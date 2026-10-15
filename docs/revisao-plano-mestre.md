@@ -1,200 +1,95 @@
 # Revisão do Plano Mestre
 
-Fonte: `PLANO MESTRE REVISADO` (briefing do hub Bling ERP, Mercado Livre e Nuvemshop).
+Estado em 15 de outubro de 2026.
 
-O modelo de soberania, os dez motores e o corte de escopo sustentam o projeto. A Parte 8 do plano ainda não serve como prompt de implementação: as regras que o código precisa seguir aparecem de formas diferentes no mesmo documento.
+A spec de desenvolvimento é [plano-mestre.md](plano-mestre.md). Este arquivo é o registro da revisão. Não é prompt de motor e não reabre regra que o plano já fechou.
 
-Fase 0 pode abrir (monorepo, Docker, pool, Redis, papéis). Schema, matching, enriquecimento e push esperam os ajustes P0.
+O briefing `PLANO MESTRE REVISADO` foi substituído. As contradições daquele texto estão unificadas no plano. Código ainda não começou. A Fase 0 é o próximo passo.
 
-## O que permanece
+A maturidade no fim deste arquivo mede este plano. 80 é o ponto em que a implementação segue uma regra só.
 
-- Grupos A, A.5, B, C e D.
-- NCM sem auto-preenchimento e com dupla confirmação.
-- EAN com dígito GS1 e fila humana.
-- Variante como entidade, não como JSON.
-- Payload lido do Bling no momento da execução.
-- Watermark por campo e arquivo fiscal separado de log operacional.
-- Fora de escopo: pedido, financeiro, NF-e e frete.
+## O que a primeira revisão fechou
 
-## Premissas a fixar no topo do plano
+Cada item abaixo já está no plano. Onde a primeira redação foi apertada depois, vale a regra atual, não a frase antiga.
 
-- Uma conta Bling, um seller Mercado Livre, uma loja Nuvemshop.
-- Produto simples é uma variante default. Todo produto tem ao menos uma linha em `product_variants`.
-- Preço publicado é o preço de venda do Bling. Promoção só entra com flag explícita.
-- Estoque publicado é a soma de uma lista configurável de depósitos.
-- Moeda: BRL.
-- A defasagem aceita de estoque é a do job P1, inferior a 2 minutos, enquanto o push de estoque não estiver bloqueado.
-
-## P0 — aplicar antes de codar
-
-### 1. Uma ordem só para o enriquecimento (CQS)
-
-Trechos em conflito: seção 2.1, seção 5.2, mandamentos 33–37 e o prompt da Fase 5.
-
-A tabela de delta, a grade B e o mandamento da grade A não dizem a mesma coisa. A primeira regra que casar vence:
-
-1. Externo grade F, ou score externo menor que 15: KEEP.
-2. Bling grade A (81–100): KEEP.
-3. Bling grade F (0–20) e externo pelo menos C: REPLACE.
-4. Bling grade D (21–40), externo B ou A, delta de pelo menos 15: REPLACE.
-5. Delta de pelo menos 30 com Bling em C ou D: REPLACE e registro em `quality_history`.
-6. Delta 15–29, ou Bling grade B com qualquer delta: SUGGEST.
-7. Qualquer outro caso: KEEP.
-
-REPLACE automático não ocorre em grade A nem em grade B.
-
-### 2. Matching por predicado (PIRE e VIR)
-
-Trechos em conflito: seções 5.1 e 5.6 e mandamento 24.
-
-Os pontos não são somados para auto-vínculo. Casa sozinho apenas:
-
-- vínculo manual já confirmado
-- SKU normalizado com um único candidato no Bling
-- EAN com GVE válido e um único dono no catálogo
-
-Preço, peso e nome fuzzy só ordenam a fila de sugestão. O score exibido é o maior sinal, com o breakdown em `match_signals`. Dois candidatos no mesmo patamar vão para quarentena.
-
-EAN de anúncio compara com a variante. Um GTIN compartilhado não promove o `master_product`.
-
-### 3. Webhook: gravar antes de confirmar (WIG)
-
-Trechos em conflito: fluxo 6.3, prompt da Fase 9 e mandamento 91.
-
-Ordem fixa:
-
-1. Ler o raw body.
-2. Validar HMAC com comparação de tempo constante. Assinatura inválida responde 401 e não persiste.
-3. Inserir em `webhook_events` com o SHA-256 completo (64 hex). Conflito de chave responde 200 e para.
-4. Enfileirar no BullMQ.
-5. Só então responder HTTP 200.
-
-O worker aplica lock, watermark e comparação de conteúdo. `setImmediate` sai do prompt. O fluxo que responde 200 antes da assinatura aceita chamada inválida e perde o evento se o processo cair.
-
-### 4. Três tipos de push (APE)
-
-Trechos em conflito: princípio P6, seções 5.3, 5.4 e 6.2, mandamentos 10 e 18.
-
-| Tipo | Segue quando |
+| Conflito do briefing | Regra atual |
 |---|---|
-| STOCK_PRICE | Sempre, exceto preço menor ou igual a zero. Preço zero bloqueia só o preço. |
-| CONTENT | Vínculo confirmado e sem bloqueio fiscal |
-| CREATE | O de CONTENT, mais o threshold do CRE no canal |
+| CQS com várias ordens de KEEP / REPLACE / SUGGEST | A primeira regra que casar vence. REPLACE automático não ocorre em grade A nem em grade B |
+| Matching por soma de pontos | Auto-vínculo exige dois sinais fortes no mesmo candidato e nenhum conflito. EAN sozinho não vale 95. A frase antiga, que deixava SKU ou EAN casar sozinho, não vale |
+| Webhook respondia 200 antes de gravar | HMAC, INSERT com SHA-256, fila, e só então HTTP 200 |
+| Um push com o produto inteiro | Jobs `STOCK_PRICE`, `CONTENT` e `CREATE`. Cada passo chama um endpoint. Não existe PUT do produto inteiro |
+| Eco do enriquecimento reabria push | `hub_writes` com `origin = hub`. Webhook que só repete essa escrita fica `ignored`, motivo `echo` |
+| Nome e descrição escolhiam entre Mercado Livre e Nuvemshop | Nome e descrição do Bling não recebem texto de canal. Título de anúncio fica em `channel_content_overrides` |
+| Schema não subia no PostgreSQL 16 | PK de partição `(created_at, id)`, `timestamptz`, imagem como entidade, NCM `0000.00.00`. Não existe `sync_queue` nem `final_status` |
+| Dupla confirmação sem usuário | `users`, `user_roles`, `sessions`. Revisores são chave estrangeira. A segunda revisão de NCM é outro usuário, com nota de TIPI |
 
-Estoque de anúncio já publicado não espera correção de NCM.
+## O que entrou depois
 
-### 5. Corte do eco de enriquecimento
+Estes ajustes não estavam na primeira revisão. Também já estão no plano.
 
-O enriquecimento faz PUT no Bling. O webhook dessa escrita não pode reabrir push.
+- Enquanto a integração nativa do Bling estiver ligada, ela atualiza estoque e preço de anúncio já publicado. O `CREATE` confirmado por uma pessoa envia preço e estoque uma vez, na abertura, e não repete.
+- Estoque publicado é o saldo virtual dos depósitos `seller` com `include_in_push`. Depósito `ml_full` não entra. O hub não soma `saldoVirtualTotal` nem subtrai `meli_facility`.
+- Estoque Full (`meli_facility`) é do Mercado Livre. O hub não grava essa quantidade, nem zero. Variante removida segue a mesma exceção.
+- Kit (`formato` E) é um SKU. O saldo é o que o Bling calculou. O hub não explode componente nem recalcula a composição.
+- Preço da loja Bling vale na Nuvemshop e, no Mercado Livre, só na condição com `follow_store_price`. As outras conservam o próprio preço e alertam.
+- Peso e dimensão da Nuvemshop vão no passo `measures`, sem preço e sem estoque.
+- Preço maior que zero e menor que o custo abre alerta crítico. Estoque, pausa e a escrita do preço seguem.
+- Não há `ncm_override` nem `name_override`. O NCM é `master_products.ncm`. O nome do Bling é `master_products.name`.
+- Inativo e excluído chegam em `product.updated`. `product.deleted` é a exclusão definitiva e só marca o cadastro local depois de um GET 404.
+- Webhook de Mercado Livre e de Nuvemshop tem fluxo próprio. Valor do canal não grava no ERP.
+- Cota do Bling é uma só: 3 req/s e 120.000 chamadas por dia.
+- Escrita de conteúdo no Bling nasce em shadow, com kill switch, teto por execução e reversão pelo `quality_history`.
+- `match_rejections` não expira. Quarentena não devolve o anúncio para `unmatched`.
+- Imagens passam por `image_processing_queue`. Dedup não cruza produto.
+- Mercado Livre em conta `user_product_seller` não publica `variations`. Item antigo fica no legado até a migração.
+- Só admin muda depósito, loja, dono do estoque, modo live e `follow_store_price`. `control_changes` grava quem, quando, valor anterior e valor novo, na mesma transação.
+- Credencial OAuth fica em `oauth_tokens`, não no Redis.
 
-- Toda escrita do hub grava `origin=hub` e o id da request.
-- Webhook cujo diff é só essa escrita fica `ignored`, motivo `echo`.
-- Não devolver um campo à plataforma de origem se o valor já é igual.
-- O método no prompt passa a se chamar `applyToBling`.
-- Grupo A continua sem escrita externa.
+## O que continua fora
 
-### 6. Desempate entre Mercado Livre e Nuvemshop
+Pedido, financeiro, emissão de NF-e, cotação de frete, serviço (`tipo` diferente de `P`) e comissão de canal. A nota permanece no Bling. Preço contra custo não é margem depois da tarifa. O peso enviado à Nuvemshop corrige o dado do frete. O hub não cotiza frete.
 
-| Campo | Ordem |
-|---|---|
-| Nome | Mercado Livre, depois Nuvemshop |
-| Descrição | Nuvemshop, depois Mercado Livre |
-| Marca | Maior grade. Empate permanece no Bling e vira SUGGEST |
-| Peso e dimensões | Só entram com as três medidas e concordância dentro de 5%. Senão, SUGGEST |
-| Categoria de canal | Vai para `product_category_mappings`. Não sobrescreve a categoria do Bling |
+CEST e origem fiscal não viram motor. A nota usa o cadastro do Bling.
 
-Fonte inválida pelo CQS é pulada.
+## Duas frases que o plano ainda não tem
 
-### 7. Schema que sobe no PostgreSQL 16
+São limite de operação, não módulo novo.
 
-- PK das tabelas particionadas: `(created_at, id)`.
-- `UNIQUE` que inclui `variant_id` usa `NULLS NOT DISTINCT`, ou uma variante sentinela para produto simples.
-- `TIMESTAMP` vira `timestamptz`.
-- Remover `images` JSONB de `master_products` e a coluna `completeness_score`.
-- Máscara de NCM: `0000.00.00` (a coluna `VARCHAR(10)` já cabe). O exemplo `XX.XX.XX` sai do prompt.
-- Apagar `sync_queue` do DLM. A limpeza de push usa a coluna `status`, não `final_status`.
-
-### 8. Usuários para a dupla confirmação
-
-Tabelas `users` e `user_roles` antes do fiscal.
-
-Papéis: `operator`, `fiscal_approver`, `admin`.
-
-`second_review_by` referencia `users` e é diferente de `first_review_by`, com checagem no banco. A nota de consulta à TIPI é obrigatória. `confirmed_by` e `resolved_by` viram chave estrangeira. O dashboard exige sessão.
-
-## P1 — antes de publicar de verdade
-
-### Contratos das APIs
-
-Congelar fixtures sanitizados: produto simples, produto com variação, webhook de estoque, webhook de preço e erro 429, para Bling, Mercado Livre e Nuvemshop. O mapper fecha contra esses arquivos antes de qualquer motor.
-
-Registrar os limites oficiais de Mercado Livre e Nuvemshop no limiter, junto com os 3 req/s do Bling. O full enrich diário persiste um cursor para retomar.
-
-### Modelo de publicação do Mercado Livre
-
-Criar item, atualizar item, grade, foto e estoque são operações diferentes. Vários campos ficam imutáveis depois da criação. O builder é por canal e por operação (`create`, `update`, `stock`, `price`, `pictures`), não um DTO único.
-
-`product_category_mappings` guarda a categoria verificada e os atributos obrigatórios. CREATE no Mercado Livre espera essa categoria. Estoque e preço de item existente não esperam.
-
-### Preço, depósito e token
-
-Preço e estoque seguem as premissas do topo deste documento.
-
-Agenda só via jobs repetíveis do BullMQ. `node-cron` dentro do processo dispara em dobro com duas réplicas.
-
-Tabela `oauth_tokens` com refresh criptografado. Redis fica para cache e lock.
-
-Log estruturado, profundidade da fila, idade do webhook e latência de push. Job com falha tem replay pelo id, sem reprocessar chave de idempotência já concluída.
-
-### Imagens
-
-Dedup só dentro do mesmo `master_product`. O algoritmo descrito no plano é average hash 8x8. Hash entre produtos diferentes no máximo sugere revisão.
-
-Heurística de marca d'água vai para a fila até o limiar ser medido em amostra real.
-
-Download só de hosts do Bling, Mercado Livre e Nuvemshop, com timeout e tamanho máximo.
-
-### Cronograma
-
-Tratar 31–46 dias úteis como a espinha de backend. As 13 telas não cabem em 4–5 dias. Cada fase fecha com um teste nomeado.
-
-## P2
-
-- Coluna `seo_slug`. `keywords` cumprem o papel de tags no score da Nuvemshop.
-- O arquivo de NCM e EAN por 5 anos é política do hub. A NF-e permanece no Bling. A citação da Lei 9.430/96 vale para o documento fiscal, que está fora deste escopo.
-- `raw_payload` de webhook tem TTL curto.
-- Nome de operador fica em `users`.
+1. `cest`, `tax_origin` e `requires_cest` são espelho do Bling. O hub copia, mostra na ficha e não usa esses campos para bloquear push nem para gravar de volta. O anúncio não carrega o dado fiscal da nota, então não há alerta de divergência com o canal.
+2. Desligar a sincronização nativa de estoque e preço não desliga a entrada de pedidos no Bling. Sem o pedido, o saldo que o hub lê deixa de se mover.
 
 ## Ordem de construção
 
-| Fase | Entrega | Fecha quando |
-|---|---|---|
-| 0 | Monorepo `api` + `web`, Docker, usuários e papéis | Healthcheck e login de dois papéis |
-| 0.5 | Fixtures sanitizados das três APIs | Mapper cobre simples, variação, 429 e webhook |
-| 1 | Schema com PK, UNIQUE e `timestamptz` corrigidos | Migrations sobem e descem |
-| 2 | Conectores com limiter e token persistido | Contrato verde contra fixture |
-| 3 | GVE e NVE puros, sem I/O | Vetores GS1 e NCM `0000.00.00` |
-| 4 | PIRE e VIR por predicado | EAN compartilhado cai em quarentena |
-| 5 | IQRE com dedup no produto | Duas cores parecidas não colapsam |
-| 6 | CQS com a ordem única e a matriz de fonte | Grade A e grade B não sofrem REPLACE |
-| 7 | CRE com bloqueio só de CREATE e CONTENT | Estoque não lê o score |
-| 8 | WIG: HMAC, INSERT, fila, 200 | Restart depois do 200 não perde evento |
-| 9 | APE em três tipos de job | Echo do PUT do hub não reabre push |
-| 10 | DLM em job repetível do BullMQ | Uma réplica extra não duplica limpeza |
-| 11 | Dashboard: matching e fiscal primeiro | Dois usuários confirmam o mesmo NCM |
-| 12 | Ensaio com recorte real do catálogo | Lag de estoque medido |
+A tabela viva está na seção 13 do plano. 31–46 dias úteis cobrem a espinha de backend. As telas não cabem nesse intervalo.
+
+| Fase | Fecha quando |
+|---|---|
+| 0 | Healthcheck e login de dois papéis |
+| 0.5 | Mapper cobre simples, variação, kit, 429 e `product.deleted` |
+| 1 | Migrations sobem e descem |
+| 2 | Dois jobs juntos não passam de 3 req/s. O refresh do token é single-flight |
+| 3 | Vetores GS1 e NCM `0000.00.00` |
+| 4 | EAN compartilhado cai em quarentena. Conta `user_product_seller` não publica `variations` |
+| 5 | A sync enfileira as imagens. O fechamento deduplica sem cruzar produto |
+| 6 | Grade A e grade B não sofrem REPLACE |
+| 7 | Estoque não lê o score |
+| 8 | Restart depois do 200 não perde evento |
+| 9 | Eco do PUT do hub não reabre push. Anúncio só Full não recebe PUT de estoque |
+| 10 | Réplica extra não duplica limpeza |
+| 11 | Dois usuários confirmam o mesmo NCM |
+| 12 | Lag de estoque medido |
 
 ## Maturidade da spec
 
-Julgamento de 0 a 100. 80 é o ponto em que um agente implementa sem escolher entre regras conflitantes.
+Julgamento de 0 a 100. A nota do plano é a média simples das oito áreas: **81**.
 
-| Área | Nota |
-|---|---|
-| Princípios | 80 |
-| Schema | 55 |
-| Motores | 50 |
-| Fluxos | 45 |
-| Contratos de API | 20 |
-| Auth | 25 |
-| Operação | 35 |
-| Cronograma | 40 |
+| Área | Nota | O que a nota reflete |
+|---|---|---|
+| Princípios | 92 | Soberania, matching, push e bloqueio fiscal estão numa lista só. A seção 14 do plano trava o que não volta |
+| Schema | 86 | Variante, eixo, fila, Full, loja e trilha sobem no PostgreSQL 16. CEST e origem existem como coluna e ainda não têm a frase de espelho |
+| Motores | 84 | Cada motor tem predicado e saída neste plano. O limiar de marca d'água espera amostra real |
+| Fluxos | 88 | Push, Full, kit, preço, exclusão e convivência fecham. Falta gravar que desligar o estoque nativo mantém a entrada de pedidos |
+| Contratos de API | 58 | A seção 11 lista os fixtures. Os arquivos ainda não existem, então o shape do payload não está congelado |
+| Auth | 84 | Papel, sessão, OAuth criptografado e refresh em single-flight. A rotação do refresh segue como premissa até a documentação oficial |
+| Operação | 80 | Cota única, BullMQ, shadow, alerta e trilha de controle. A troca do dono do estoque tem regra e não tem roteiro de operação |
+| Cronograma | 76 | 31–46 dias úteis cobrem a espinha de backend, com teste de saída por fase. Tela não tem prazo |
