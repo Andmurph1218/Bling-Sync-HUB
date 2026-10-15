@@ -51,8 +51,6 @@ Premissa de operação: uma conta Bling, um seller Mercado Livre, uma loja Nuvem
 
 ## Estado
 
-O briefing (`PLANO MESTRE REVISADO`) foi revisado. A arquitetura permanece. Oito regras ainda se contradizem dentro do plano e precisam ser aplicadas antes de gerar schema, matching, enriquecimento ou push.
+O briefing de desenvolvimento é [docs/plano-mestre.md](docs/plano-mestre.md). Ele já incorpora os ajustes da [revisão](docs/revisao-plano-mestre.md): matching por predicado, enriquecimento com uma ordem só, webhook gravado antes do HTTP 200, e push separado para estoque, conteúdo e criação.
 
-O detalhe, a regra única de cada conflito e a ordem de construção estão em [docs/revisao-plano-mestre.md](docs/revisao-plano-mestre.md).
-
-A Fase 0 (monorepo, Docker, pool, Redis e papéis de usuário) é o próximo passo seguro. As migrations 001–013 do plano, como estão hoje, não sobem no PostgreSQL 16.
+A Fase 0 (monorepo, Docker, pool, Redis e papéis de usuário) é o próximo passo.
