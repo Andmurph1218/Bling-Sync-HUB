@@ -32,8 +32,8 @@ Fica de fora: pedidos, financeiro, emissão de NF-e, frete e serviço (`tipo` di
 - Uma conta Bling, um seller Mercado Livre, uma loja Nuvemshop.
 - Moeda BRL.
 - Todo produto `tipo` P tem ao menos uma variante, conferida no fim da transação. O código do pai (`master_products.bling_sku`) só identifica o cadastro no Bling. O código vendável é `product_variants.bling_sku`. No produto simples (`formato` S) e no kit sem grade (`formato` E) os dois códigos são iguais e a única variante é `is_default`. Na grade (`formato` V), cada variação tem o próprio código e o próprio `bling_variant_id`. Peso e dimensões ficam só na variante. Serviço não entra no cadastro.
-- Preço publicado na Nuvemshop é o preço do vínculo produto-loja. No Mercado Livre, esse preço só vai à condição de venda com `follow_store_price`. As outras guardam o próprio preço e geram alerta. Sem linha em `variant_channel_prices`, vale o preço do cadastro. Promocional só entra quando o Bling manda valor maior que zero: `precoPromocional` da loja, ou `use_promotional` no cadastro quando não há preço de loja.
-- Estoque publicado é a soma do saldo virtual dos depósitos com `role = seller` e `include_in_push = true`. Depósito `ml_full` guarda a peça já enviada ao Full e não entra nessa soma. `estoque.saldoVirtualTotal` do produto soma todos os depósitos e não é o número enviado. Lista vazia publica zero e abre alerta, em vez de somar o estoque inteiro. O canal recebe o inteiro abaixo desse saldo (`floor`), para não vender fração. Esse número não é o saldo em `meli_facility`.
+- Preço de cadastro é `product_variants.price` e `product_variants.promotional_price`, com `use_promotional`. Preço de loja é `variant_channel_prices.store_price` e `store_promotional_price`, gravados só por `GET /produtos/lojas`. A tabela da loja não guarda o cadastro. Sem `channel_stores`, o canal usa o cadastro e o dashboard mostra a loja como não configurada. Com a loja configurada e sem linha de preço, o passo `price` espera a leitura. `store_price` nulo, depois da leitura, usa o cadastro. `store_price` preenchido é o preço da loja, mesmo quando o número é igual ao cadastro. Promocional da loja entra se `store_promotional_price` for maior que zero. Promocional do cadastro entra se `use_promotional` e o valor for maior que zero. Na Nuvemshop esse preço vai à variante. No Mercado Livre, só à condição com `follow_store_price`. As outras guardam o próprio preço e geram alerta.
+- `product_variants.stock` é a soma de `saldo_virtual` dos depósitos com `role = seller` e `include_in_push = true`. A coluna nasce nula e só recebe número depois de `GET /estoques/saldos`. Zero é essa soma já lida. Depósito `ml_full`, `other` ou `unclassified` fica de fora. `estoque.saldoVirtualTotal` não entra na coluna. O passo `stock` e o CREATE enviam o `floor` dessa soma. Com a coluna nula, esse envio espera a leitura. Produto inativo, excluído ou variante `discontinued` envia quantidade zero no anúncio comum e deixa a coluna como está. Lista de depósitos `seller` marcados vazia, depois da leitura, grava zero e abre alerta. O inteiro enviado não é o saldo em `meli_facility`.
 - A defasagem aceita de estoque é a do job P1, inferior a 2 minutos, e só vale enquanto o push de estoque não estiver bloqueado. Não vale para o saldo em `meli_facility`, que o hub não escreve.
 - A cota do Bling é da conta, não de cada job: 3 req/s, 120.000 chamadas por dia e um limiter só. O full enrich usa o saldo do dia e retoma pelo cursor.
 
@@ -120,7 +120,7 @@ Operador e aprovador fiscal não alteram depósito, loja do canal, dono do estoq
 | Grupo | Dono | Regra |
 |---|---|---|
 | A | Bling | Preço de venda, preço da loja, custo, estoque por depósito, composição do kit, NCM, CEST, origem fiscal, unidade, fornecedor, SKU. Canal não grava. Divergência gera alerta. |
-| A.5 | GVE | EAN da variante. Bling válido é intocável. Bling vazio e externo válido vão para fila humana. Nunca auto-preenche. |
+| A.5 | GVE | EAN da variante. Bling válido é intocável. Bling vazio e externo válido vão para fila humana. Nunca auto-preenche. EAN repetido entre variantes do mesmo produto não vale como dono único |
 | B | CQS | Marca, peso e dimensões podem ir ao Bling, só com a rede da seção 8.5. Nome e descrição do Bling não recebem texto de canal. Título e descrição por canal ficam em `channel_content_overrides`. |
 | C | IQRE | Imagens, keywords, vídeos e atributos extras. União, sem substituir o que o Bling já tem de atributo. |
 | D | APE | Bling envia aos canais. Payload lido na execução. |
@@ -202,6 +202,10 @@ Nome fuzzy usa Jaro-Winkler depois de minúsculas, remoção de acento e stopwor
 
 No anúncio legado, o SKU da variação sai de `seller_sku`, `seller_custom_field` ou `attributes[SELLER_SKU]`, nessa ordem. No User Product o SKU sai do item da variação, pelos mesmos campos. O campo usado fica em `platform_sku_field`. O PIRE agrupa os itens da mesma `family_id` num único `master_product`. Dois itens da mesma família não viram dois produtos pai.
 
+`family_id` não é um quarto sinal forte. `family_confidence` mede se os itens dessa chave apontam para o mesmo `master_product`. O cálculo junta os sinais fortes de todos os itens da família. Dois sinais fortes no mesmo candidato, e nenhum em outro, valem 95 e abrem um `platform_links` com `platform_product_id = family_id`. Um sinal forte só fica em sugestão, com score no máximo 80, sem `platform_links`. Sinais fortes em candidatos diferentes vão para quarentena: a família não se parte e não nasce vínculo. Confirmação manual da família vale 100. `family_id` ausente deixa `family_confidence` nulo e o item não entra em família. O breakdown fica em `match_signals.family_id`, com os itens que concordam e os que conflitam. No User Product há um `platform_items` por `family_id`, e o `best_score` da fila é esse número.
+
+Item novo com `family_id` já vinculada entra no pai existente. Sinal forte para outro pai manda só esse item à quarentena. Não abre segundo pai e não baixa o `family_confidence` já gravado. Na migração UPtin, `family_confidence` recebe o `match_confidence` do vínculo legado e o PIRE não recalcula a família.
+
 CREATE só com vínculo confirmado por uma pessoa, para lacuna `missing_ml` ou `missing_ns`. Vale com a integração nativa dona do estoque e do preço. O preço e o estoque iniciais vão nessa criação. Enquanto `stock_price = bling_native`, isso não abre atualização contínua. Enriquecimento, ainda em shadow, só com vínculo confirmado ou com auto-vínculo de score pelo menos 95 e dois sinais fortes. Abaixo disso não há REPLACE nem override.
 
 ### 8.2 VIR
@@ -228,7 +232,7 @@ O Mercado Livre tem dois formatos. A conta com a tag `user_product_seller` publi
 
 Atributos `PARENT_PK` são iguais em todos os itens da família. O `comboKey` sai dos atributos `CHILD_PK` com tag `allow_variations`. Vários itens com o mesmo `user_product_id` são condições de venda da mesma variante, não linhas novas na matriz. `family_name` não passa do `max_title_length` do domínio e só muda se nenhuma condição de venda tiver venda.
 
-A notificação de migração (UPtin) troca o `variation_id` antigo pelos novos `item_id` e `user_product_id`, no mesmo `variant_id` do Bling. Não cria outro `master_product`.
+A notificação de migração (UPtin) troca o `variation_id` antigo pelos novos `item_id` e `user_product_id`, no mesmo `variant_id` do Bling. Não cria outro `master_product`. `family_confidence` copia o `match_confidence` já gravado.
 
 Lacunas em `variant_matrix_analysis`:
 
@@ -246,7 +250,10 @@ Validação estrutural: 8, 12, 13 ou 14 dígitos, dígito GS1 (pesos 3/1 da dire
 | Bling com EAN válido | Intocável. Externo diferente: alerta crítico e bloqueio de CONTENT/CREATE do produto |
 | Bling vazio e externo válido | `ean_pending_validation`. Nunca auto-preenche. Expira em 30 dias |
 | Bling com checksum inválido | `fiscal_risk_flag = true` e bloqueio de CONTENT/CREATE |
+| EAN válido repetido entre variantes do mesmo produto | `ean_status = duplicate` e `fiscal_risk_flag = true` em cada variante que carrega esse EAN. CONTENT e CREATE bloqueiam só essas variantes. O EAN permanece no Bling e não entra em `ean_pending_validation`. Não é sinal forte |
 | Placeholder | Descarte e log técnico |
+
+A comparação usa só os dígitos. EAN vazio não conta. Variante `discontinued` não entra. As variantes do mesmo pai com outro EAN seguem a própria linha do GVE. O alerta é um por produto e EAN. Quando o GVE seguinte encontra uma única variante não descontinuada com esse EAN, `duplicate` sai e `fiscal_risk_flag` cai se o checksum for válido. EAN igual em produtos diferentes continua no PIRE: não é sinal e cai em quarentena. Não usa esta linha.
 
 STOCK_PRICE de anúncio já publicado não espera essa fila.
 
@@ -260,8 +267,11 @@ NCM do Mercado Livre não entra no enriquecimento automático. Formato exibido: 
 | Bling com NCM válido | Mantém o Bling. Divergência: alerta crítico e bloqueio de CONTENT/CREATE |
 | Bling vazio e ML com 8 dígitos válidos | Sugestão com duas confirmações de usuários diferentes, nota de TIPI e TTL de 15 dias |
 | Bling inválido | `ncm_fiscal_risk = true` e bloqueio de CONTENT/CREATE |
+| NCM em conflito entre variantes | `ncm_status = conflict` e `ncm_fiscal_risk = true` no pai. CONTENT e CREATE do produto bloqueiam. Nenhum dos códigos em conflito vira sugestão nem substitui o `master_products.ncm` já gravado |
 
 NCM não é alterado por processo automático. Cada decisão gera linha imutável em `ncm_audit_log`. A variante não tem NCM próprio. A sugestão aprovada grava em `master_products.ncm`, que é o valor do Bling.
+
+O conflito compara o NCM de cada variante não descontinuada na mesma passagem: o código que veio no payload da variação no Bling e o atributo de NCM do anúncio vinculado no Mercado Livre. A limpeza é a desta seção. Placeholder e código inválido não entram na conta. Dois códigos válidos diferentes no mesmo pai são o conflito. Código vazio não conta. O mesmo código em todas as variantes não é conflito. O alerta é um por produto, em `ncm_divergence_alerts`. Essa linha é avaliada antes da sugestão. Quando o NVE seguinte não encontra dois códigos válidos diferentes, `conflict` sai. `ncm_fiscal_risk` permanece se o NCM do pai for inválido.
 
 ### 8.5 CQS
 
@@ -275,7 +285,7 @@ Em `live`, o REPLACE chama `applyToBling`, grava `hub_writes` e marca `quality_h
 
 ### 8.6 IQRE
 
-Imagem é linha em `product_images`, não JSON no produto. O enriquecimento não processa as imagens na mesma chamada. Ele grava uma linha em `image_processing_queue` por URL e segue. Um worker BullMQ consome a fila, uma imagem por vez, com `FOR UPDATE SKIP LOCKED`.
+Imagem é linha em `product_images`, não JSON no produto. O enriquecimento não processa as imagens na mesma chamada. Ele grava uma linha em `image_processing_queue` por URL e segue. Um worker BullMQ consome a fila, uma imagem por vez, com `FOR UPDATE SKIP LOCKED`, pela ordem de `available_at` no índice parcial da seção 9.5.
 
 Para um catálogo de 5.000 produtos e 8 imagens, são 40.000 downloads. A sync do produto não espera esse volume. O CRE dessa rodada usa o score de imagem que já existir. Quando o fechamento do produto termina, um job recalcula o CRE só desse produto.
 
@@ -328,11 +338,11 @@ Uma chamada com o produto inteiro não serve. Preço, estoque, descrição e ima
 
 | Canal | Passo | Envia |
 |---|---|---|
-| Mercado Livre | `stock` | quantidade publicada do Bling só no local que a seção 10.8 permite escrever. `meli_facility` não entra |
+| Mercado Livre | `stock` | `floor` de `product_variants.stock` só no local que a seção 10.8 permite escrever. `meli_facility` não entra. Coluna nula espera a leitura |
 | Mercado Livre | `price` | preço da seção 10.7 só na condição com `follow_store_price`. Condição sem a marca não é escrita |
 | Mercado Livre | `description` | descrição do `channel_content_overrides` em modo `live`, não o nome do Bling |
 | Mercado Livre | `pictures` | a lista de imagens, só se o conjunto mudou |
-| Nuvemshop | `stock` | estoque publicado, sem preço e sem peso |
+| Nuvemshop | `stock` | `floor` de `product_variants.stock`, sem preço e sem peso. Coluna nula espera a leitura |
 | Nuvemshop | `price` | preço publicado da seção 10.7, sem estoque e sem peso |
 | Nuvemshop | `measures` | peso e dimensões da variante, sem preço e sem estoque |
 | Nuvemshop | `product` | título e descrição do override em modo `live`; marca e SEO só se estiverem no diff |
@@ -349,7 +359,7 @@ Prioridade e janela de agregação:
 | P3 | peso, dimensões, marca, descrição | 30 s | 1 h |
 | P4 | imagens, atributos, keywords, vídeos | 60 s | 4 h |
 
-Há no máximo uma janela aberta por produto, variante, plataforma e tipo. Job P1 novo com job P1 ainda `pending` promove o mesmo job. Job já `locked` não é alterado; a mudança abre outra janela.
+Há no máximo uma janela aberta por produto, variante, plataforma e tipo. O índice único `push_jobs_active` cobre `status = pending`. Job P1 novo com job P1 ainda `pending` promove o mesmo job. Job já `locked` não entra nesse índice e não é alterado; a mudança abre outra janela.
 
 Retry de erro transitório (timeout, 429, 5xx): imediato, 30 s, 5 min, 1 h. Depois, `failed` e alerta. Lock do job expira em 5 minutos. Locks vencidos voltam a `pending` a cada minuto.
 
@@ -495,8 +505,18 @@ CREATE TABLE control_changes (
   field       text NOT NULL,
   old_value   text,
   new_value   text,
-  changed_by  uuid NOT NULL REFERENCES users(id),
-  changed_at  timestamptz NOT NULL DEFAULT now()
+  origin      text NOT NULL DEFAULT 'admin' CHECK (origin IN ('admin', 'system')),
+  changed_by  uuid REFERENCES users(id),
+  changed_at  timestamptz NOT NULL DEFAULT now(),
+  CHECK (
+    (origin = 'admin' AND changed_by IS NOT NULL)
+    OR (
+      origin = 'system'
+      AND changed_by IS NULL
+      AND target = 'selling_condition'
+      AND field = 'follow_store_price'
+    )
+  )
 );
 
 CREATE TABLE sync_cursors (
@@ -518,7 +538,7 @@ A chave de criptografia fica no ambiente, não no Redis. `access_token_enc` e `r
 
 A renovação trava a linha com `SELECT … FOR UPDATE`. Se a resposta trouxer outro refresh token, os dois valores novos são gravados na mesma transação, antes de soltar o lock. O refresh anterior deixa de ser usado. Bling e Mercado Livre são tratados como se rotacionassem o refresh a cada renovação, até a documentação de cada um confirmar o contrário. Duas réplicas não renovam o mesmo token. A Nuvemshop usa a mesma tabela, com `refresh_token_enc` nulo. O segredo de HMAC do webhook continua no ambiente.
 
-`control_changes` é a trilha do princípio 7 para o que move estoque e preço. Uma linha por campo alterado, com `old_value`, `new_value`, `changed_by` e `changed_at`. `changed_by` é o usuário da sessão.
+`control_changes` é a trilha do princípio 7 para o que move estoque e preço. Uma linha por campo alterado, com `old_value`, `new_value`, `origin`, `changed_by` e `changed_at`. Com `origin = admin`, `changed_by` é o usuário da sessão. `origin = system` e `changed_by` nulo só valem para `follow_store_price`. O `target_key` de `selling_condition` é o `item_id`. `old_value` e `new_value` desse campo são `true` ou `false`.
 
 | Alvo | Campos |
 |---|---|
@@ -528,7 +548,7 @@ A renovação trava a linha com `SELECT … FOR UPDATE`. Se a resposta trouxer o
 | `enrichment_control` | `mode`, `kill_switch`, `max_replaces_per_run` |
 | `selling_condition` | `follow_store_price` |
 
-A tabela não recebe UPDATE nem DELETE. O DLM não a limpa. Depósito novo vindo da API, ainda `unclassified`, não gera linha. A classificação feita pelo admin gera. O seed inicial grava `old_value` nulo.
+A tabela não recebe UPDATE nem DELETE. O DLM não a limpa. Depósito novo vindo da API, ainda `unclassified`, não gera linha. A classificação feita pelo admin gera. O seed inicial grava `old_value` nulo. Cada gravação de `follow_store_price`, inclusive o INSERT da condição, gera uma linha nesta tabela na mesma transação. `old_value` nulo marca o nascimento. Valor igual ao anterior não gera outra linha. Sem a linha, `follow_store_price` não muda.
 
 ### 9.2 Produto e variante
 
@@ -582,7 +602,7 @@ CREATE TABLE product_variants (
   promotional_price  numeric(10,2),
   use_promotional    boolean NOT NULL DEFAULT false,
   cost_price         numeric(10,2),
-  stock              numeric(12,3) NOT NULL DEFAULT 0,
+  stock              numeric(12,3),
   net_weight         numeric(8,3),
   gross_weight       numeric(8,3),
   height             numeric(8,2),
@@ -614,7 +634,7 @@ Forma conferida por trigger adiada, no commit:
 - Kit sem grade: pai `formato` E, uma variante `formato` E e `is_default`, `stock_mode` preenchido. Componentes ficam em `product_components`.
 - Grade: pai `formato` V, nenhuma variante `is_default`, toda variante com `bling_variant_id` e `formato` S ou E, e os eixos de cada variante iguais aos de `product_axes`. Variante E tem `stock_mode` e componentes.
 
-`has_variants` não é coluna. Há grade quando existe variante com `bling_variant_id`. PIRE usa o SKU do pai só para achar o `master_product`. Preço, estoque, EAN, peso e dimensões saem da variante. `product_variants.stock` é o cache do saldo publicado (seção 10.7), não uma cópia de `saldoVirtualTotal`. `stock_mode` só existe em variante com `bling_formato = E`.
+`has_variants` não é coluna. Há grade quando existe variante com `bling_variant_id`. PIRE usa o SKU do pai só para achar o `master_product`. Preço, estoque, EAN, peso e dimensões saem da variante. `product_variants.stock` é o cache da seção 10.7: nulo até a primeira leitura de saldo e, depois, a soma. Não guarda o `floor` enviado ao canal. `stock_mode` só existe em variante com `bling_formato = E` e não muda o que a coluna guarda.
 
 ```sql
 CREATE TABLE product_components (
@@ -636,14 +656,16 @@ CREATE TABLE variant_stock_balances (
 );
 
 CREATE TABLE variant_channel_prices (
-  variant_id        uuid NOT NULL REFERENCES product_variants(id),
-  platform          text NOT NULL REFERENCES channel_stores(platform),
-  price             numeric(10,2),
-  promotional_price numeric(10,2),
-  updated_at        timestamptz NOT NULL DEFAULT now(),
+  variant_id              uuid NOT NULL REFERENCES product_variants(id),
+  platform                text NOT NULL REFERENCES channel_stores(platform),
+  store_price             numeric(10,2),
+  store_promotional_price numeric(10,2),
+  updated_at              timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (variant_id, platform)
 );
 ```
+
+`product_variants.price`, `promotional_price` e `use_promotional` são o preço de cadastro. `variant_channel_prices` é só o vínculo da loja: `store_price` e `store_promotional_price`. Não há coluna de cadastro nessa tabela, e o `GET /produtos/lojas` não copia `product_variants.price` para ela. A escolha entre os dois está na seção 10.7.
 
 ### 9.3 Atributos e vínculos
 
@@ -698,9 +720,14 @@ CREATE TABLE platform_links (
   ml_model            text CHECK (ml_model IN ('legacy_variations', 'user_product')),
   family_id           text,
   family_name         text,
+  family_confidence   smallint,
   sync_status         text NOT NULL DEFAULT 'pending',
   last_synced_at      timestamptz,
-  UNIQUE (platform, platform_product_id)
+  UNIQUE (platform, platform_product_id),
+  CHECK (
+    family_confidence IS NULL
+    OR (ml_model = 'user_product' AND family_confidence BETWEEN 0 AND 100)
+  )
 );
 
 CREATE TABLE platform_variant_links (
@@ -750,9 +777,9 @@ CREATE TABLE ml_stock_locations (
 );
 ```
 
-No legado, `platform_links.platform_product_id` é o item e `platform_variant_id` é o id da variação. `user_product_id` fica nulo. No User Product, `platform_links.platform_product_id` é o `family_id`, `platform_variant_id` é o `user_product_id`, e cada anúncio daquela variante é uma linha em `ml_selling_conditions`. Nuvemshop deixa `ml_model`, `family_id` e `user_product_id` nulos. `platform_variant_id` vazio, no legado ou na Nuvemshop, é o produto simples.
+No legado, `platform_links.platform_product_id` é o item e `platform_variant_id` é o id da variação. `user_product_id` fica nulo. No User Product, `platform_links.platform_product_id` é o `family_id`, `platform_variant_id` é o `user_product_id`, e cada anúncio daquela variante é uma linha em `ml_selling_conditions`. `family_confidence` é o score da seção 8.1 e só existe com `ml_model = user_product`. Nesse vínculo, `match_confidence` guarda o mesmo número. Nuvemshop deixa `ml_model`, `family_id`, `family_confidence` e `user_product_id` nulos. `platform_variant_id` vazio, no legado ou na Nuvemshop, é o produto simples.
 
-No legado há um preço por variação, e esse preço segue a loja. No User Product, várias condições de venda da mesma variante não recebem o mesmo preço só por existirem. `follow_store_price` verdadeiro é quem recebe o preço da seção 10.7. `follow_set_by` nulo deixa o sistema marcar verdadeiro quando a variante tem uma condição só. A segunda condição nasce falsa. Admin que grava `follow_set_by` fixa a escolha, e o sync seguinte não a troca.
+No legado há um preço por variação, e esse preço segue a loja. No User Product, várias condições de venda da mesma variante não recebem o mesmo preço só por existirem. `follow_store_price` verdadeiro é quem recebe o preço da seção 10.7. `follow_set_by` nulo deixa o sistema marcar verdadeiro quando a variante tem uma condição só. A segunda condição nasce falsa. Essa marcação do sync grava `control_changes` com `origin = system`. Admin que grava `follow_set_by` fixa a escolha, grava `origin = admin` na mesma transação, e o sync seguinte não a troca. `follow_set_by` é o último admin que fixou. O histórico das trocas é `control_changes`.
 
 ### 9.4 Filas fiscais e de matching
 
@@ -861,16 +888,43 @@ CREATE TABLE image_processing_queue (
   finished_at        timestamptz,
   UNIQUE (master_product_id, url_normalized)
 );
+
+CREATE INDEX image_processing_queue_claim
+  ON image_processing_queue (available_at, id)
+  WHERE stage = 'queued' AND locked_at IS NULL;
 ```
 
-O worker reserva lotes com `stage = 'queued'`, `available_at <= now()` e `locked_at` nulo, em `FOR UPDATE SKIP LOCKED`. `product_image_id` aponta para `product_images` depois da coleta. `image_rights_review_queue` continua só para a decisão humana de direitos.
+O worker reserva lotes com `stage = 'queued'`, `available_at <= now()` e `locked_at` nulo, ordenados por `available_at`, `id`, em `FOR UPDATE SKIP LOCKED`. Essa leitura usa `image_processing_queue_claim`. Linha que ganha `locked_at`, ou que sai de `queued`, deixa o índice. `product_image_id` aponta para `product_images` depois da coleta. `image_rights_review_queue` continua só para a decisão humana de direitos.
 
 `push_jobs.job_kind` é `STOCK_PRICE`, `CONTENT` ou `CREATE`. Status: `pending`, `locked`, `completed`, `failed`, `blocked`, `superseded`, `cancelled`. `blocked` é terminal e não entra no retry. `block_reason` guarda o motivo (`ncm`, `ean`, `score`, `unlinked`, `price_zero`). O job só fica `completed` quando todos os passos estão `completed` ou `skipped`.
 
 ```sql
+CREATE TABLE push_jobs (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  master_product_id  uuid NOT NULL REFERENCES master_products(id),
+  variant_id         uuid NOT NULL REFERENCES product_variants(id),
+  platform           text NOT NULL CHECK (platform IN ('mercadolivre', 'nuvemshop')),
+  job_kind           text NOT NULL CHECK (job_kind IN ('STOCK_PRICE', 'CONTENT', 'CREATE')),
+  status             text NOT NULL DEFAULT 'pending' CHECK (status IN (
+                       'pending', 'locked', 'completed', 'failed',
+                       'blocked', 'superseded', 'cancelled'
+                     )),
+  block_reason       text CHECK (block_reason IN ('ncm', 'ean', 'score', 'unlinked', 'price_zero')),
+  attempts           smallint NOT NULL DEFAULT 0,
+  created_at         timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX push_jobs_active
+  ON push_jobs (master_product_id, variant_id, platform, job_kind)
+  WHERE status = 'pending';
+```
+
+`push_jobs_active` é o job ativo da agregação: no máximo um `pending` por produto, variante, plataforma e tipo. A busca desse recurso usa o índice. `locked` fica de fora, então a execução em curso não impede a janela seguinte.
+
+```sql
 CREATE TABLE push_job_steps (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  push_job_id  uuid NOT NULL,
+  push_job_id  uuid NOT NULL REFERENCES push_jobs(id),
   step         text NOT NULL,
   status       text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'skipped')),
   last_error   text,
@@ -878,8 +932,6 @@ CREATE TABLE push_job_steps (
   UNIQUE (push_job_id, step)
 );
 ```
-
-Índice parcial: uma janela `open` por `(master_product_id, variant_id, platform, job_kind)`.
 
 `webhook_events.idempotency_key` é única. `content_hash` tem 64 caracteres. `sync_logs.idempotency_key` é obrigatória em toda linha.
 
@@ -969,7 +1021,7 @@ Webhook do Bling ou delta chama o WIG, detecta campos e agrega. O flush abre um 
 
 Recursos assinados no Bling: `product` (`created`, `updated`, `deleted`), `stock` e `virtual_stock`. `virtual_stock` vem ligado junto com `stock`. Pedido, nota e fornecedor ficam de fora. O payload não traz a ordem garantida: o worker usa o `date` do evento, e um `updated` que chega antes do `created` faz upsert pelo `bling_id`.
 
-`stock` e `virtual_stock` não alteram preço nem conteúdo. Atualizam `variant_stock_balances` pelo GET `/estoques/saldos` do produto citado e recalculam o cache publicado. `product` de preço ou de situação segue a seção 10.4 e a 10.7.
+`stock` e `virtual_stock` não alteram preço nem conteúdo. Atualizam `variant_stock_balances` pelo GET `/estoques/saldos` do produto citado e gravam `product_variants.stock` pela seção 10.7. Evento `product`, enrich e situação não copiam `estoque` para essa coluna. Preço segue a seção 10.7. Situação segue a seção 10.4.
 
 Check de preço a cada 30 minutos compara cada anúncio com o preço da seção 10.7. Condição com `follow_store_price` entra no passo `price` só se `stock_price = hub`. Condição sem a marca não entra nesse passo: preço diferente vira alerta. O valor do canal não grava no Bling. A leitura de saldo reusa o snapshot do stock sync quando ele tem menos de 15 minutos. O preço de loja vem de `GET /produtos/lojas` da `channel_stores` daquele canal.
 
@@ -999,11 +1051,11 @@ O mesmo `bling_id` que volta com `situacao` A retoma `active`. Não cria outro `
 Nos anúncios já vinculados de produto `inactive` ou `deleted`:
 
 - Cancela `CONTENT` e `CREATE` pendentes.
-- Com `stock_price = hub`, enfileira `pause` e, fora de anúncio Full, `stock` com quantidade zero em cada item de `ml_selling_conditions`, ou na variação legada. Esses passos não consultam NCM, EAN nem preço. Local `meli_facility` não recebe quantidade, nem zero. Com `bling_native`, o hub só registra o estado e o alerta. Quem zera o anúncio comum é a integração nativa. O hub não apaga o anúncio no Mercado Livre nem na Nuvemshop.
+- Com `stock_price = hub`, enfileira `pause` e, fora de anúncio Full, `stock` com quantidade zero em cada item de `ml_selling_conditions`, ou na variação legada. Esse zero vai no corpo do passo. `product_variants.stock` permanece a soma da seção 10.7. Esses passos não consultam NCM, EAN nem preço. Local `meli_facility` não recebe quantidade, nem zero. Com `bling_native`, o hub só registra o estado e o alerta. Quem zera o anúncio comum é a integração nativa. O hub não apaga o anúncio no Mercado Livre nem na Nuvemshop.
 - `platform_links` permanece, com `sync_status = 'source_inactive'` ou `'source_deleted'`.
 - Um alerta crítico aberto por produto. A matriz da variante some do canal passa a `extra_ml` ou `extra_ns` enquanto o anúncio existir sem produto ativo no Bling.
 
-Variante removida e pai ainda ativo: só essa variante fica `discontinued`. O pai continua no enriquecimento. Com `stock_price = hub`, o vínculo dela recebe pausa e, fora de anúncio Full, estoque zero. Local `meli_facility` não recebe quantidade, nem zero. Com `bling_native`, o hub só registra o estado e o alerta. Componente que sai do catálogo não apaga o kit; o saldo virtual do kit é relido.
+Variante removida e pai ainda ativo: só essa variante fica `discontinued`. O pai continua no enriquecimento. Com `stock_price = hub`, o vínculo dela recebe pausa e, fora de anúncio Full, quantidade zero no corpo do passo `stock`. `product_variants.stock` não muda por causa dessa saída. Local `meli_facility` não recebe quantidade, nem zero. Com `bling_native`, o hub só registra o estado e o alerta. Componente que sai do catálogo não apaga o kit; o saldo virtual do kit é relido.
 
 Produto `inactive` ou `deleted` não entra em enriquecimento, IQRE, CREATE nem CONTENT.
 
@@ -1016,8 +1068,8 @@ A notificação do Mercado Livre é um aviso fino (tópico e recurso). O worker 
 | Evento | Efeito |
 |---|---|
 | Eco de um `push_job_steps` concluído para o mesmo recurso e os mesmos campos | `ignored`, motivo `echo`. Não abre outro push |
-| Migração UPtin | atualiza `user_product_id` e `ml_selling_conditions` no vínculo já existente. Não cria outro `master_product` |
-| Preço ou estoque no canal diferente do Bling | alerta de divergência. O valor do canal não grava no ERP. Passo `price` só sai se `stock_price = hub` e, no Mercado Livre, se a condição tiver `follow_store_price`. Passo `stock` só sai se `stock_price = hub`. Saldo em `meli_facility` não dispara passo `stock` |
+| Migração UPtin | atualiza `user_product_id` e `ml_selling_conditions` no vínculo já existente. Não cria outro `master_product`. `family_confidence` copia o `match_confidence` já gravado |
+| Preço ou estoque no canal diferente do Bling | alerta de divergência. O valor do canal não grava no ERP. Estoque do canal compara com `floor` de `product_variants.stock`. Coluna nula não abre alerta de estoque. Na saída comercial que manda quantidade zero, a comparação usa zero. Passo `price` só sai se `stock_price = hub` e, no Mercado Livre, se a condição tiver `follow_store_price`. Passo `stock` só sai se `stock_price = hub`. Saldo em `meli_facility` não dispara passo `stock` |
 | Título, descrição ou imagem editados no canal | não chama `applyToBling`. O texto fica disponível para o próximo enrich comparar. Override só nasce em `shadow` |
 | Anúncio ou produto apagado no canal | `platform_links.sync_status = channel_deleted`. O cadastro do Bling permanece. A matriz deixa de marcar `extra_ml` ou `extra_ns` nesse anúncio |
 
@@ -1049,26 +1101,30 @@ O hub continua lendo estoque e preço no Bling para o cadastro local e para o al
 
 O anúncio é o SKU vendável. Kit (`formato` E) não vira vários anúncios dos componentes, e a grade (`formato` V) não vira anúncio do pai.
 
-| Forma | O que vende | Estoque publicado |
+| Forma | O que vende | `product_variants.stock` |
 |---|---|---|
-| S, simples | a variante default | soma do saldo virtual dos depósitos `seller` marcados |
-| E, composição | o próprio kit | o saldo virtual que o Bling já calculou para esse SKU, nos mesmos depósitos `seller` |
-| V, grade | cada variação, que pode ser S ou E | o saldo daquela variação |
+| S, simples | a variante default | soma de `saldo_virtual` dos depósitos `seller` com `include_in_push` |
+| E, composição | o próprio kit | a mesma soma, no saldo virtual que o Bling já calculou para esse SKU |
+| V, grade | cada variação, que pode ser S ou E | a mesma soma, calculada nessa variação |
 
 `stock_mode = virtual` baixa o componente na venda e o saldo do kit muda quando o componente muda. `stock_mode = physical` é o estoque do próprio kit. Nos dois casos o hub não recalcula `min(estoque do componente / quantidade)`. Quem calcula é o Bling. A estrutura só diz de quem o kit depende.
 
 `GET /produtos/estruturas/{id}` preenche `product_components`. O hub não faz POST nem PUT de estrutura. Componente ainda não sincronizado fica com `component_variant_id` nulo e o `component_bling_id` guardado. Estrutura incompleta gera alerta e não bloqueia a leitura de saldo.
 
-`virtual_stock` é o aviso de reserva e de kit. Se `vinculoComplexo` vier verdadeiro, o payload não lista todos os kits afetados (passa de 200 vínculos): o saldo sai de `GET /estoques/saldos`, não da lista do evento. `stock` cobre lançamento físico. Os dois atualizam `variant_stock_balances` e, na mesma transação, `product_variants.stock` = soma de `saldo_virtual` dos depósitos `seller` com `include_in_push`. Depósito `ml_full` ou `other` não entra. `saldo_fisico` fica só para conferência. O stock sync de 15 minutos é o respaldo quando o webhook falta. Mudança de componente que altera o kit entra por `virtual_stock` ou por esse ciclo, não por uma fórmula local.
+`virtual_stock` é o aviso de reserva e de kit. Se `vinculoComplexo` vier verdadeiro, o payload não lista todos os kits afetados (passa de 200 vínculos): o saldo sai de `GET /estoques/saldos`, não da lista do evento. `stock` cobre lançamento físico. Esses dois eventos e o stock sync de 15 minutos atualizam `variant_stock_balances` e, na mesma transação, gravam `product_variants.stock` com a soma de `saldo_virtual` dos depósitos `seller` com `include_in_push`. Depósito `ml_full`, `other` ou `unclassified` fica de fora. `saldo_fisico` fica só para conferência. Mudança de `role` ou de `include_in_push` recalcula essa soma com os saldos já gravados, na mesma transação. Payload de produto e enrich não escrevem a coluna. Nulo significa que `/estoques/saldos` ainda não rodou para a variante. Zero significa que a leitura já rodou e a soma é zero. Na execução, o CREATE e o passo `stock` que acompanha o saldo releem `/estoques/saldos`, gravam a coluna e enviam o `floor`. Com a coluna nula, o envio espera. O passo `stock` da saída comercial manda quantidade zero e não altera a coluna. Mudança de componente que altera o kit entra por `virtual_stock` ou pelo ciclo de 15 minutos, não por uma fórmula local.
+
+Preço de cadastro fica em `product_variants`: `price`, `promotional_price` e `use_promotional`. Preço de loja fica em `variant_channel_prices`: `store_price` e `store_promotional_price`. O `GET /produtos/lojas` da `channel_stores` da plataforma grava só as colunas da loja. O payload de produto grava só o cadastro. Um não copia o outro.
 
 Preço enviado ao canal, por variante:
 
-1. Linha em `variant_channel_prices` da plataforma: `promotional_price` se for maior que zero; senão `price`.
-2. Sem linha de loja: `promotional_price` do cadastro se `use_promotional` e o valor for maior que zero; senão `price`.
+1. Sem linha em `channel_stores`: o cadastro. O dashboard mostra a loja como não configurada.
+2. Loja configurada e sem linha em `variant_channel_prices`: o passo `price` e o CREATE esperam o `GET /produtos/lojas`.
+3. `store_price` nulo: o cadastro. `promotional_price` se `use_promotional` e o valor for maior que zero; senão `product_variants.price`.
+4. `store_price` preenchido: a loja. `store_promotional_price` se for maior que zero; senão `store_price`. O valor da loja permanece quando é igual ao cadastro.
 
-Preço zero ou negativo bloqueia o passo `price` das condições marcadas e o CREATE, como na seção 8.8. Preço maior que zero e menor que `cost_price` não bloqueia: abre o alerta crítico da seção 8.8. Custo nulo não compara. Condição sem `follow_store_price` não é escrita, mesmo com o preço da loja válido, e o preço que ela já tem também compara com o custo. O CREATE marca verdadeiro a condição que acaba de nascer. O preço do kit é o preço desse SKU, não a soma dos componentes. Custo não vai ao canal. Divergência entre preço de cadastro e preço de loja gera alerta e não escolhe o cadastro enquanto a loja tiver preço. Na Nuvemshop há um preço por variante, o da loja. No Mercado Livre, a comparação e a escrita usam a condição marcada. As outras conservam `ml_selling_conditions.price` e alertam se esse valor for diferente do da loja.
+Preço zero ou negativo no número escolhido bloqueia o passo `price` das condições marcadas e o CREATE, como na seção 8.8. Preço maior que zero e menor que `cost_price` não bloqueia: abre o alerta crítico da seção 8.8. Custo nulo não compara. Condição sem `follow_store_price` não é escrita, mesmo com o preço da loja válido, e o preço que ela já tem também compara com o custo. O CREATE marca verdadeiro a condição que acaba de nascer e grava `control_changes` com `origin = system` na mesma transação. `follow_set_by` continua nulo. O preço do kit é o preço desse SKU, não a soma dos componentes. Custo não vai ao canal. Com `store_price` preenchido, número de cadastro diferente do número de loja gera alerta. A escrita usa a loja. Na Nuvemshop há um preço por variante, o da lista acima. No Mercado Livre, a comparação e a escrita usam a condição marcada. As outras conservam `ml_selling_conditions.price` e alertam se esse valor for diferente do preço da lista acima.
 
-`channel_stores` guarda o `bling_loja_id` do Mercado Livre e o da Nuvemshop. Sem essa linha, o canal cai no preço de cadastro e o dashboard mostra a loja como não configurada.
+`channel_stores` guarda o `bling_loja_id` do Mercado Livre e o da Nuvemshop.
 
 ### 10.8 Estoque Full do Mercado Livre
 
@@ -1079,7 +1135,7 @@ O worker lê `GET /user-products/{user_product_id}/stock` e grava cada local em 
 | Local no User Product | Quem gere | O que o hub faz com `stock_price = hub` |
 |---|---|---|
 | só `meli_facility` | Mercado Livre | passo `stock` fica `skipped`, motivo `ml_full`. Não há PUT de `available_quantity` |
-| `seller_warehouse` e `meli_facility` | vendedor no depósito dele; Mercado Livre no Full | PUT só em `/user-products/{id}/stock/type/seller_warehouse`, com o `x-version` lido na hora. A quantidade é o estoque publicado do Bling. O corpo não leva `meli_facility` |
+| `seller_warehouse` e `meli_facility` | vendedor no depósito dele; Mercado Livre no Full | PUT só em `/user-products/{id}/stock/type/seller_warehouse`, com o `x-version` lido na hora. A quantidade é o `floor` de `product_variants.stock`. O corpo não leva `meli_facility` |
 | `selling_address` | vendedor, e só em MLA/MLC | nesta conta, não escreve |
 
 409 no PUT de estoque relê o `x-version` e tenta de novo uma vez. Não soma o saldo Full ao saldo do Bling, nem reduz um para compensar o outro. O hub também não subtrai `meli_facility` da soma do Bling: quando a transferência já baixou o depósito de venda, subtrair de novo zeraria peça que ainda está com o vendedor. Venda Full desconta `meli_facility`. Venda pelo depósito do vendedor desconta `seller_warehouse`.
@@ -1147,8 +1203,8 @@ A primeira entrega é matching e fiscal. O restante acompanha o motor correspond
 | 0.5 | Fixtures sanitizados | Mapper cobre simples, variação, kit, 429 e `product.deleted` |
 | 1 | Schema deste documento | Migrations sobem e descem |
 | 2 | Conectores, limiter e `oauth_tokens` | Dois jobs juntos não passam de 3 req/s; o refresh do token é single-flight |
-| 3 | GVE e NVE puros | Vetores GS1 e NCM `0000.00.00` |
-| 4 | PIRE e VIR | EAN compartilhado cai em quarentena; conta `user_product_seller` não publica `variations` |
+| 3 | GVE e NVE puros | Vetores GS1 e NCM `0000.00.00`; EAN repetido entre variantes do mesmo produto marca `duplicate`; NCM em conflito entre variantes marca `conflict` |
+| 4 | PIRE e VIR | EAN compartilhado cai em quarentena; família User Product com sinais em dois pais também; conta `user_product_seller` não publica `variations` |
 | 5 | IQRE | A sync enfileira as imagens; o fechamento deduplica sem cruzar produto |
 | 6 | CQS | Grade A e grade B não sofrem REPLACE |
 | 7 | CRE | Estoque não lê o score |
@@ -1161,18 +1217,18 @@ A primeira entrega é matching e fiscal. O restante acompanha o motor correspond
 ## 14. Regras que não voltam atrás
 
 - Grupo A não é escrito por canal nem por enriquecimento.
-- NCM não é auto-preenchido. Sugestão exige dois aprovadores e nota de TIPI. Não existe NCM de variante. O nome do Bling não tem coluna paralela.
-- EAN externo válido não auto-preenche.
-- Auto-match exige dois sinais fortes no mesmo candidato e nenhum conflito. EAN sozinho não vale 95.
+- NCM não é auto-preenchido. Sugestão exige dois aprovadores e nota de TIPI. Não existe NCM de variante. Códigos diferentes entre variantes do mesmo produto marcam `conflict` no pai, não viram sugestão e não escolhem um vencedor. O nome do Bling não tem coluna paralela.
+- EAN externo válido não auto-preenche. EAN válido repetido entre variantes do mesmo produto marca `duplicate`, bloqueia CONTENT/CREATE dessas variantes e não sai do Bling. EAN igual em produtos diferentes não é sinal e cai em quarentena.
+- Auto-match exige dois sinais fortes no mesmo candidato e nenhum conflito. EAN sozinho não vale 95. No User Product, `family_confidence` é o score de a `family_id` apontar para um só `master_product`. Conflito entre itens da família vai para quarentena e não parte a família. Confirmação manual vale 100. Legado deixa a coluna nula.
 - Escrita de conteúdo no Bling nasce em shadow, com kill switch por plataforma, teto por execução e reversão pelo `quality_history`. Nome do Bling não recebe título de canal.
 - HTTP 200 de webhook só sai depois do HMAC válido e do INSERT.
 - A cota do Bling é uma só por conta. Nenhum cron soma outro limite de 3 req/s.
 - O push lê o Bling na execução e chama um endpoint por passo. Não reenvia o produto inteiro nem repete passo já concluído. Na Nuvemshop, peso e dimensão vão no passo `measures` e não reenviam preço nem estoque.
 - Estoque e pausa de anúncio publicado não esperam NCM, EAN nem preço. Com a integração nativa ligada, quem atualiza estoque e preço de anúncio já publicado é o Bling, não o hub. O CREATE confirmado envia preço e estoque uma vez, na abertura, e não repete.
-- Estoque publicado é o saldo virtual dos depósitos `seller` marcados. Depósito `ml_full` não entra. O hub não soma `saldoVirtualTotal` nem recalcula kit a partir dos componentes.
+- `product_variants.stock` é a soma do saldo virtual dos depósitos `seller` com `include_in_push`. Nasce nula. Zero só existe depois da leitura. O passo `stock` e o CREATE enviam o `floor` dessa soma. A saída comercial manda quantidade zero no anúncio comum e não grava esse zero na coluna. Depósito `ml_full` não entra. O hub não soma `saldoVirtualTotal` nem recalcula kit a partir dos componentes.
 - Estoque Full (`meli_facility`) é do Mercado Livre. O hub não grava essa quantidade, nem zero, não a soma ao estoque do Bling e não a subtrai do depósito de venda.
-- Preço publicado é o da loja Bling do canal. Sem vínculo de loja, vale o preço do cadastro. Promocional só entra com valor maior que zero. No Mercado Livre, esse preço só é escrito na condição com `follow_store_price`. As outras não são achatadas. Preço acima de zero e abaixo do custo gera alerta crítico e não segura estoque, pausa nem a escrita do preço.
+- Preço de cadastro é `product_variants.price` e `promotional_price`. Preço de loja é `variant_channel_prices.store_price` e `store_promotional_price`. A loja não guarda cópia do cadastro. Sem `channel_stores`, vale o cadastro. Com a loja configurada, `store_price` nulo também vale o cadastro; preenchido, vale a loja. Sem linha de preço de loja, o envio espera a leitura. Promocional da loja só entra com valor maior que zero. No Mercado Livre, esse preço só é escrito na condição com `follow_store_price`. As outras não são achatadas. Preço acima de zero e abaixo do custo gera alerta crítico e não segura estoque, pausa nem a escrita do preço.
 - Produto inativado (`situacao` I), excluído (`situacao` E em `product.updated`) ou apagado (`product.deleted` com GET 404) não é apagado no hub nem no canal. O cadastro local permanece. Variante removida com pai ativo segue a mesma saída comercial: com dono `hub`, o anúncio comum recebe estoque zero e pausa. Anúncio Full não recebe quantidade. Com `bling_native`, quem zera o anúncio comum é a integração nativa.
 - Imagem é entidade. Dedup não cruza produto.
 - Tabelas `*_archive` não recebem UPDATE nem DELETE.
-- Nome de operador vive em `users`. Credencial OAuth vive em `oauth_tokens`, não no Redis. `raw_payload` de webhook expira. Depósito, loja, dono do estoque e modo live só mudam com admin, e a trilha guarda quem, quando, valor anterior e valor novo.
+- Nome de operador vive em `users`. Credencial OAuth vive em `oauth_tokens`, não no Redis. `raw_payload` de webhook expira. Depósito, loja, dono do estoque e modo live só mudam com admin, e a trilha guarda quem, quando, valor anterior e valor novo. `follow_store_price` entra na mesma trilha: admin com o usuário da sessão, sync com `origin = system`. O nascimento da condição também gera linha. Sem essa linha, o booleano não muda.
