@@ -1,0 +1,22 @@
+{
+  "name": "bling-sync-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hub de sincronização de catálogo entre Bling ERP v3, Mercado Livre e Nuvemshop",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:api": "npm --workspace=@bling-sync/api run dev",
+    "dev:web": "npm --workspace=@bling-sync/web run dev",
+    "build": "npm --workspaces run build",
+    "typecheck": "npm --workspaces run typecheck",
+    "test": "npm --workspace=@bling-sync/api run test",
+    "migrate:up": "npm --workspace=@bling-sync/api run migrate:up",
+    "migrate:down": "npm --workspace=@bling-sync/api run migrate:down"
+  }
+}

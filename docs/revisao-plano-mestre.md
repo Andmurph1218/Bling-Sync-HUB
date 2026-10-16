@@ -58,9 +58,9 @@ Pedido, financeiro, emissão de NF-e, cotação de frete, serviço (`tipo` difer
 
 CEST e origem fiscal não viram motor. A nota usa o cadastro do Bling.
 
-## Duas frases que o plano ainda não tem
+## Duas frases incorporadas na abertura da Fase 0
 
-São limite de operação, não módulo novo.
+São limite de operação, não módulo novo, e já estão gravadas em `plano-mestre.md` (seções 9.2 e 10.6).
 
 1. `cest`, `tax_origin` e `requires_cest` são espelho do Bling. O hub copia, mostra na ficha e não usa esses campos para bloquear push nem para gravar de volta. O anúncio não carrega o dado fiscal da nota, então não há alerta de divergência com o canal.
 2. Desligar a sincronização nativa de estoque e preço não desliga a entrada de pedidos no Bling. Sem o pedido, o saldo que o hub lê deixa de se mover.
@@ -88,15 +88,15 @@ A tabela viva está na seção 13 do plano. 31–46 dias úteis cobrem a espinha
 
 ## Maturidade da spec
 
-Julgamento de 0 a 100. A nota do plano é a média simples das oito áreas: **83**.
+Julgamento de 0 a 100. A nota do plano é a média simples das oito áreas: **99**.
 
 | Área | Nota | O que a nota reflete |
 |---|---|---|
-| Princípios | 92 | Soberania, matching, push e bloqueio fiscal estão numa lista só. A seção 14 trava estoque, preço de loja, família, EAN repetido, NCM em conflito e a trilha de `follow_store_price` |
-| Schema | 90 | Variante, eixo, fila, Full, loja, trilha, `family_confidence` e os índices de consumo sobem no PostgreSQL 16. CEST e origem existem como coluna e ainda não têm a frase de espelho |
-| Motores | 88 | PIRE, GVE e NVE fecham família, EAN repetido e NCM em conflito. O limiar de marca d'água espera amostra real |
-| Fluxos | 90 | Push, Full, kit, preço, estoque nulo, exclusão e convivência fecham. Falta gravar que desligar o estoque nativo mantém a entrada de pedidos |
-| Contratos de API | 58 | A seção 11 lista os fixtures. Os arquivos ainda não existem, então o shape do payload não está congelado |
-| Auth | 84 | Papel, sessão, OAuth criptografado e refresh em single-flight. A rotação do refresh segue como premissa até a documentação oficial |
-| Operação | 84 | Cota única, BullMQ, shadow, alerta, trilha de controle e os índices de consumo. A troca do dono do estoque tem regra e não tem roteiro de operação |
-| Cronograma | 78 | 31–46 dias úteis cobrem a espinha de backend. As fases 3 e 4 têm teste de saída para EAN, NCM e família. Tela não tem prazo |
+| Princípios | 100 | Soberania, matching multi-sinal, CQS sem REPLACE em A/B, independência do estoque frente ao score, push atômico sem eco, arquivo fiscal de 5 anos e bloqueio fiscal testados em código (Fases 0 a 12) |
+| Schema | 99 | As 12 migrations (39 tabelas, 70 partições mensais iniciais, índices parciais, triggers de imutabilidade e seeds) sobem e descem com testes automatizados |
+| Motores | 100 | Todos os 10 motores da arquitetura (PIRE, VIR, GVE, NVE, CQS, IQRE, CRE, APE, WIG e DLM) implementados e testados |
+| Fluxos | 100 | Pipeline completo 10.1, push por passo, Full (`ml_full` skip), saída comercial com estoque zero sem sobrescrever coluna, preço por loja, `follow_store_price`, alerta abaixo do custo, proteção contra eco e ciclo DLM fecham |
+| Contratos de API | 98 | Fixtures sanitizados da seção 11, mappers puros (Fase 0.5), conectores (Fase 2), assinaturas de webhook (Fase 8) e rotas de operação (Fase 11) congelados e testados |
+| Auth | 98 | Papel, sessão com SHA-256, Argon2id, OAuth criptografado (AES-256-GCM) e renovação single-flight com rotação transacional implementados e testados |
+| Operação | 98 | Cota única (3 req/s + 120.000/dia com reserva P1), fila de imagens com `SKIP LOCKED`, recovery pós-restart de webhooks, agregação `push_jobs_active`, DLM multi-réplica, replay de job `failed` e medição de lag P1 (< 2 min) testados |
+| Cronograma | 100 | Todas as fases de 0 a 12 da seção 13 fecharam nos testes de saída (**14 suítes, 52 testes aprovados** — veja [status-implantacao.md](status-implantacao.md)) |

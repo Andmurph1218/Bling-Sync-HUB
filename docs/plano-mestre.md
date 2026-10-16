@@ -626,7 +626,7 @@ CREATE UNIQUE INDEX uq_one_default_variant
   WHERE is_default;
 ```
 
-`bling_sku` da variante já é único no catálogo. Um segundo `UNIQUE (master_product_id, bling_sku)` não restringe nada. Não há `ncm_override` nem `name_override`. O NCM que vale é `master_products.ncm`. O nome que vale no Bling, e o que pode ir para a NF-e, é `master_products.name`. Título de canal fica em `channel_content_overrides` e não substitui esse nome.
+`bling_sku` da variante já é único no catálogo. Um segundo `UNIQUE (master_product_id, bling_sku)` não restringe nada. Não há `ncm_override` nem `name_override`. O NCM que vale é `master_products.ncm`. O nome que vale no Bling, e o que pode ir para a NF-e, é `master_products.name`. Título de canal fica em `channel_content_overrides` e não substitui esse nome. `cest`, `tax_origin` e `requires_cest` são espelho do Bling: o hub copia, mostra na ficha e não usa esses campos para bloquear push nem para gravar de volta. O anúncio não carrega o dado fiscal da nota, então não há alerta de divergência com o canal.
 
 Forma conferida por trigger adiada, no commit:
 
@@ -1095,7 +1095,7 @@ CREATE TABLE channel_sync_owners (
 | Título, descrição, imagens e atributos de conteúdo | `hub` | este hub, em modo `live` |
 | Nascimento do anúncio | CREATE confirmado por uma pessoa | este hub, uma vez, com preço e estoque lidos do Bling. A atualização seguinte fica com o dono de `stock_price` |
 
-O hub continua lendo estoque e preço no Bling para o cadastro local e para o alerta de divergência. Não os devolve a anúncio já publicado enquanto `stock_price = bling_native`. A criação confirmada envia esses valores uma vez porque a API do canal exige, e não abre job de atualização. Passar um canal para `hub` é manual e só depois de desligar, no Bling, a sincronização nativa de estoque e preço desse canal. Os dois modos não ficam ligados juntos. Conteúdo nativo do Bling para o canal fica desligado enquanto `content = hub`, para o título do anúncio não ser reescrito pelos dois.
+O hub continua lendo estoque e preço no Bling para o cadastro local e para o alerta de divergência. Não os devolve a anúncio já publicado enquanto `stock_price = bling_native`. A criação confirmada envia esses valores uma vez porque a API do canal exige, e não abre job de atualização. Passar um canal para `hub` é manual e só depois de desligar, no Bling, a sincronização nativa de estoque e preço desse canal. Desligar a sincronização nativa de estoque e preço não desliga a entrada de pedidos no Bling: sem o pedido, o saldo que o hub lê deixa de se mover. Os dois modos não ficam ligados juntos. Conteúdo nativo do Bling para o canal fica desligado enquanto `content = hub`, para o título do anúncio não ser reescrito pelos dois.
 
 ### 10.7 Kit, depósito e preço da loja
 
@@ -1199,9 +1199,9 @@ A primeira entrega é matching e fiscal. O restante acompanha o motor correspond
 
 | Fase | Entrega | Fecha quando |
 |---|---|---|
-| 0 | Monorepo, Docker, usuários e papéis | Healthcheck e login de dois papéis |
-| 0.5 | Fixtures sanitizados | Mapper cobre simples, variação, kit, 429 e `product.deleted` |
-| 1 | Schema deste documento | Migrations sobem e descem |
+| 0 | Monorepo, Docker, migration 1 (identidade e controles), usuários e papéis | Healthcheck e login de dois papéis |
+| 0.5 | Fixtures sanitizados (Bling v3, ML Legado/User Product, Nuvemshop `inventory_levels`) | Mapper cobre simples, variação, kit, 429 e `product.deleted` |
+| 1 | Schema completo deste documento (migrations 2 a 12) | Migrations sobem e descem |
 | 2 | Conectores, limiter e `oauth_tokens` | Dois jobs juntos não passam de 3 req/s; o refresh do token é single-flight |
 | 3 | GVE e NVE puros | Vetores GS1 e NCM `0000.00.00`; EAN repetido entre variantes do mesmo produto marca `duplicate`; NCM em conflito entre variantes marca `conflict` |
 | 4 | PIRE e VIR | EAN compartilhado cai em quarentena; família User Product com sinais em dois pais também; conta `user_product_seller` não publica `variations` |
