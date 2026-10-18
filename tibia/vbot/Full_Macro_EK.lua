@@ -136,26 +136,6 @@ local function countMonsters(range)
   return total
 end
 
--- Jogadores que nao sao party e nao sao o alvo atual.
-local function strangersAround(range, ignore)
-  local total = 0
-  local origin = pos()
-  for _, spec in pairs(getSpectators()) do
-    if spec:isPlayer() and not spec:isLocalPlayer() and spec ~= ignore then
-      local specPos = spec:getPosition()
-      local party = spec.isPartyMember and spec:isPartyMember()
-      if specPos and specPos.z == origin.z and not party and getDistanceBetween(origin, specPos) <= range then
-        total = total + 1
-      end
-    end
-  end
-  return total
-end
-
-local function areaBlocked(range, target)
-  return safeMacro and safeMacro.isOn() and strangersAround(range, target) > 0
-end
-
 local function faceCreature(creature)
   local origin = pos()
   local targetPos = creature:getPosition()
@@ -230,39 +210,19 @@ local function castHunt(target, justTurned)
   local adjacent = countMonsters(1)
   local around = countMonsters(3)
   if castSingleTarget(target, justTurned) then return true end
-  if adjacent >= Config.minGran and not areaBlocked(1, target) and trySpell("exori gran", GROUP_ATTACK) then
+  if adjacent >= Config.minGran and trySpell("exori gran", GROUP_ATTACK) then
     return true
   end
-  if not justTurned and monstersInFront() >= Config.minSweep and not areaBlocked(1, target) and trySpell("exori min", GROUP_ATTACK) then
+  if not justTurned and monstersInFront() >= Config.minSweep and trySpell("exori min", GROUP_ATTACK) then
     return true
   end
-  if around >= Config.minMas and not areaBlocked(3, target) and trySpell("exori mas", GROUP_ATTACK) then
+  if around >= Config.minMas and trySpell("exori mas", GROUP_ATTACK) then
     return true
   end
-  if adjacent >= Config.minExori and not areaBlocked(1, target) and trySpell("exori", GROUP_ATTACK) then
+  if adjacent >= Config.minExori and trySpell("exori", GROUP_ATTACK) then
     return true
   end
-  -- Area bloqueada ou em cooldown: Brutal Strike nao pega jogador ao lado.
   if not justTurned and cardinalMelee(target) and trySpell("exori ico", GROUP_ATTACK) then
-    return true
-  end
-  return false
-end
-
-local function meleeDistance(creature)
-  local origin = pos()
-  local targetPos = creature:getPosition()
-  if not targetPos or targetPos.z ~= origin.z then return 99 end
-  return getDistanceBetween(origin, targetPos)
-end
-
-local function castBurst(target, justTurned)
-  if castSingleTarget(target, justTurned) then return true end
-  local dist = meleeDistance(target)
-  if dist <= 1 and not areaBlocked(1, target) and trySpell("exori gran", GROUP_ATTACK) then
-    return true
-  end
-  if dist <= 1 and not areaBlocked(1, target) and trySpell("exori", GROUP_ATTACK) then
     return true
   end
   return false
@@ -270,17 +230,9 @@ end
 
 local function castAttack(target, justTurned)
   if not target or not target:getPosition() then return false end
-  if target:isPlayer() then
-    if pvpMacro.isOff() then return false end
-    return castBurst(target, justTurned)
-  end
-  if huntMacro.isOn() then
-    return castHunt(target, justTurned)
-  end
-  if pvpMacro.isOn() then
-    return castBurst(target, justTurned)
-  end
-  return false
+  if not huntMacro or huntMacro.isOff() then return false end
+  if target:isPlayer() then return false end
+  return castHunt(target, justTurned)
 end
 
 -- Dois botoes separados. Na segunda metade dos 2s do ataque a fala fica livre para o exori.
@@ -313,28 +265,14 @@ local function castExetaAmp(target)
   return true
 end
 
-if UI and UI.Separator then
-  UI.Separator()
-  UI.Label("EK Aurera")
-  UI.Separator()
-else
-  addSeparator()
-end
-
-huntMacro = macro(100, "EK Hunt", function() end)
-pvpMacro = macro(100, "EK PVP", function() end)
-safeMacro = macro(100000, "EK Safe AoE", function() end)
-exetaResMacro = macro(100, "Exeta Res", function() end)
-exetaAmpMacro = macro(100, "Exeta Amp", function() end)
-paraMacro = macro(100, "Anti Paralyze", function() end)
-
-macro(100, function()
-  if isInPz() then return end
-
-  if paraMacro.isOn() and isParalyzed() then
-    trySpell("utani hur", GROUP_SUPPORT)
+local function section(title)
+  if UI and UI.Separator then
+    UI.Separator()
+    UI.Label(title)
+  else
+    addSeparator()
   end
-end)
+end
 
 local function usePotion(itemId)
   if now - lastPotion < Config.potDelay then return false end
@@ -343,16 +281,6 @@ local function usePotion(itemId)
   lastPotion = now
   return true
 end
-
-macro(200, "Supreme HP", function()
-  if hppercent() > Config.potHp then return end
-  usePotion(Config.potId)
-end)
-
-macro(200, "Mana Potion", function()
-  if manapercent() > Config.manaMp then return end
-  usePotion(Config.manaId)
-end)
 
 local function isCorpseContainer(container)
   if container.lootContainer then return true end
@@ -409,6 +337,104 @@ local function pullTrash()
   return false
 end
 
+local function antiPush()
+  if not antiPushMacro or antiPushMacro.isOff() then return end
+  if now - lastMove < Config.dropDelay then return end
+  local feet = pos()
+  if not feet then return end
+  local tile = g_map.getTile(feet)
+  if not tile or tile:getThingCount() >= Config.maxStackedItems then return end
+
+  local top = tile:getTopThing()
+  local topId = nil
+  if top and top.isItem and top:isItem() then
+    if top.isNotMoveable and top:isNotMoveable() then return end
+    topId = top:getId()
+  end
+
+  local fallback = nil
+  for _, itemId in ipairs(Config.dropItems) do
+    if itemId ~= topId then
+      local dropItem = findItem(itemId)
+      if dropItem then
+        g_game.move(dropItem, feet, 1)
+        lastMove = now
+        return
+      end
+    elseif not fallback then
+      fallback = findItem(itemId)
+    end
+  end
+  if fallback then
+    g_game.move(fallback, feet, 1)
+    lastMove = now
+  end
+end
+
+section("EK Aurera")
+section("Combate")
+huntMacro = macro(100, "EK Hunt", function() end)
+exetaResMacro = macro(100, "Exeta Res", function() end)
+exetaAmpMacro = macro(100, "Exeta Amp", function() end)
+paraMacro = macro(100, "Anti Paralyze", function() end)
+
+macro(100, function()
+  if isInPz() then return end
+  if paraMacro.isOn() and isParalyzed() then
+    trySpell("utani hur", GROUP_SUPPORT)
+  end
+end)
+
+macro(100, function()
+  if isInPz() then return end
+  local hunting = huntMacro.isOn()
+  local wantExeta = exetaResMacro.isOn() or exetaAmpMacro.isOn()
+  if not hunting and not wantExeta then return end
+
+  local target = g_game.isAttacking() and g_game.getAttackingCreature() or nil
+  if target and not target:getPosition() then target = nil end
+
+  local justTurned = false
+  if hunting and target then
+    justTurned = faceCreature(target)
+  end
+
+  if hunting and target and castAttack(target, justTurned) then
+    lastAttack = now
+    return
+  end
+  if castExetaRes(target) then return end
+  castExetaAmp(target)
+end)
+
+section("Cura")
+macro(100, "EK Heal", function()
+  if isInPz() or not canTalk() or groupBusy(GROUP_HEAL) then return end
+  if hppercent() <= Config.granHealHp and ready("exura gran ico") then
+    speak("exura gran ico")
+    return
+  end
+  if hppercent() > Config.healHp then return end
+  if lvl() >= spellFallback("exura med ico").level and ready("exura med ico") then
+    speak("exura med ico")
+    return
+  end
+  if ready("exura ico") then
+    speak("exura ico")
+  end
+end)
+
+macro(200, "Supreme HP", function()
+  if hppercent() > Config.potHp then return end
+  usePotion(Config.potId)
+end)
+
+macro(200, "Mana Potion", function()
+  if manapercent() > Config.manaMp then return end
+  usePotion(Config.manaId)
+end)
+
+section("Util")
 if storage.gpPushEnabled == nil then
   storage.gpPushEnabled = false
 end
@@ -483,40 +509,6 @@ macro(1000, "Stack items", function()
   end
 end)
 
-local function antiPush()
-  if not antiPushMacro or antiPushMacro.isOff() then return end
-  if now - lastMove < Config.dropDelay then return end
-  local feet = pos()
-  if not feet then return end
-  local tile = g_map.getTile(feet)
-  if not tile or tile:getThingCount() >= Config.maxStackedItems then return end
-
-  local top = tile:getTopThing()
-  local topId = nil
-  if top and top.isItem and top:isItem() then
-    if top.isNotMoveable and top:isNotMoveable() then return end
-    topId = top:getId()
-  end
-
-  local fallback = nil
-  for _, itemId in ipairs(Config.dropItems) do
-    if itemId ~= topId then
-      local dropItem = findItem(itemId)
-      if dropItem then
-        g_game.move(dropItem, feet, 1)
-        lastMove = now
-        return
-      end
-    elseif not fallback then
-      fallback = findItem(itemId)
-    end
-  end
-  if fallback then
-    g_game.move(fallback, feet, 1)
-    lastMove = now
-  end
-end
-
 antiPushMacro = macro(Config.dropDelay, "Anti Push", function()
   antiPush()
 end)
@@ -526,48 +518,6 @@ if type(onPlayerPositionChange) == "function" then
     antiPush()
   end)
 end
-
-macro(100, "EK Heal", function()
-  if isInPz() or not canTalk() or groupBusy(GROUP_HEAL) then return end
-  if hppercent() <= Config.granHealHp and ready("exura gran ico") then
-    speak("exura gran ico")
-    return
-  end
-  if hppercent() > Config.healHp then return end
-  if lvl() >= spellFallback("exura med ico").level and ready("exura med ico") then
-    speak("exura med ico")
-    return
-  end
-  if ready("exura ico") then
-    speak("exura ico")
-  end
-end)
-
-macro(100, function()
-  if isInPz() then return end
-  local hunting = huntMacro.isOn() or pvpMacro.isOn()
-  local wantExeta = exetaResMacro.isOn() or exetaAmpMacro.isOn()
-  if not hunting and not wantExeta then return end
-
-  local target = g_game.isAttacking() and g_game.getAttackingCreature() or nil
-  if target and not target:getPosition() then target = nil end
-
-  local justTurned = false
-  if hunting and target then
-    justTurned = faceCreature(target)
-  end
-
-  if hunting and target and castAttack(target, justTurned) then
-    lastAttack = now
-    return
-  end
-  if castExetaRes(target) then return end
-  castExetaAmp(target)
-end)
-
-local pvpIcon = addIcon("pvp", {item = 32616, text = "PVP"}, pvpMacro)
-pvpIcon:breakAnchors()
-pvpIcon:move(228, 650)
 
 local huntIcon = addIcon("up", {item = 34083, text = "HUNT"}, huntMacro)
 huntIcon:breakAnchors()
@@ -786,6 +736,6 @@ local function jewelleryEquip()
   end)
 end
 
-if UI and UI.Separator then UI.Separator() else addSeparator() end
+section("Joias")
 jewelleryEquip()
 if UI and UI.Separator then UI.Separator() else addSeparator() end
