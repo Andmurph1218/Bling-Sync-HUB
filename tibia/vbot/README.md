@@ -17,6 +17,7 @@ O arquivo antigo juntava varios macros soltos. Dois deles castavam ao mesmo temp
 | Mana Potion | Great Mana Potion `238` em 50% de mana. Divide o exhaust de 1s com a de vida; vida tem prioridade |
 | Stack items | Junta pilhas iguais nas backpacks abertas, uma por segundo. Ignora corpo de monstro |
 | Puxar Trash | Desligado ao colar. Puxa um item pegavel dos 8 sqm para o pe, a cada 600 ms |
+| Anti Push | Solta worm `3492`, banana `3590` ou gold coin `3031` no pe ate 5 things. Um drop a cada 100 ms, tambem ao andar |
 | EK Heal | `exura gran ico` em 45%, `exura med ico` a partir do level 300, senao `exura ico` |
 | Amuleto / anel | SSA `3081` em 75% e Might Ring `3048` em 70%. O slot da direita e o item padrao |
 

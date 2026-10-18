@@ -12,6 +12,9 @@ local Config = {
   minSweep = 1,        -- exori min
   exetaGap = 4000,     -- entre um challenge e outro
   trashDelay = 600,    -- um item por vez; 200ms empurra os 8 sqm e trava
+  dropItems = {3492, 3590, 3031}, -- worm, banana, gold coin
+  maxStackedItems = 5,
+  dropDelay = 100,     -- 10ms flooda; um drop por vez no pe
   talkGap = 200,
   equipGap = 400
 }
@@ -470,6 +473,50 @@ macro(1000, "Stack items", function()
     end
   end
 end)
+
+local function antiPush()
+  if not antiPushMacro or antiPushMacro.isOff() then return end
+  if now - lastMove < Config.dropDelay then return end
+  local feet = pos()
+  if not feet then return end
+  local tile = g_map.getTile(feet)
+  if not tile or tile:getThingCount() >= Config.maxStackedItems then return end
+
+  local top = tile:getTopThing()
+  local topId = nil
+  if top and top.isItem and top:isItem() then
+    if top.isNotMoveable and top:isNotMoveable() then return end
+    topId = top:getId()
+  end
+
+  local fallback = nil
+  for _, itemId in ipairs(Config.dropItems) do
+    if itemId ~= topId then
+      local dropItem = findItem(itemId)
+      if dropItem then
+        g_game.move(dropItem, feet, 1)
+        lastMove = now
+        return
+      end
+    elseif not fallback then
+      fallback = findItem(itemId)
+    end
+  end
+  if fallback then
+    g_game.move(fallback, feet, 1)
+    lastMove = now
+  end
+end
+
+antiPushMacro = macro(Config.dropDelay, "Anti Push", function()
+  antiPush()
+end)
+
+if type(onPlayerPositionChange) == "function" then
+  onPlayerPositionChange(function()
+    antiPush()
+  end)
+end
 
 macro(100, "EK Heal", function()
   if isInPz() or not canTalk() or groupBusy(GROUP_HEAL) then return end
