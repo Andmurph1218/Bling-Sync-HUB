@@ -33,7 +33,7 @@ Os dois icones continuam na tela: HUNT e PVP. Os dois podem ficar ligados. Monst
 - Attack, healing e support respeitam o grupo de cooldown do client (`1`, `2`, `3`). O script antigo dava `say` em todas as spells a cada 500 ms e tomava exhaust.
 - `exori gran ico` e `exori min` so saem se o alvo esta no sqm da frente. Em diagonal a spell nao acerta. Se o personagem virou neste ciclo, a spell direcional espera o proximo.
 - Blood Rage no Aurera e stance. O icone strengthened (`hasPartyBuff`) impede recast: recastar desliga a stance. Protector usa o mesmo icone, entao o script nao troca de stance sozinho.
-- Abaixo do level 150, `exeta amp res` cai para `exeta res`.
+- Os campos Exeta e Anti paralyze castam o texto escrito neles. Nao ha troca automatica para `exeta res`.
 - O painel de joias lia `ringEnabled`, mas gravava `ringSwitch`. O switch nascia desligado. A comparacao de HP estava com `and`/`or` invertido na precedencia: sem amuleto, equipava o de emergencia mesmo com HP cheio. No editor do vBot `parent` vem vazio; a aba corrente e `panel`.
 - Item padrao `0` nao e equipado. Arraste o anel de skill e o amuleto de hunt para o slot da direita. O da esquerda e o de emergencia (Might e SSA).
 - `10476` (Lucky Clover em alguns OT) e `34080` (nao e anel de Tibia) deixaram de ser padrao. Se o storage antigo ja tiver esses ids, eles sao mantidos.

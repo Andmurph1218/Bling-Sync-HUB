@@ -69,8 +69,16 @@ local Familiars = {
   ["monk familiar"] = true
 }
 
-storage.ekExeta = storage.ekExeta or "exeta amp res"
-storage.ekAntiPara = storage.ekAntiPara or "utani hur"
+if type(storage.ekExeta) ~= "string" then
+  storage.ekExeta = "exeta amp res"
+end
+if type(storage.ekAntiPara) ~= "string" then
+  storage.ekAntiPara = "utani hur"
+end
+
+local exetaEdit
+local paraEdit
+local utitoAt = 0
 
 local lastTalk = 0
 local GROUP_ATTACK = 1
@@ -247,27 +255,34 @@ local function bloodRageActive()
   return false
 end
 
-local function spellLevel(words)
+local function editedText(widget, text)
+  if type(text) == "string" then return text end
+  if type(widget) == "string" then return widget end
+  if widget and widget.getText then return widget:getText() or "" end
+  return ""
+end
+
+-- Le o que esta escrito no slot. Nao troca a spell por outra.
+local function slotWords(widget, key)
+  if widget and widget.getText then
+    local text = widget:getText()
+    if type(text) == "string" then
+      storage[key] = text
+      return trim(text)
+    end
+  end
+  if type(storage[key]) == "string" then return trim(storage[key]) end
+  return ""
+end
+
+local function castSlot(widget, key)
+  local words = slotWords(widget, key)
+  if words == "" then return false end
+  if not canTalk() or groupBusy(GROUP_SUPPORT) or onCooldown(words) then return false end
   local info = clientSpell(words)
-  if info then return info.level end
-  return spellFallback(words).level
-end
-
-local function exetaWords()
-  local words = trim(storage.ekExeta)
-  if words == "" or words == "exeta mas res" then
-    words = "exeta amp res"
-  end
-  if words == "exeta amp res" and lvl() < spellLevel(words) then
-    return "exeta res"
-  end
-  return words
-end
-
-local function paraWords()
-  local words = trim(storage.ekAntiPara)
-  if words == "" then return "utani hur" end
-  return words
+  if info and mana() < info.mana then return false end
+  speak(words)
+  return true
 end
 
 local function trySpell(words, groupId)
@@ -276,22 +291,13 @@ local function trySpell(words, groupId)
   return true
 end
 
-local function castPara()
-  if not isParalyzed() then return false end
-  return trySpell(paraWords(), GROUP_SUPPORT)
-end
-
 local function castBloodRage()
   if bloodRageActive() then return false end
+  if now - utitoAt < 10000 then return false end
   if not g_game.isAttacking() and countMonsters(5) < 1 then return false end
-  return trySpell("utito tempo", GROUP_SUPPORT)
-end
-
-local function castExeta(target)
-  if huntMacro.isOff() then return false end
-  if target and target:isPlayer() then return false end
-  if countMonsters(7) < 1 then return false end
-  return trySpell(exetaWords(), GROUP_SUPPORT)
+  if not trySpell("utito tempo", GROUP_SUPPORT) then return false end
+  utitoAt = now
+  return true
 end
 
 local function castSingleTarget(target, justTurned)
@@ -366,20 +372,38 @@ else
   addSeparator()
 end
 
-addTextEdit("ekExeta", storage.ekExeta, function(widget, text)
-  storage.ekExeta = text
+if UI and UI.Label then UI.Label("Exeta") end
+exetaEdit = addTextEdit("ekExetaEdit", storage.ekExeta, function(widget, text)
+  storage.ekExeta = editedText(widget, text)
 end)
-addTextEdit("ekAntiPara", storage.ekAntiPara, function(widget, text)
-  storage.ekAntiPara = text
+
+if UI and UI.Label then UI.Label("Anti paralyze") end
+paraEdit = addTextEdit("ekAntiParaEdit", storage.ekAntiPara, function(widget, text)
+  storage.ekAntiPara = editedText(widget, text)
 end)
 
 huntMacro = macro(100, "EK Hunt", function() end)
 pvpMacro = macro(100, "EK PVP", function() end)
 safeMacro = macro(100000, "EK Safe AoE", function() end)
+exetaMacro = macro(100, "Exeta", function() end)
+paraMacro = macro(100, "Anti Paralyze", function() end)
 
-macro(100, "Anti Paralyze", function()
+macro(100, function()
   if isInPz() then return end
-  castPara()
+
+  if paraMacro.isOn() and isParalyzed() and castSlot(paraEdit, "ekAntiPara") then
+    return
+  end
+
+  if (huntMacro.isOn() or pvpMacro.isOn()) and castBloodRage() then
+    return
+  end
+
+  if exetaMacro.isOff() then return end
+  local target = g_game.isAttacking() and g_game.getAttackingCreature() or nil
+  if target and target:isPlayer() then return end
+  if countMonsters(7) < 1 then return end
+  castSlot(exetaEdit, "ekExeta")
 end)
 
 macro(200, "Supreme HP", function()
@@ -417,10 +441,7 @@ macro(100, function()
     justTurned = faceCreature(target)
   end
 
-  if castPara() then return end
-  if castBloodRage() then return end
-  if target and castAttack(target, justTurned) then return end
-  castExeta(target)
+  if target then castAttack(target, justTurned) end
 end)
 
 local pvpIcon = addIcon("pvp", {item = 32616, text = "PVP"}, pvpMacro)
