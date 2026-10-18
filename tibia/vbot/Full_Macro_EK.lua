@@ -11,6 +11,7 @@ local Config = {
   minExori = 1,        -- exori
   minSweep = 1,        -- exori min
   exetaGap = 4000,     -- entre um challenge e outro
+  trashDelay = 600,    -- um item por vez; 200ms empurra os 8 sqm e trava
   talkGap = 200,
   equipGap = 400
 }
@@ -44,6 +45,7 @@ local lastTalk = 0
 local lastPotion = 0
 local lastAttack = 0
 local lastExeta = 0
+local lastMove = 0
 local GROUP_ATTACK = 1
 local GROUP_HEAL = 2
 local GROUP_SUPPORT = 3
@@ -352,6 +354,74 @@ local function isCorpseContainer(container)
   return false
 end
 
+local trashOffsets = {
+  {0, -1}, {1, -1}, {1, 0}, {1, 1},
+  {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}
+}
+local trashStep = 1
+
+local function pullTrash()
+  if now - lastMove < Config.trashDelay then return false end
+  local origin = pos()
+  if not origin then return false end
+  local feet = player:getPosition()
+  if not feet then return false end
+
+  for n = 0, #trashOffsets - 1 do
+    local index = ((trashStep - 1 + n) % #trashOffsets) + 1
+    local offset = trashOffsets[index]
+    local position = {x = origin.x + offset[1], y = origin.y + offset[2], z = origin.z}
+    local tile = g_map.getTile(position)
+    if tile then
+      local thing = tile.getTopMoveThing and tile:getTopMoveThing() or nil
+      if not thing and tile.getTopThing then
+        thing = tile:getTopThing()
+      end
+      local pickup = thing and thing.isItem and thing:isItem()
+      if pickup and thing.isPickupable and not thing:isPickupable() then
+        pickup = false
+      end
+      if pickup and thing.isNotMoveable and thing:isNotMoveable() then
+        pickup = false
+      end
+      if pickup then
+        local count = thing:getCount()
+        if not count or count < 1 then count = 1 end
+        g_game.move(thing, feet, count)
+        lastMove = now
+        trashStep = index + 1
+        return true
+      end
+    end
+  end
+  return false
+end
+
+if storage.gpPushEnabled == nil then
+  storage.gpPushEnabled = false
+end
+
+local trashParent = parent or panel
+if not trashParent and type(setDefaultTab) == "function" then
+  setDefaultTab("HP")
+  trashParent = panel
+end
+
+if type(addSwitch) == "function" then
+  local trashSwitch = addSwitch("gpPushEnabled", "Puxar Trash", function(widget)
+    storage.gpPushEnabled = not widget:isOn()
+    widget:setOn(storage.gpPushEnabled)
+  end, trashParent)
+  if trashSwitch then
+    trashSwitch:setOn(storage.gpPushEnabled and true or false)
+  end
+end
+
+macro(Config.trashDelay, function()
+  if not storage.gpPushEnabled then return end
+  pullTrash()
+end)
+
 macro(1000, "Stack items", function()
   local containers = g_game.getContainers()
   local groups = {}
@@ -392,8 +462,9 @@ macro(1000, "Stack items", function()
       local space = 100 - dest:getCount()
       local moving = math.min(space, source:getCount())
       local destPos = dest:getPosition()
-      if moving > 0 and destPos and destPos.x == 65535 then
+      if moving > 0 and destPos and destPos.x == 65535 and now - lastMove >= 200 then
         g_game.move(source, destPos, moving)
+        lastMove = now
         return
       end
     end
