@@ -478,94 +478,96 @@ local function jewelleryEquip()
     setDefaultTab("HP")
   end
 
-  local ui = setupUI([[
-Panel
-  height: 108
-  margin-top: 2
-
-  BotItem
-    id: ammyId
-    anchors.left: parent.left
-    anchors.top: parent.top
-
-  BotItem
-    id: defaultAmmyId
-    anchors.left: parent.left
-    anchors.top: parent.top
-    margin-left: 36
-
-  BotLabel
-    id: ammyTitle
-    anchors.left: defaultAmmyId.right
-    anchors.right: parent.right
-    anchors.top: parent.top
-    text-align: center
-    text: Amuleto HP
-
-  SmallBotSwitch
-    id: ammySwitch
-    anchors.left: defaultAmmyId.right
-    anchors.right: parent.right
-    anchors.top: parent.top
-    margin-left: 3
-    margin-right: 3
-    margin-top: 18
-
-  HorizontalScrollBar
-    id: ammyScroll1
-    anchors.left: parent.left
-    anchors.top: defaultAmmyId.bottom
-    anchors.right: parent.right
-    margin-right: 2
-    margin-left: 2
-    margin-top: 5
-    minimum: 0
-    maximum: 100
-    step: 1
-
-  BotItem
-    id: ringId
-    anchors.left: parent.left
-    anchors.top: ammyScroll1.bottom
-    margin-top: 5
-
-  BotItem
-    id: defaultRingId
-    anchors.left: parent.left
-    anchors.top: ammyScroll1.bottom
-    margin-top: 5
-    margin-left: 36
-
-  BotLabel
-    id: ringTitle
-    anchors.left: defaultRingId.right
-    anchors.right: parent.right
-    anchors.top: ammyScroll1.top
-    text-align: center
-    text: Anel HP
-    margin-top: 20
-
-  SmallBotSwitch
-    id: ringSwitch
-    anchors.left: defaultRingId.right
-    anchors.right: parent.right
-    anchors.top: ammyScroll1.top
-    margin-left: 3
-    margin-right: 3
-    margin-top: 36
-
-  HorizontalScrollBar
-    id: ringScroll1
-    anchors.left: parent.left
-    anchors.top: defaultRingId.bottom
-    anchors.right: parent.right
-    margin-right: 2
-    margin-left: 2
-    margin-top: 5
-    minimum: 0
-    maximum: 100
-    step: 1
-]], parent or panel)
+  -- Texto comum de proposito. Colchete duplo fecha o editor do vBot e o parentese seguinte vira erro.
+  local otui = table.concat({
+    "Panel",
+    "  height: 108",
+    "  margin-top: 2",
+    "",
+    "  BotItem",
+    "    id: ammyId",
+    "    anchors.left: parent.left",
+    "    anchors.top: parent.top",
+    "",
+    "  BotItem",
+    "    id: defaultAmmyId",
+    "    anchors.left: parent.left",
+    "    anchors.top: parent.top",
+    "    margin-left: 36",
+    "",
+    "  BotLabel",
+    "    id: ammyTitle",
+    "    anchors.left: defaultAmmyId.right",
+    "    anchors.right: parent.right",
+    "    anchors.top: parent.top",
+    "    text-align: center",
+    "    text: Amuleto HP",
+    "",
+    "  SmallBotSwitch",
+    "    id: ammySwitch",
+    "    anchors.left: defaultAmmyId.right",
+    "    anchors.right: parent.right",
+    "    anchors.top: parent.top",
+    "    margin-left: 3",
+    "    margin-right: 3",
+    "    margin-top: 18",
+    "",
+    "  HorizontalScrollBar",
+    "    id: ammyScroll1",
+    "    anchors.left: parent.left",
+    "    anchors.top: defaultAmmyId.bottom",
+    "    anchors.right: parent.right",
+    "    margin-right: 2",
+    "    margin-left: 2",
+    "    margin-top: 5",
+    "    minimum: 0",
+    "    maximum: 100",
+    "    step: 1",
+    "",
+    "  BotItem",
+    "    id: ringId",
+    "    anchors.left: parent.left",
+    "    anchors.top: ammyScroll1.bottom",
+    "    margin-top: 5",
+    "",
+    "  BotItem",
+    "    id: defaultRingId",
+    "    anchors.left: parent.left",
+    "    anchors.top: ammyScroll1.bottom",
+    "    margin-top: 5",
+    "    margin-left: 36",
+    "",
+    "  BotLabel",
+    "    id: ringTitle",
+    "    anchors.left: defaultRingId.right",
+    "    anchors.right: parent.right",
+    "    anchors.top: ammyScroll1.top",
+    "    text-align: center",
+    "    text: Anel HP",
+    "    margin-top: 20",
+    "",
+    "  SmallBotSwitch",
+    "    id: ringSwitch",
+    "    anchors.left: defaultRingId.right",
+    "    anchors.right: parent.right",
+    "    anchors.top: ammyScroll1.top",
+    "    margin-left: 3",
+    "    margin-right: 3",
+    "    margin-top: 36",
+    "",
+    "  HorizontalScrollBar",
+    "    id: ringScroll1",
+    "    anchors.left: parent.left",
+    "    anchors.top: defaultRingId.bottom",
+    "    anchors.right: parent.right",
+    "    margin-right: 2",
+    "    margin-left: 2",
+    "    margin-top: 5",
+    "    minimum: 0",
+    "    maximum: 100",
+    "    step: 1"
+  }, "\n")
+  local ui = setupUI(otui, parent or panel)
 
   if not ui then
     if type(warn) == "function" then
