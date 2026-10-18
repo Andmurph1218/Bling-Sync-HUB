@@ -6,7 +6,6 @@
 -- canCast/getSpellData usam o valor do client.
 --
 -- Aurera (wiki, balanceamento de vocacoes):
---   utito tempo      level 20   mana 20    stance. Nao recastar com o icone strengthened.
 --   exori            level 35   mana 125   cd 4s   area 1
 --   exori mas        level 33   mana 200   cd 8s   area grande
 --   exori min        level 70   mana 200   cd 6s   3 sqm a frente
@@ -44,7 +43,6 @@ local Config = {
 }
 
 local Spell = {
-  ["utito tempo"]     = {mana = 20,  level = 20,  cd = 2000},
   ["exori"]           = {mana = 125, level = 35,  cd = 4000},
   ["exori mas"]       = {mana = 200, level = 33,  cd = 8000},
   ["exori min"]       = {mana = 200, level = 70,  cd = 6000},
@@ -78,7 +76,6 @@ end
 
 local exetaEdit
 local paraEdit
-local utitoAt = 0
 
 local lastTalk = 0
 local GROUP_ATTACK = 1
@@ -249,12 +246,6 @@ local function monstersInFront()
   return total
 end
 
--- Icone strengthened cobre Blood Rage e Protector. Recastar utito desliga a stance.
-local function bloodRageActive()
-  if type(hasPartyBuff) == "function" and hasPartyBuff() then return true end
-  return false
-end
-
 local function editedText(widget, text)
   if type(text) == "string" then return text end
   if type(widget) == "string" then return widget end
@@ -288,15 +279,6 @@ end
 local function trySpell(words, groupId)
   if not canTalk() or groupBusy(groupId) or not ready(words) then return false end
   speak(words)
-  return true
-end
-
-local function castBloodRage()
-  if bloodRageActive() then return false end
-  if now - utitoAt < 10000 then return false end
-  if not g_game.isAttacking() and countMonsters(5) < 1 then return false end
-  if not trySpell("utito tempo", GROUP_SUPPORT) then return false end
-  utitoAt = now
   return true
 end
 
@@ -392,10 +374,6 @@ macro(100, function()
   if isInPz() then return end
 
   if paraMacro.isOn() and isParalyzed() and castSlot(paraEdit, "ekAntiPara") then
-    return
-  end
-
-  if (huntMacro.isOn() or pvpMacro.isOn()) and castBloodRage() then
     return
   end
 
