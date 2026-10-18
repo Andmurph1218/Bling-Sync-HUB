@@ -13,7 +13,8 @@ O arquivo antigo juntava varios macros soltos. Dois deles castavam ao mesmo temp
 | EK Safe AoE | Nao solta area se tiver jogador fora da party no alcance. O alvo atacado nao entra nessa conta |
 | Exeta | `exeta amp res` com monstro em 7 sqm. Nao solta em player |
 | Anti Paralyze | So o botao. Ligado e paralizado, solta `utani hur` |
-| Supreme HP | Supreme Health Potion `23375` em 80% de HP, exhaust de 1s |
+| Supreme HP | Supreme Health Potion `23375` em 80% de HP |
+| Mana Potion | Great Mana Potion `238` em 50% de mana. Divide o exhaust de 1s com a de vida; vida tem prioridade |
 | EK Heal | `exura gran ico` em 45%, `exura med ico` a partir do level 300, senao `exura ico` |
 | Amuleto / anel | SSA `3081` em 75% e Might Ring `3048` em 70%. O slot da direita e o item padrao |
 

@@ -1,7 +1,9 @@
 local Config = {
   potId = 23375,       -- supreme health potion
   potHp = 80,
-  potDelay = 1000,
+  manaId = 238,        -- great mana potion; no Aurera, todas as vocacoes
+  manaMp = 50,
+  potDelay = 1000,     -- exhaust compartilhado das duas pocoes
   healHp = 70,         -- exura med ico, ou exura ico abaixo do level 300
   granHealHp = 45,     -- exura gran ico
   minGran = 2,         -- exori gran
@@ -38,6 +40,7 @@ local Familiars = {
 }
 
 local lastTalk = 0
+local lastPotion = 0
 local GROUP_ATTACK = 1
 local GROUP_HEAL = 2
 local GROUP_SUPPORT = 3
@@ -299,11 +302,22 @@ macro(100, function()
   trySpell("exeta amp res", GROUP_SUPPORT)
 end)
 
+local function usePotion(itemId)
+  if now - lastPotion < Config.potDelay then return false end
+  if not findItem(itemId) then return false end
+  usewith(itemId, player)
+  lastPotion = now
+  return true
+end
+
 macro(200, "Supreme HP", function()
   if hppercent() > Config.potHp then return end
-  if not findItem(Config.potId) then return end
-  usewith(Config.potId, player)
-  delay(Config.potDelay)
+  usePotion(Config.potId)
+end)
+
+macro(200, "Mana Potion", function()
+  if manapercent() > Config.manaMp then return end
+  usePotion(Config.manaId)
 end)
 
 macro(100, "EK Heal", function()
