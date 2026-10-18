@@ -1,33 +1,3 @@
--- Full Macro EK
--- vBot 4.8 / OTClient. Cole este arquivo no editor de scripts do vBot.
--- Feito para Elite Knight no Aurera Global, depois do balanceamento de vocacoes.
---
--- Mana e level abaixo sao o fallback. Se o client tiver a spell em SpellInfo,
--- canCast/getSpellData usam o valor do client.
---
--- Aurera (wiki, balanceamento de vocacoes):
---   exori            level 35   mana 125   cd 4s   area 1
---   exori mas        level 33   mana 200   cd 8s   area grande
---   exori min        level 70   mana 200   cd 6s   3 sqm a frente
---   exori gran       level 90   mana 360   cd 6s   area 1
---   exori gran ico   level 110  mana 300   cd 30s  alvo cardinal na frente
---   exori ico        level 16   mana 30    cd 6s   alvo na frente
---   exeta res        level 20   mana 40    cd 2s
---   exeta amp res    level 150  mana 80    cd 2s   alcance 7
---   exura ico        level 8    mana 40    grupo de cura 2s
---   exura gran ico   level 80   mana 300   cd individual 2 min
---   exura med ico    level 300  mana 135   grupo de cura 2s
---   utani hur        level 14   mana 60
---
--- Grupos do OTClient: 1 attack, 2 healing, 3 support.
--- Desligue o AttackBot se ele tambem estiver soltando exori. Os dois juntos duplicam a magia.
---
--- Fora deste script, de proposito:
---   follow em "Player2": nome fixo, e o CaveBot ja segue o caminho.
---   "exeta mas res": essa spell nao existe.
---   Auto SSA / Auto Might separados: hppercent() <= 100 equipava sempre.
---     O painel de joias abaixo faz o mesmo trabalho, com limiar real.
-
 local Config = {
   potId = 23375,       -- supreme health potion
   potHp = 80,
@@ -67,25 +37,10 @@ local Familiars = {
   ["monk familiar"] = true
 }
 
-if type(storage.ekExeta) ~= "string" then
-  storage.ekExeta = "exeta amp res"
-end
-if type(storage.ekAntiPara) ~= "string" then
-  storage.ekAntiPara = "utani hur"
-end
-
-local exetaEdit
-local paraEdit
-
 local lastTalk = 0
 local GROUP_ATTACK = 1
 local GROUP_HEAL = 2
 local GROUP_SUPPORT = 3
-
-local function trim(text)
-  if type(text) ~= "string" then return "" end
-  return text:lower():gsub("^%s+", ""):gsub("%s+$", "")
-end
 
 local function spellFallback(words)
   return Spell[words] or {mana = 0, level = 0, cd = 2000}
@@ -246,36 +201,6 @@ local function monstersInFront()
   return total
 end
 
-local function editedText(widget, text)
-  if type(text) == "string" then return text end
-  if type(widget) == "string" then return widget end
-  if widget and widget.getText then return widget:getText() or "" end
-  return ""
-end
-
--- Le o que esta escrito no slot. Nao troca a spell por outra.
-local function slotWords(widget, key)
-  if widget and widget.getText then
-    local text = widget:getText()
-    if type(text) == "string" then
-      storage[key] = text
-      return trim(text)
-    end
-  end
-  if type(storage[key]) == "string" then return trim(storage[key]) end
-  return ""
-end
-
-local function castSlot(widget, key)
-  local words = slotWords(widget, key)
-  if words == "" then return false end
-  if not canTalk() or groupBusy(GROUP_SUPPORT) or onCooldown(words) then return false end
-  local info = clientSpell(words)
-  if info and mana() < info.mana then return false end
-  speak(words)
-  return true
-end
-
 local function trySpell(words, groupId)
   if not canTalk() or groupBusy(groupId) or not ready(words) then return false end
   speak(words)
@@ -354,16 +279,6 @@ else
   addSeparator()
 end
 
-if UI and UI.Label then UI.Label("Exeta") end
-exetaEdit = addTextEdit("ekExetaEdit", storage.ekExeta, function(widget, text)
-  storage.ekExeta = editedText(widget, text)
-end)
-
-if UI and UI.Label then UI.Label("Anti paralyze") end
-paraEdit = addTextEdit("ekAntiParaEdit", storage.ekAntiPara, function(widget, text)
-  storage.ekAntiPara = editedText(widget, text)
-end)
-
 huntMacro = macro(100, "EK Hunt", function() end)
 pvpMacro = macro(100, "EK PVP", function() end)
 safeMacro = macro(100000, "EK Safe AoE", function() end)
@@ -373,7 +288,7 @@ paraMacro = macro(100, "Anti Paralyze", function() end)
 macro(100, function()
   if isInPz() then return end
 
-  if paraMacro.isOn() and isParalyzed() and castSlot(paraEdit, "ekAntiPara") then
+  if paraMacro.isOn() and isParalyzed() and trySpell("utani hur", GROUP_SUPPORT) then
     return
   end
 
@@ -381,7 +296,7 @@ macro(100, function()
   local target = g_game.isAttacking() and g_game.getAttackingCreature() or nil
   if target and target:isPlayer() then return end
   if countMonsters(7) < 1 then return end
-  castSlot(exetaEdit, "ekExeta")
+  trySpell("exeta amp res", GROUP_SUPPORT)
 end)
 
 macro(200, "Supreme HP", function()

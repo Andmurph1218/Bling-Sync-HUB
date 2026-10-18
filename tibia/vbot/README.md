@@ -11,7 +11,8 @@ O arquivo antigo juntava varios macros soltos. Dois deles castavam ao mesmo temp
 | EK Hunt | Rotacao de box: `exori gran ico`, `exori gran`, `exori min`, `exori mas`, `exori` |
 | EK PVP | Mesmo alvo corpo a corpo, sem esperar contagem de monstro. Em player, prioriza single target |
 | EK Safe AoE | Nao solta area se tiver jogador fora da party no alcance. O alvo atacado nao entra nessa conta |
-| Anti Paralyze | `utani hur` enquanto estiver paralizado. O texto e editavel |
+| Exeta | `exeta amp res` com monstro em 7 sqm. Nao solta em player |
+| Anti Paralyze | So o botao. Ligado e paralizado, solta `utani hur` |
 | Supreme HP | Supreme Health Potion `23375` em 80% de HP, exhaust de 1s |
 | EK Heal | `exura gran ico` em 45%, `exura med ico` a partir do level 300, senao `exura ico` |
 | Amuleto / anel | SSA `3081` em 75% e Might Ring `3048` em 70%. O slot da direita e o item padrao |
@@ -32,7 +33,7 @@ Os dois icones continuam na tela: HUNT e PVP. Os dois podem ficar ligados. Monst
 
 - Attack, healing e support respeitam o grupo de cooldown do client (`1`, `2`, `3`). O script antigo dava `say` em todas as spells a cada 500 ms e tomava exhaust.
 - `exori gran ico` e `exori min` so saem se o alvo esta no sqm da frente. Em diagonal a spell nao acerta. Se o personagem virou neste ciclo, a spell direcional espera o proximo.
-- Os campos Exeta e Anti paralyze castam o texto escrito neles. Nao ha troca automatica para `exeta res`.
+- Exeta e Anti Paralyze sao so os botoes. Nao ha campo de texto e nao ha troca para `exeta res`.
 - O painel de joias lia `ringEnabled`, mas gravava `ringSwitch`. O switch nascia desligado. A comparacao de HP estava com `and`/`or` invertido na precedencia: sem amuleto, equipava o de emergencia mesmo com HP cheio. No editor do vBot `parent` vem vazio; a aba corrente e `panel`.
 - Item padrao `0` nao e equipado. Arraste o anel de skill e o amuleto de hunt para o slot da direita. O da esquerda e o de emergencia (Might e SSA).
 - `10476` (Lucky Clover em alguns OT) e `34080` (nao e anel de Tibia) deixaram de ser padrao. Se o storage antigo ja tiver esses ids, eles sao mantidos.
