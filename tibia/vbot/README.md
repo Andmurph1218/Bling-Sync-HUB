@@ -15,6 +15,7 @@ O arquivo antigo juntava varios macros soltos. Dois deles castavam ao mesmo temp
 | Anti Paralyze | So o botao. Ligado e paralizado, solta `utani hur` |
 | Supreme HP | Supreme Health Potion `23375` em 80% de HP |
 | Mana Potion | Great Mana Potion `238` em 50% de mana. Divide o exhaust de 1s com a de vida; vida tem prioridade |
+| Stack items | Junta pilhas iguais nas backpacks abertas, uma por segundo. Ignora corpo de monstro |
 | EK Heal | `exura gran ico` em 45%, `exura med ico` a partir do level 300, senao `exura ico` |
 | Amuleto / anel | SSA `3081` em 75% e Might Ring `3048` em 70%. O slot da direita e o item padrao |
 

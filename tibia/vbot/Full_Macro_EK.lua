@@ -340,6 +340,66 @@ macro(200, "Mana Potion", function()
   usePotion(Config.manaId)
 end)
 
+local function isCorpseContainer(container)
+  if container.lootContainer then return true end
+  if not container.getName then return false end
+  local name = container:getName()
+  if type(name) ~= "string" then return false end
+  name = name:lower()
+  if name:find("dead ", 1, true) == 1 then return true end
+  if name:find("slain ", 1, true) == 1 then return true end
+  if name:find("remains of", 1, true) == 1 then return true end
+  return false
+end
+
+macro(1000, "Stack items", function()
+  local containers = g_game.getContainers()
+  local groups = {}
+  for _, container in pairs(containers) do
+    if container and not isCorpseContainer(container) and (not container.isClosed or not container:isClosed()) then
+      local total = container:getItemsCount()
+      for slot = 0, total - 1 do
+        local item = container:getItem(slot)
+        if item and item:isStackable() then
+          local count = item:getCount()
+          if count > 0 and count < 100 then
+            local id = item:getId()
+            local pile = groups[id]
+            if not pile then
+              pile = {}
+              groups[id] = pile
+            end
+            pile[#pile + 1] = item
+          end
+        end
+      end
+    end
+  end
+
+  for _, pile in pairs(groups) do
+    if #pile >= 2 then
+      local dest = pile[1]
+      local source = pile[2]
+      for n = 2, #pile do
+        local item = pile[n]
+        if item:getCount() > dest:getCount() then
+          source = dest
+          dest = item
+        elseif item:getCount() < source:getCount() then
+          source = item
+        end
+      end
+      local space = 100 - dest:getCount()
+      local moving = math.min(space, source:getCount())
+      local destPos = dest:getPosition()
+      if moving > 0 and destPos and destPos.x == 65535 then
+        g_game.move(source, destPos, moving)
+        return
+      end
+    end
+  end
+end)
+
 macro(100, "EK Heal", function()
   if isInPz() or not canTalk() or groupBusy(GROUP_HEAL) then return end
   if hppercent() <= Config.granHealHp and ready("exura gran ico") then
