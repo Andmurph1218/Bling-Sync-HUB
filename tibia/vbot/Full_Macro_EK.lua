@@ -47,7 +47,8 @@ local Familiars = {
 local lastTalk = 0
 local lastPotion = 0
 local lastAttack = 0
-local lastExeta = 0
+local lastExetaRes = 0
+local lastExetaAmp = 0
 local lastMove = 0
 local GROUP_ATTACK = 1
 local GROUP_HEAL = 2
@@ -282,26 +283,33 @@ local function castAttack(target, justTurned)
   return false
 end
 
--- exeta res segura o box. exeta amp res puxa quem esta mais longe.
--- Na segunda metade dos 2s do grupo de ataque a fala fica livre para o proximo exori.
-local function castExeta(target)
-  if not exetaMacro or exetaMacro.isOff() or isInPz() then return false end
-  if now - lastExeta < Config.exetaGap then return false end
+-- Dois botoes separados. Na segunda metade dos 2s do ataque a fala fica livre para o exori.
+local function exetaWindowOpen()
+  if isInPz() then return false end
+  if lastAttack == 0 then return true end
+  local since = now - lastAttack
+  return not (since >= 1000 and since < 2000)
+end
+
+local function castExetaRes(target)
+  if not exetaResMacro or exetaResMacro.isOff() then return false end
+  if not exetaWindowOpen() then return false end
+  if now - lastExetaRes < Config.exetaGap then return false end
   if target and target:isPlayer() then return false end
-  if lastAttack ~= 0 then
-    local since = now - lastAttack
-    if since >= 1000 and since < 2000 then return false end
-  end
-  local words
-  if countMonsters(1) > 2 then
-    words = "exeta res"
-  elseif countMonsters(7) >= 1 then
-    words = "exeta amp res"
-  else
-    return false
-  end
-  if not trySpell(words, GROUP_SUPPORT) then return false end
-  lastExeta = now
+  if countMonsters(1) <= 2 then return false end
+  if not trySpell("exeta res", GROUP_SUPPORT) then return false end
+  lastExetaRes = now
+  return true
+end
+
+local function castExetaAmp(target)
+  if not exetaAmpMacro or exetaAmpMacro.isOff() then return false end
+  if not exetaWindowOpen() then return false end
+  if now - lastExetaAmp < Config.exetaGap then return false end
+  if target and target:isPlayer() then return false end
+  if countMonsters(7) < 1 then return false end
+  if not trySpell("exeta amp res", GROUP_SUPPORT) then return false end
+  lastExetaAmp = now
   return true
 end
 
@@ -316,7 +324,8 @@ end
 huntMacro = macro(100, "EK Hunt", function() end)
 pvpMacro = macro(100, "EK PVP", function() end)
 safeMacro = macro(100000, "EK Safe AoE", function() end)
-exetaMacro = macro(100, "Exeta", function() end)
+exetaResMacro = macro(100, "Exeta Res", function() end)
+exetaAmpMacro = macro(100, "Exeta Amp", function() end)
 paraMacro = macro(100, "Anti Paralyze", function() end)
 
 macro(100, function()
@@ -537,7 +546,8 @@ end)
 macro(100, function()
   if isInPz() then return end
   local hunting = huntMacro.isOn() or pvpMacro.isOn()
-  if not hunting and exetaMacro.isOff() then return end
+  local wantExeta = exetaResMacro.isOn() or exetaAmpMacro.isOn()
+  if not hunting and not wantExeta then return end
 
   local target = g_game.isAttacking() and g_game.getAttackingCreature() or nil
   if target and not target:getPosition() then target = nil end
@@ -551,7 +561,8 @@ macro(100, function()
     lastAttack = now
     return
   end
-  castExeta(target)
+  if castExetaRes(target) then return end
+  castExetaAmp(target)
 end)
 
 local pvpIcon = addIcon("pvp", {item = 32616, text = "PVP"}, pvpMacro)
