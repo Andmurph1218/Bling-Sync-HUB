@@ -11,7 +11,7 @@ O arquivo antigo juntava varios macros soltos. Dois deles castavam ao mesmo temp
 | EK Hunt | Rotacao de box: `exori gran ico`, `exori gran`, `exori min`, `exori mas`, `exori` |
 | EK PVP | Mesmo alvo corpo a corpo, sem esperar contagem de monstro. Em player, prioriza single target |
 | EK Safe AoE | Nao solta area se tiver jogador fora da party no alcance. O alvo atacado nao entra nessa conta |
-| Exeta | `exeta amp res` com monstro em 7 sqm. Nao solta em player |
+| Exeta | `exeta res` com mais de 2 monstros a 1 sqm. Senao, `exeta amp res` com monstro em ate 7 sqm. Nao solta em player. Intervalo de 4s, na folga do ataque |
 | Anti Paralyze | So o botao. Ligado e paralizado, solta `utani hur` |
 | Supreme HP | Supreme Health Potion `23375` em 80% de HP |
 | Mana Potion | Great Mana Potion `238` em 50% de mana. Divide o exhaust de 1s com a de vida; vida tem prioridade |
@@ -34,7 +34,7 @@ Os dois icones continuam na tela: HUNT e PVP. Os dois podem ficar ligados. Monst
 
 - Attack, healing e support respeitam o grupo de cooldown do client (`1`, `2`, `3`). O script antigo dava `say` em todas as spells a cada 500 ms e tomava exhaust.
 - `exori gran ico` e `exori min` so saem se o alvo esta no sqm da frente. Em diagonal a spell nao acerta. Se o personagem virou neste ciclo, a spell direcional espera o proximo.
-- Exeta e Anti Paralyze sao so os botoes. Nao ha campo de texto e nao ha troca para `exeta res`.
+- Exeta e Anti Paralyze sao so os botoes. Com mais de 2 monstros colados sai `exeta res`; com monstro ate 7 sqm sai `exeta amp res`. O challenge espera 4s e nao fala na segunda metade do cooldown de ataque, para o proximo exori sair na hora.
 - O painel de joias lia `ringEnabled`, mas gravava `ringSwitch`. O switch nascia desligado. A comparacao de HP estava com `and`/`or` invertido na precedencia: sem amuleto, equipava o de emergencia mesmo com HP cheio. No editor do vBot `parent` vem vazio; a aba corrente e `panel`.
 - Item padrao `0` nao e equipado. Arraste o anel de skill e o amuleto de hunt para o slot da direita. O da esquerda e o de emergencia (Might e SSA).
 - `10476` (Lucky Clover em alguns OT) e `34080` (nao e anel de Tibia) deixaram de ser padrao. Se o storage antigo ja tiver esses ids, eles sao mantidos.

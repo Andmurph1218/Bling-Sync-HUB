@@ -10,6 +10,7 @@ local Config = {
   minMas = 3,          -- exori mas
   minExori = 1,        -- exori
   minSweep = 1,        -- exori min
+  exetaGap = 4000,     -- entre um challenge e outro
   talkGap = 200,
   equipGap = 400
 }
@@ -41,6 +42,8 @@ local Familiars = {
 
 local lastTalk = 0
 local lastPotion = 0
+local lastAttack = 0
+local lastExeta = 0
 local GROUP_ATTACK = 1
 local GROUP_HEAL = 2
 local GROUP_SUPPORT = 3
@@ -274,6 +277,29 @@ local function castAttack(target, justTurned)
   return false
 end
 
+-- exeta res segura o box. exeta amp res puxa quem esta mais longe.
+-- Na segunda metade dos 2s do grupo de ataque a fala fica livre para o proximo exori.
+local function castExeta(target)
+  if not exetaMacro or exetaMacro.isOff() or isInPz() then return false end
+  if now - lastExeta < Config.exetaGap then return false end
+  if target and target:isPlayer() then return false end
+  if lastAttack ~= 0 then
+    local since = now - lastAttack
+    if since >= 1000 and since < 2000 then return false end
+  end
+  local words
+  if countMonsters(1) > 2 then
+    words = "exeta res"
+  elseif countMonsters(7) >= 1 then
+    words = "exeta amp res"
+  else
+    return false
+  end
+  if not trySpell(words, GROUP_SUPPORT) then return false end
+  lastExeta = now
+  return true
+end
+
 if UI and UI.Separator then
   UI.Separator()
   UI.Label("EK Aurera")
@@ -291,15 +317,9 @@ paraMacro = macro(100, "Anti Paralyze", function() end)
 macro(100, function()
   if isInPz() then return end
 
-  if paraMacro.isOn() and isParalyzed() and trySpell("utani hur", GROUP_SUPPORT) then
-    return
+  if paraMacro.isOn() and isParalyzed() then
+    trySpell("utani hur", GROUP_SUPPORT)
   end
-
-  if exetaMacro.isOff() then return end
-  local target = g_game.isAttacking() and g_game.getAttackingCreature() or nil
-  if target and target:isPlayer() then return end
-  if countMonsters(7) < 1 then return end
-  trySpell("exeta amp res", GROUP_SUPPORT)
 end)
 
 local function usePotion(itemId)
@@ -337,18 +357,23 @@ macro(100, "EK Heal", function()
 end)
 
 macro(100, function()
-  if huntMacro.isOff() and pvpMacro.isOff() then return end
   if isInPz() then return end
+  local hunting = huntMacro.isOn() or pvpMacro.isOn()
+  if not hunting and exetaMacro.isOff() then return end
 
   local target = g_game.isAttacking() and g_game.getAttackingCreature() or nil
   if target and not target:getPosition() then target = nil end
 
   local justTurned = false
-  if target then
+  if hunting and target then
     justTurned = faceCreature(target)
   end
 
-  if target then castAttack(target, justTurned) end
+  if hunting and target and castAttack(target, justTurned) then
+    lastAttack = now
+    return
+  end
+  castExeta(target)
 end)
 
 local pvpIcon = addIcon("pvp", {item = 32616, text = "PVP"}, pvpMacro)
