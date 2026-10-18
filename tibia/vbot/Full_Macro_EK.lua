@@ -452,16 +452,9 @@ end
 
 local function jewelleryEquip()
   local panelName = "jewelleryEquipper"
-  local uiParent = parent
-  if not uiParent and type(setDefaultTab) == "function" then
-    setDefaultTab("Main")
-    uiParent = parent
-  end
-  if not uiParent then
-    if type(warn) == "function" then
-      warn("[EK] Sem painel para as joias. Cole o script numa aba do vBot.")
-    end
-    return
+  -- setDefaultTab grava a aba em `panel`. O global `parent` fica nil no editor do vBot.
+  if not parent and not panel and type(setDefaultTab) == "function" then
+    setDefaultTab("HP")
   end
 
   local ui = setupUI([[
@@ -551,7 +544,14 @@ Panel
     minimum: 0
     maximum: 100
     step: 1
-]], uiParent)
+]], parent or panel)
+
+  if not ui then
+    if type(warn) == "function" then
+      warn("[EK] Nao consegui criar o painel de joias nesta aba.")
+    end
+    return
+  end
 
   ui:setId(panelName)
 
