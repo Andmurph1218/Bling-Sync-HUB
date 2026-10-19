@@ -10,6 +10,7 @@ local Config = {
   minMas = 3,          -- exori mas
   minExori = 2,        -- exori
   minSweep = 3,        -- exori min
+  minScu = 2,          -- exori scu (Shield Slam, adjacentes)
   minExetaRes = 2,     -- exeta res com monstro a 1 sqm
   exetaGap = 4000,     -- entre um challenge e outro
   trashDelay = 600,    -- um item por vez; 200ms empurra os 8 sqm e trava
@@ -26,7 +27,9 @@ local Spell = {
   ["exori min"]       = {mana = 200, level = 70,  cd = 6000},
   ["exori gran"]      = {mana = 360, level = 90,  cd = 6000},
   ["exori gran ico"]  = {mana = 300, level = 110, cd = 30000},
+  ["exori scu"]       = {mana = 110, level = 30,  cd = 6000},
   ["exori ico"]       = {mana = 30,  level = 16,  cd = 6000},
+  ["exori ico scu"]   = {mana = 30,  level = 18,  cd = 4000},
   ["exeta res"]       = {mana = 40,  level = 20,  cd = 2000},
   ["exeta amp res"]   = {mana = 80,  level = 150, cd = 2000},
   ["exura ico"]       = {mana = 40,  level = 8,   cd = 2000},
@@ -211,6 +214,9 @@ local function castHunt(target, justTurned)
   local around = countMonsters(3)
   if castSingleTarget(target, justTurned) then return true end
   if adjacent >= Config.minGran and trySpell("exori gran", GROUP_ATTACK) then
+    return true
+  end
+  if adjacent >= Config.minScu and trySpell("exori scu", GROUP_ATTACK) then
     return true
   end
   if not justTurned and monstersInFront() >= Config.minSweep and trySpell("exori min", GROUP_ATTACK) then

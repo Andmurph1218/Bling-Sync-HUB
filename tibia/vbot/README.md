@@ -8,7 +8,7 @@ O arquivo antigo juntava varios macros soltos. Dois deles castavam ao mesmo temp
 
 | Grupo | Macro | Funcao |
 |---|---|---|
-| Combate | EK Hunt | Rotacao de box: `exori gran ico`, `exori gran`, `exori min`, `exori mas`, `exori` |
+| Combate | EK Hunt | Rotacao de box: `exori gran ico`, `exori gran`, `exori scu`, `exori min`, `exori mas`, `exori` |
 | Combate | Exeta Res | `exeta res` com pelo menos 2 monstros a 1 sqm. Sai antes do exori, intervalo de 4s |
 | Combate | Exeta Amp | `exeta amp res` com monstro em ate 7 sqm. Intervalo de 4s, na folga do ataque |
 | Combate | Anti Paralyze | Ligado e paralizado, solta `utani hur` |
