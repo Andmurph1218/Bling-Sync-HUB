@@ -47,7 +47,6 @@ local Familiars = {
 
 local lastTalk = 0
 local lastPotion = 0
-local lastAttack = 0
 local lastExetaRes = 0
 local lastExetaAmp = 0
 local lastMove = 0
@@ -391,9 +390,7 @@ macro(100, function()
 
   if not hunting or not target then return end
   local justTurned = faceCreature(target)
-  if castAttack(target, justTurned) then
-    lastAttack = now
-  end
+  castAttack(target, justTurned)
 end)
 
 section("Cura")
