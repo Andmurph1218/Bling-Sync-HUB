@@ -273,6 +273,110 @@ authRouter.put(
   }
 );
 
+const updateChannelStoreSchema = z.object({
+  bling_loja_id: z.string().min(1),
+  name: z.string().min(1),
+});
+
+authRouter.put(
+  '/admin/controls/stores/:platform',
+  requireRole('admin'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const platform = req.params.platform;
+      if (platform !== 'mercadolivre' && platform !== 'nuvemshop') {
+        res.status(400).json({ error: 'invalid_platform' });
+        return;
+      }
+
+      const parsed = updateChannelStoreSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'invalid_payload', details: parsed.error.flatten() });
+        return;
+      }
+
+      const adminUser = req.user!;
+
+      const updated = await withTransaction(async (client) => {
+        const existingRes = await client.query<{
+          bling_loja_id: string;
+          name: string;
+        }>(
+          `SELECT bling_loja_id, name
+           FROM channel_stores
+           WHERE platform = $1
+           FOR UPDATE`,
+          [platform]
+        );
+        const prev = existingRes.rows[0] ?? null;
+
+        await client.query(
+          `INSERT INTO channel_stores (platform, bling_loja_id, name)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (platform) DO UPDATE
+             SET bling_loja_id = EXCLUDED.bling_loja_id,
+                 name = EXCLUDED.name`,
+          [platform, parsed.data.bling_loja_id, parsed.data.name]
+        );
+
+        if (!prev || prev.bling_loja_id !== parsed.data.bling_loja_id) {
+          await client.query(
+            `INSERT INTO control_changes (target, target_key, field, old_value, new_value, origin, changed_by)
+             VALUES ('channel_store', $1, 'bling_loja_id', $2, $3, 'admin', $4)`,
+            [platform, prev ? prev.bling_loja_id : null, parsed.data.bling_loja_id, adminUser.id]
+          );
+        }
+
+        if (!prev || prev.name !== parsed.data.name) {
+          await client.query(
+            `INSERT INTO control_changes (target, target_key, field, old_value, new_value, origin, changed_by)
+             VALUES ('channel_store', $1, 'name', $2, $3, 'admin', $4)`,
+            [platform, prev ? prev.name : null, parsed.data.name, adminUser.id]
+          );
+        }
+
+        return {
+          platform,
+          bling_loja_id: parsed.data.bling_loja_id,
+          name: parsed.data.name,
+        };
+      });
+
+      res.status(200).json({ store: updated });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+authRouter.get(
+  '/admin/controls/summary',
+  requireRole('admin'),
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const summary = await withTransaction(async (client) => {
+        const [warehouses, stores, owners, enrichment, changes] = await Promise.all([
+          client.query(`SELECT bling_warehouse_id, name, role, include_in_push FROM stock_warehouses ORDER BY bling_warehouse_id ASC`),
+          client.query(`SELECT platform, bling_loja_id, name FROM channel_stores ORDER BY platform ASC`),
+          client.query(`SELECT platform, stock_price, content FROM channel_sync_owners ORDER BY platform ASC`),
+          client.query(`SELECT platform, mode, kill_switch, max_replaces_per_run FROM enrichment_controls ORDER BY platform ASC`),
+          client.query(`SELECT target, target_key, field, old_value, new_value, origin, changed_by, changed_at FROM control_changes ORDER BY changed_at DESC LIMIT 20`),
+        ]);
+        return {
+          warehouses: warehouses.rows,
+          stores: stores.rows,
+          syncOwners: owners.rows,
+          enrichmentControls: enrichment.rows,
+          recentControlChanges: changes.rows,
+        };
+      });
+      res.status(200).json(summary);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 authRouter.get(
   '/fiscal/capabilities',
   requireRole('fiscal_approver', 'admin'),

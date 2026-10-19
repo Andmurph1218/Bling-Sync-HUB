@@ -1,14 +1,24 @@
+import path from 'node:path';
+import dotenv from 'dotenv';
 import express, { Router, Request, Response, NextFunction } from 'express';
 import {
   ingestWebhookController,
+  processWebhookEventById,
   WebhookSource,
 } from '../engines/wig.js';
+import { logger } from '../lib/logger.js';
 
 export const webhooksRouter = Router();
 
 function getWebhookSecretForSource(source: WebhookSource): string {
+  dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
+  dotenv.config({ path: path.resolve(process.cwd(), '../../.env'), override: true });
   if (source === 'bling') {
-    return process.env.BLING_WEBHOOK_SECRET || 'bling_dev_webhook_secret';
+    return (
+      process.env.BLING_WEBHOOK_SECRET ||
+      process.env.BLING_CLIENT_SECRET ||
+      'bling_dev_webhook_secret'
+    );
   }
   if (source === 'mercadolivre') {
     return process.env.ML_WEBHOOK_SECRET || 'ml_dev_webhook_secret';
@@ -63,6 +73,18 @@ webhooksRouter.post(
         rawBody,
         signatureHeader,
         secret,
+        queueDispatcher: {
+          enqueue: async (webhookEventId: string) => {
+            setImmediate(() => {
+              processWebhookEventById(webhookEventId).catch((err) => {
+                logger.error('Falha ao processar webhook em background', {
+                  webhookEventId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
+            });
+          },
+        },
       });
 
       if (outcome.httpStatus === 401) {

@@ -5,6 +5,7 @@ import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.js';
 import { webhooksRouter } from './routes/webhooks.js';
 import { dashboardRouter } from './routes/dashboard.js';
+import { oauthRouter } from './routes/oauth.js';
 import { logger } from './lib/logger.js';
 
 export function createApp(): Express {
@@ -27,6 +28,7 @@ export function createApp(): Express {
   app.use(healthRouter);
   app.use(authRouter);
   app.use(dashboardRouter);
+  app.use(oauthRouter);
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     const message = err instanceof Error ? err.message : 'Erro interno do servidor';

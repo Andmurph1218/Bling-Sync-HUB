@@ -188,3 +188,79 @@ Conforme definido nas seções 1, 7, 9.2, 10.6 e 10.8 do Plano Mestre, **não en
 6. **Cálculo de Margem Líquida / Comissão de Canal**: a verificação de preço abaixo do custo (`price < cost_price`) compara diretamente preço de venda contra `cost_price` da variante para emitir alerta crítico, sem descontar tarifas variáveis de marketplace.
 7. **Motor de Validação ou Bloqueio por CEST / Origem Fiscal**: `cest`, `tax_origin` e `requires_cest` são espelhados do Bling para exibição na ficha do produto, mas não bloqueiam push nem disparam alertas de divergência contra o canal.
 8. **Escrita de Estoque Full (`meli_facility`) no Mercado Livre**: o saldo Full é gerido pelo Mercado Livre via inbound logístico; o hub jamais escreve quantidade (nem zero) em `meli_facility` e não explode kits (`formato = 'E'`) em anúncios de componentes.
+
+---
+
+## 5. Roteiro Prático Passo a Passo para Continuar a Implantação em Ambiente Real
+
+Siga esta sequência exata para colocar o **Bling Sync HUB** em operação com o seu catálogo real:
+
+### Passo 1 — Subir o PostgreSQL 16 e o Redis 7 (Docker) — **[CONCLUÍDO / ATIVO]**
+1. Containers `bling_sync_postgres` (`postgres:16-alpine`, porta `5432`) e `bling_sync_redis` (`redis:7-alpine`, porta `6379`) iniciados e em estado `healthy`:
+   ```bash
+   docker compose up -d
+   docker compose ps
+   ```
+
+### Passo 2 — Configurar o Arquivo `.env` e a Chave Criptográfica — **[CONCLUÍDO / ATIVO]**
+1. Arquivo `.env` criado a partir de `.env.example` (ignorado pelo Git em `.gitignore`).
+2. Chave criptográfica exclusiva de 32 bytes (64 caracteres hex) gerada via `node:crypto` e configurada em `OAUTH_ENCRYPTION_KEY` para criptografia `AES-256-GCM` de `oauth_tokens`.
+3. Quando tiver as credenciais de produção das contas, preencha no `.env`:
+   - `BLING_CLIENT_ID`, `BLING_CLIENT_SECRET`, `BLING_WEBHOOK_SECRET`
+   - `ML_CLIENT_ID`, `ML_CLIENT_SECRET`, `ML_WEBHOOK_SECRET`
+   - `NS_CLIENT_ID`, `NS_CLIENT_SECRET`, `NS_WEBHOOK_SECRET`
+
+### Passo 3 — Rodar o Bootstrap do Banco (Migrations 1–12 + 70 Partições + Usuários Iniciais) — **[CONCLUÍDO / ATIVO]**
+1. Comando `npm run bootstrap` executado com sucesso no PostgreSQL 16 (`bling_sync_postgres`):
+   ```bash
+   npm run bootstrap
+   ```
+2. Aplicadas todas as **12 migrations**, criadas as **70 partições mensais**, registradas as triggers de imutabilidade (`trg_control_changes_immutable`, `trg_ncm_audit_immutable`, `trg_*_archive_immutable`), populados os seeds iniciais e criados os **4 usuários iniciais**:
+   - **Admin**: `admin@blingsync.local` (papel `admin`)
+   - **Fiscal 1**: `fiscal1@blingsync.local` (papel `fiscal_approver` — 1ª revisão NCM / aprovação de EAN)
+   - **Fiscal 2**: `fiscal2@blingsync.local` (papel `fiscal_approver` — 2ª revisão obrigatória de NCM com nota de TIPI)
+   - **Operador**: `operador@blingsync.local` (papel `operator` — matching, conteúdo e push manual)
+
+### Passo 4 — Iniciar a API (`apps/api`) e o Dashboard (`apps/web`) — **[CONCLUÍDO / ATIVO]**
+1. API Express iniciada em segundo plano na porta `3001` (`npm run dev:api`).
+2. Healthcheck validado em `http://localhost:3001/health` retornando HTTP `200`:
+   ```json
+   {"status":"ok","service":"@bling-sync/api","dependencies":{"postgres":{"ok":true},"redis":{"ok":true}}}
+   ```
+3. Dashboard Next.js iniciado em segundo plano na porta `3000` (`npm run dev:web` — `http://localhost:3000` respondendo HTTP `200`).
+
+### Passo 5 — Classificar Depósitos e Lojas do Bling (Autenticado como `admin`) — **[CONCLUÍDO / ATIVO]**
+1. Token OAuth 2.0 da conta Bling (`JHS`) autenticado, criptografado (`AES-256-GCM`) e salvo em `oauth_tokens`.
+2. Descoberta automática (`POST /admin/bling/discover`) executada em `GET /depositos` e `GET /canais-venda` na API v3 do Bling.
+3. Depósito real e lojas reais classificados via `admin` com trilha gravada em `control_changes`:
+   - **Depósito (`stock_warehouses`)**: `14886768228` — **Geral** (`role = 'seller'`, `include_in_push = true`)
+   - **Loja Mercado Livre (`channel_stores`)**: `204990471` — **JHS SHOPPING ML** (`platform = 'mercadolivre'`)
+   - **Loja Nuvemshop (`channel_stores`)**: `205681549` — **Nuvemshop** (`platform = 'nuvemshop'`)
+
+### Passo 6 — Configurar os Webhooks nas Três Plataformas — **[TÚNEL HTTPS ATIVO]**
+Túnel HTTPS (`cloudflared`, pop `gru13`) ativo encaminhando para `http://localhost:3001`:
+- **Base HTTPS ativa**: `https://companies-environments-right-galleries.trycloudflare.com`
+
+URLs prontas para colar nos painéis de desenvolvedor:
+1. **Bling ERP v3**:
+   - **URL do Servidor**: `https://companies-environments-right-galleries.trycloudflare.com/webhooks/bling`
+   - **Cabeçalho validado**: `X-Bling-Signature-256` (HMAC-SHA256 com `BLING_WEBHOOK_SECRET`, já configurado no `.env`).
+   - **Recursos para ativar na aba Webhooks do aplicativo no Bling**: `Produto` (`created`, `updated`, `deleted`), `Estoque` (`stock`) e `Estoque Virtual` (`virtual_stock`). *(Não ativar pedidos nem notas fiscais).*
+2. **Mercado Livre**:
+   - **URL de Notificação**: `https://companies-environments-right-galleries.trycloudflare.com/webhooks/mercadolivre`
+   - **Tópicos para assinar**: `items` e `user-products-families` (cabeçalho `x-signature`).
+3. **Nuvemshop**:
+   - **URL do Webhook**: `https://companies-environments-right-galleries.trycloudflare.com/webhooks/nuvemshop`
+   - **Eventos para assinar**: `product/created`, `product/updated` e `product/deleted` (cabeçalho `x-linkedstore-hmac-sha256`).
+
+### Passo 7 — Operação Inicial em `shadow` e Roteiro Seguro de Virada para `live` / `hub`
+1. **Fase Inicial (`shadow` + `bling_native`)**:
+   - O sistema nasce com `enrichment_controls.mode = 'shadow'` e `channel_sync_owners.stock_price = 'bling_native'`.
+   - Deixe o primeiro ciclo de leitura/matching rodar: valide os vínculos sugeridos e quarentenas em `/matching`, aprove os EANs externos na fila `/fiscal/ean` e faça a dupla confirmação de NCM com dois usuários `fiscal_approver` em `/fiscal/ncm`.
+2. **Ativação do Enriquecimento de Conteúdo (`shadow` $\to$ `live`)**:
+   - Quando as sugestões do CQS estiverem validadas, passe `enrichment_controls.mode` para `'live'` (mantendo `max_replaces_per_run = 25` e `kill_switch = false`). Lembre-se de desligar a exportação nativa de título/descrição do Bling para o canal para evitar sobrescrita mútua.
+3. **Troca do Dono de Estoque e Preço (`bling_native` $\to$ `hub`)**:
+   - **Atenção**: no painel do Bling, desligue **apenas** a sincronização/exportação automática de estoque e preço daquele canal, **mantendo obrigatoriamente ligada a importação de pedidos** no Bling (para que as vendas continuem baixando o saldo virtual no ERP).
+   - Confirme que `GET /estoques/saldos` e `GET /produtos/lojas` já preencheram `product_variants.stock` e `variant_channel_prices`.
+   - Como `admin`, chame `PUT /admin/controls/sync-owner/mercadolivre` (e/ou `nuvemshop`) enviando `{"stock_price": "hub", "content": "hub"}`. A mudança será gravada em `control_changes` e o **APE** assumirá o envio de estoque e preço P1 (< 2 min).
+

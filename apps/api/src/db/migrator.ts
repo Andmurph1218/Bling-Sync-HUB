@@ -81,8 +81,53 @@ export async function runAllMigrationsUp(options?: {
       : mig.upSql;
 
     await query(sqlToRun);
+    if (mig.id === 1 && !options?.stripPartitionClauseForMemDb) {
+      await query(`
+        CREATE OR REPLACE FUNCTION forbid_control_changes_mutation()
+        RETURNS trigger AS $$
+        BEGIN
+          RAISE EXCEPTION 'control_changes is append-only: UPDATE and DELETE are forbidden';
+        END;
+        $$ LANGUAGE plpgsql;
+
+        DROP TRIGGER IF EXISTS trg_control_changes_immutable ON control_changes;
+        CREATE TRIGGER trg_control_changes_immutable
+          BEFORE UPDATE OR DELETE ON control_changes
+          FOR EACH ROW EXECUTE FUNCTION forbid_control_changes_mutation();
+      `);
+    }
+    if (mig.id === 4 && !options?.stripPartitionClauseForMemDb) {
+      await query(`
+        CREATE OR REPLACE FUNCTION forbid_fiscal_archive_mutation()
+        RETURNS trigger AS $$
+        BEGIN
+          RAISE EXCEPTION 'Tabelas de auditoria e arquivo fiscal são imutáveis: UPDATE e DELETE proibidos';
+        END;
+        $$ LANGUAGE plpgsql;
+
+        DROP TRIGGER IF EXISTS trg_ncm_audit_immutable ON ncm_audit_log;
+        CREATE TRIGGER trg_ncm_audit_immutable
+          BEFORE UPDATE OR DELETE ON ncm_audit_log
+          FOR EACH ROW EXECUTE FUNCTION forbid_fiscal_archive_mutation();
+
+        DROP TRIGGER IF EXISTS trg_ncm_archive_immutable ON ncm_audit_log_archive;
+        CREATE TRIGGER trg_ncm_archive_immutable
+          BEFORE UPDATE OR DELETE ON ncm_audit_log_archive
+          FOR EACH ROW EXECUTE FUNCTION forbid_fiscal_archive_mutation();
+
+        DROP TRIGGER IF EXISTS trg_ean_archive_immutable ON ean_validation_history_archive;
+        CREATE TRIGGER trg_ean_archive_immutable
+          BEFORE UPDATE OR DELETE ON ean_validation_history_archive
+          FOR EACH ROW EXECUTE FUNCTION forbid_fiscal_archive_mutation();
+
+        DROP TRIGGER IF EXISTS trg_divergence_archive_immutable ON divergence_alerts_archive;
+        CREATE TRIGGER trg_divergence_archive_immutable
+          BEFORE UPDATE OR DELETE ON divergence_alerts_archive
+          FOR EACH ROW EXECUTE FUNCTION forbid_fiscal_archive_mutation();
+      `);
+    }
     if (mig.id === 12 && !options?.stripPartitionClauseForMemDb) {
-      const { upSql } = m012.buildMonthlyPartitionsSql();
+      const { upSql } = m012.buildMonthlyPartitionsSql(new Date());
       await query(upSql);
     }
 
