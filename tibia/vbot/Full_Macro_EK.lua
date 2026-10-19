@@ -1,15 +1,16 @@
 local Config = {
   potId = 23375,       -- supreme health potion
-  potHp = 80,
+  potHp = 70,
   manaId = 238,        -- great mana potion; no Aurera, todas as vocacoes
   manaMp = 50,
   potDelay = 1000,     -- exhaust compartilhado das duas pocoes
-  healHp = 70,         -- exura med ico, ou exura ico abaixo do level 300
+  healHp = 85,         -- exura med ico, ou exura ico abaixo do level 300
   granHealHp = 45,     -- exura gran ico
   minGran = 2,         -- exori gran
   minMas = 3,          -- exori mas
-  minExori = 1,        -- exori
-  minSweep = 1,        -- exori min
+  minExori = 2,        -- exori
+  minSweep = 3,        -- exori min
+  minExetaRes = 2,     -- exeta res com monstro a 1 sqm
   exetaGap = 4000,     -- entre um challenge e outro
   trashDelay = 600,    -- um item por vez; 200ms empurra os 8 sqm e trava
   dropItems = {3492, 3590, 3031}, -- worm, banana, gold coin
@@ -235,28 +236,19 @@ local function castAttack(target, justTurned)
   return castHunt(target, justTurned)
 end
 
--- Dois botoes separados. Na segunda metade dos 2s do ataque a fala fica livre para o exori.
-local function exetaWindowOpen()
-  if isInPz() then return false end
-  if lastAttack == 0 then return true end
-  local since = now - lastAttack
-  return not (since >= 1000 and since < 2000)
-end
-
+-- Challenge sai antes do exori. talkGap e o grupo support seguram a rotacao.
 local function castExetaRes(target)
-  if not exetaResMacro or exetaResMacro.isOff() then return false end
-  if not exetaWindowOpen() then return false end
+  if not exetaResMacro or exetaResMacro.isOff() or isInPz() then return false end
   if now - lastExetaRes < Config.exetaGap then return false end
   if target and target:isPlayer() then return false end
-  if countMonsters(1) <= 2 then return false end
+  if countMonsters(1) < Config.minExetaRes then return false end
   if not trySpell("exeta res", GROUP_SUPPORT) then return false end
   lastExetaRes = now
   return true
 end
 
 local function castExetaAmp(target)
-  if not exetaAmpMacro or exetaAmpMacro.isOff() then return false end
-  if not exetaWindowOpen() then return false end
+  if not exetaAmpMacro or exetaAmpMacro.isOff() or isInPz() then return false end
   if now - lastExetaAmp < Config.exetaGap then return false end
   if target and target:isPlayer() then return false end
   if countMonsters(7) < 1 then return false end
@@ -394,17 +386,14 @@ macro(100, function()
   local target = g_game.isAttacking() and g_game.getAttackingCreature() or nil
   if target and not target:getPosition() then target = nil end
 
-  local justTurned = false
-  if hunting and target then
-    justTurned = faceCreature(target)
-  end
-
-  if hunting and target and castAttack(target, justTurned) then
-    lastAttack = now
-    return
-  end
   if castExetaRes(target) then return end
-  castExetaAmp(target)
+  if castExetaAmp(target) then return end
+
+  if not hunting or not target then return end
+  local justTurned = faceCreature(target)
+  if castAttack(target, justTurned) then
+    lastAttack = now
+  end
 end)
 
 section("Cura")

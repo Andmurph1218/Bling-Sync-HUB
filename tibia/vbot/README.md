@@ -9,7 +9,7 @@ O arquivo antigo juntava varios macros soltos. Dois deles castavam ao mesmo temp
 | Grupo | Macro | Funcao |
 |---|---|---|
 | Combate | EK Hunt | Rotacao de box: `exori gran ico`, `exori gran`, `exori min`, `exori mas`, `exori` |
-| Combate | Exeta Res | `exeta res` com mais de 2 monstros a 1 sqm. Intervalo de 4s, na folga do ataque |
+| Combate | Exeta Res | `exeta res` com pelo menos 2 monstros a 1 sqm. Sai antes do exori, intervalo de 4s |
 | Combate | Exeta Amp | `exeta amp res` com monstro em ate 7 sqm. Intervalo de 4s, na folga do ataque |
 | Combate | Anti Paralyze | Ligado e paralizado, solta `utani hur` |
 | Cura | EK Heal | `exura gran ico` em 45%, `exura med ico` a partir do level 300, senao `exura ico` |
@@ -37,7 +37,7 @@ O icone HUNT fica na tela. Support (paralise e challenge) sai pelo mesmo ciclo d
 
 - Attack, healing e support respeitam o grupo de cooldown do client (`1`, `2`, `3`).
 - `exori gran ico` e `exori min` so saem se o alvo esta no sqm da frente.
-- Exeta Res e Exeta Amp sao botoes separados. Cada challenge espera 4s e nao fala na segunda metade do cooldown de ataque.
+- Exeta Res e Exeta Amp sao botoes separados. O challenge tenta antes do exori; `talkGap` e o grupo support seguram a rotacao.
 - O painel de joias usa `parent or panel` no editor do vBot.
 - Item padrao `0` nao e equipado.
 
