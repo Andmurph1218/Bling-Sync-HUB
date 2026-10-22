@@ -1,10 +1,10 @@
 # Revisão do Plano Mestre
 
-Estado em 16 de outubro de 2026.
+Estado em 22 de outubro de 2026.
 
 A spec de desenvolvimento é [plano-mestre.md](plano-mestre.md). Este arquivo é o registro da revisão. Não é prompt de motor e não reabre regra que o plano já fechou.
 
-O briefing `PLANO MESTRE REVISADO` foi substituído. As contradições daquele texto estão unificadas no plano. Código ainda não começou. A Fase 0 é o próximo passo.
+O briefing `PLANO MESTRE REVISADO` foi substituído. As contradições daquele texto estão unificadas no plano. Todas as 14 fases (0, 0.5 e 1 a 12) estão implementadas e validadas com 52 testes automatizados. O ambiente de homologação está de pé: PostgreSQL 16 e Redis 7 em Docker, API e Dashboard ativos, OAuth conectado nos três canais (Bling, Mercado Livre e Nuvemshop), webhooks de produto recebendo eventos reais e roteiro de implantação detalhado em [status-implantacao.md](status-implantacao.md).
 
 A maturidade no fim deste arquivo mede este plano. 80 é o ponto em que a implementação segue uma regra só.
 

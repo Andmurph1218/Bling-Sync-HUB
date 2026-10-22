@@ -1,9 +1,24 @@
 # Documentação de Implantação — Bling Sync HUB
 
-Data de referência: **16 de outubro de 2026**  
+Data de referência: **22 de outubro de 2026**  
 Especificação normativa: [plano-mestre.md](plano-mestre.md)  
 Resumo executivo: [descricao.md](descricao.md)  
 Registro de revisão e maturidade: [revisao-plano-mestre.md](revisao-plano-mestre.md)
+
+---
+
+## 0. Síntese da Revisão do Plano Mestre (revisão de 22/10/2026)
+
+Revisão de `revisao-plano-mestre.md` concluída nesta data. Conclusões registradas:
+
+1. **Regras fechadas pela revisão — todas implementadas e testadas**: CQS determinístico sem REPLACE em grade A/B, matching multi-sinal (2 sinais fortes, EAN sozinho ≤ 80), webhook com HMAC + INSERT antes do HTTP 200, push por passo sem PUT do produto inteiro, detecção de eco via `hub_writes`, soberania de nome/descrição do Bling em `channel_content_overrides`, dupla confirmação de NCM por 2 usuários com nota de TIPI.
+2. **Ajustes incorporados depois — todos cobertos em código**: convivência `bling_native`/`hub` em `channel_sync_owners`, estoque publicado somando apenas depósitos `seller` com `include_in_push`, `product_variants.stock` nascendo `NULL`, `meli_facility` somente leitura, kit como SKU único, preço por loja com `follow_store_price`, alerta `price_below_cost` não-bloqueante, `match_rejections` permanente, `push_jobs_active` excluindo `locked`, família User Product com `family_confidence`, EAN `duplicate` e NCM `conflict` entre variantes, controles administrativos auditados em `control_changes`, OAuth em `oauth_tokens` fora do Redis.
+3. **Maturidade da spec: 99/100** (média das 8 áreas — princípios 100, schema 99, motores 100, fluxos 100, contratos 98, auth 98, operação 100, cronograma 100).
+4. **Pendências apontadas pela revisão e já encaminhadas na implantação real**: credenciais OAuth dos 3 canais conectadas (`oauth_tokens`), webhooks de produto recebendo eventos reais (Bling e Nuvemshop confirmados em 22/10). Pendências de homologação em aberto:
+   - Desmarcar recurso `order`/`orderNF` na assinatura de webhooks do app do Bling (pedidos ficam na integração nativa);
+   - Confirmar scope `offline_access` no app do Mercado Livre (token atual não retornou `refresh_token`) e cadastrar a URL de notificação `https://rickety-lash-passive.ngrok-free.dev/webhooks/mercadolivre`;
+   - Executar a primeira sincronização de catálogo em modo `shadow` (Passo 7).
+5. **Escopo fora do hub confirmado**: pedidos, financeiro, NF-e, frete, serviços (`tipo != 'P'`), margem/comissão, motor de CEST/origem e escrita em `meli_facility`.
 
 ---
 
@@ -238,20 +253,24 @@ Siga esta sequência exata para colocar o **Bling Sync HUB** em operação com o
    - **Loja Nuvemshop (`channel_stores`)**: `205681549` — **Nuvemshop** (`platform = 'nuvemshop'`)
 
 ### Passo 6 — Configurar os Webhooks nas Três Plataformas — **[TÚNEL HTTPS ATIVO]**
-Túnel HTTPS (`cloudflared`, pop `gru13`) ativo encaminhando para `http://localhost:3001`:
-- **Base HTTPS ativa**: `https://companies-environments-right-galleries.trycloudflare.com`
+Túnel HTTPS **ngrok com domínio estático** (`rickety-lash-passive.ngrok-free.dev`, fixo por conta) ativo encaminhando para `http://localhost:3001` (substitui o túnel temporário `trycloudflare` de 2026-10-19/20 — `PUBLIC_BASE_URL` mantida no `.env`):
+- **Base HTTPS ativa**: `https://rickety-lash-passive.ngrok-free.dev`
+
+Credenciais OAuth cadastradas no `.env`: **Bling** (app JHS, token já autorizado e criptografado em `oauth_tokens`) **Mercado Livre** (app `4952161147502333`, seller `184060242` JHS SHOPPING autorizado — token em `oauth_tokens`; `refresh_token` não retornado, verificar scope `offline_access` no app), e **Nuvemshop** (app `37416`, loja `store_id = 6667412` autorizada — token em `oauth_tokens` e webhooks `product/created|updated|deleted` registrados: ids `40454738/40454739/40454740`).
+Rota de callback implementada: `GET /oauth/nuvemshop/callback` troca o `code` por `access_token`, grava criptografado em `oauth_tokens` e, quando `PUBLIC_BASE_URL` está definida, registra automaticamente os webhooks `product/created`, `product/updated` e `product/deleted` apontando para `/webhooks/nuvemshop`.
 
 URLs prontas para colar nos painéis de desenvolvedor:
 1. **Bling ERP v3**:
-   - **URL do Servidor**: `https://companies-environments-right-galleries.trycloudflare.com/webhooks/bling`
+   - **URL do Servidor**: `https://rickety-lash-passive.ngrok-free.dev/webhooks/bling`
    - **Cabeçalho validado**: `X-Bling-Signature-256` (HMAC-SHA256 com `BLING_WEBHOOK_SECRET`, já configurado no `.env`).
    - **Recursos para ativar na aba Webhooks do aplicativo no Bling**: `Produto` (`created`, `updated`, `deleted`), `Estoque` (`stock`) e `Estoque Virtual` (`virtual_stock`). *(Não ativar pedidos nem notas fiscais).*
 2. **Mercado Livre**:
-   - **URL de Notificação**: `https://companies-environments-right-galleries.trycloudflare.com/webhooks/mercadolivre`
+   - **URL de Notificação**: `https://rickety-lash-passive.ngrok-free.dev/webhooks/mercadolivre`
    - **Tópicos para assinar**: `items` e `user-products-families` (cabeçalho `x-signature`).
 3. **Nuvemshop**:
-   - **URL do Webhook**: `https://companies-environments-right-galleries.trycloudflare.com/webhooks/nuvemshop`
-   - **Eventos para assinar**: `product/created`, `product/updated` e `product/deleted` (cabeçalho `x-linkedstore-hmac-sha256`).
+   - **URL do Webhook** (registrada automaticamente via `POST /{store_id}/webhooks` após o OAuth): `https://rickety-lash-passive.ngrok-free.dev/webhooks/nuvemshop`
+   - **Eventos**: `product/created`, `product/updated` e `product/deleted` (cabeçalho `x-linkedstore-hmac-sha256`).
+   - Os 3 campos de webhook do cadastro do app no Partners Portal são exclusivos de privacidade/LGPD (`store/redact`, `customer/redact`, `customers/data_request`) e ficam em branco até implementarmos os receptores de privacidade.
 
 ### Passo 7 — Operação Inicial em `shadow` e Roteiro Seguro de Virada para `live` / `hub`
 1. **Fase Inicial (`shadow` + `bling_native`)**:
