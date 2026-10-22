@@ -272,7 +272,8 @@ URLs prontas para colar nos painéis de desenvolvedor:
    - **Eventos**: `product/created`, `product/updated` e `product/deleted` (cabeçalho `x-linkedstore-hmac-sha256`).
    - Os 3 campos de webhook do cadastro do app no Partners Portal são exclusivos de privacidade/LGPD (`store/redact`, `customer/redact`, `customers/data_request`) e ficam em branco até implementarmos os receptores de privacidade.
 
-### Passo 7 — Operação Inicial em `shadow` e Roteiro Seguro de Virada para `live` / `hub`
+### Passo 7 — Operação Inicial em `shadow` e Roteiro Seguro de Virada para `live` / `hub` — **[1ª SYNC REAL EXECUTADA 22/10]**
+0. **Primeira sincronização real executada** (`apps/api/src/scripts/shadow-sync.ts`): 15 produtos do Bling importados com variantes e saldos reais (`stock` somando só depósito `seller` 14886768228), 50 anúncios do ML (seller 184060242) e 50 produtos da Nuvemshop (store 6667412) lidos → 0 auto-vínculos, ~100 sugestões em `matching_queue` (regra de 2 sinais fortes), scores CRE calculados, nenhuma escrita externa. Migration 13 (`empty-sku-handling`) corrigiu SKU vazio do Bling colidindo na constraint UNIQUE.
 1. **Fase Inicial (`shadow` + `bling_native`)**:
    - O sistema nasce com `enrichment_controls.mode = 'shadow'` e `channel_sync_owners.stock_price = 'bling_native'`.
    - Deixe o primeiro ciclo de leitura/matching rodar: valide os vínculos sugeridos e quarentenas em `/matching`, aprove os EANs externos na fila `/fiscal/ean` e faça a dupla confirmação de NCM com dois usuários `fiscal_approver` em `/fiscal/ncm`.

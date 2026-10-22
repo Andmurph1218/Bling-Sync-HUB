@@ -11,6 +11,7 @@ import * as m009 from './migrations/1729080000009_readiness-scores-and-history.j
 import * as m010 from './migrations/1729080000010_dlm-policies-and-runs.js';
 import * as m011 from './migrations/1729080000011_indexes.js';
 import * as m012 from './migrations/1729080000012_partitions-and-seeds.js';
+import * as m013 from './migrations/1729080000013_empty-sku-handling.js';
 
 export interface MigrationStep {
   id: number;
@@ -32,6 +33,7 @@ export const ALL_MIGRATIONS: MigrationStep[] = [
   { id: 10, name: '1729080000010_dlm-policies-and-runs', upSql: m010.UP_SQL, downSql: m010.DOWN_SQL },
   { id: 11, name: '1729080000011_indexes', upSql: m011.UP_SQL, downSql: m011.DOWN_SQL },
   { id: 12, name: '1729080000012_partitions-and-seeds', upSql: m012.SEEDS_UP_SQL, downSql: m012.SEEDS_DOWN_SQL },
+  { id: 13, name: '1729080000013_empty-sku-handling', upSql: m013.UP_SQL, downSql: m013.DOWN_SQL },
 ];
 
 /**

@@ -132,7 +132,7 @@ export async function upsertCatalogProductFromBlingPayload(
            $1, $2, $3, $4, $5, $6, $7, $8, NULL,
            $9, $10, $11, $12, $13, $14, $15, $16, now(), now()
          )
-         ON CONFLICT (bling_sku) DO UPDATE
+         ON CONFLICT (master_product_id, bling_sku) DO UPDATE
            SET price = EXCLUDED.price,
                cost_price = EXCLUDED.cost_price,
                net_weight = COALESCE(product_variants.net_weight, EXCLUDED.net_weight),
