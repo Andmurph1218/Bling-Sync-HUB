@@ -5,7 +5,13 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
+  Boxes,
   GitCompare,
+  ClipboardList,
+  Send,
+  TrendingUp,
+  Sliders,
+  History,
   Barcode,
   FileCheck2,
   ChevronLeft,
@@ -30,21 +36,21 @@ export const ROLE_USERS: Record<UserRole, RoleUser> = {
     name: 'Admin JHS',
     email: 'admin@blingsync.local',
     role: 'admin',
-    roleLabel: 'Admin',
+    roleLabel: 'Administrador',
     initials: 'AD',
   },
   fiscal_approver: {
     name: 'Carla Mendes (Fiscal 1)',
     email: 'fiscal1@blingsync.local',
     role: 'fiscal_approver',
-    roleLabel: 'Fiscal Approver',
+    roleLabel: 'Revisor Fiscal',
     initials: 'CM',
   },
   operator: {
     name: 'Lucas Operação',
     email: 'operador@blingsync.local',
     role: 'operator',
-    roleLabel: 'Operator',
+    roleLabel: 'Operador',
     initials: 'LO',
   },
 };
@@ -70,38 +76,87 @@ interface NavItem {
   badge?: string;
   icon: React.ComponentType<{ className?: string }>;
   allowedRoles: UserRole[];
+  isSubItem?: boolean;
 }
 
+/**
+ * Arquitetura de Navegação nas 8 Áreas Operacionais (Seção 4 de docs/bling_sync_hub_evolucao_dashboard.md)
+ * preservando /matching, /fiscal/ean e /fiscal/ncm.
+ */
 const NAV_ITEMS: NavItem[] = [
   {
     href: '/',
-    label: 'Visão Geral',
+    label: '1. Visão Geral',
     shortLabel: 'Início',
     icon: LayoutDashboard,
     allowedRoles: ['admin', 'fiscal_approver', 'operator'],
   },
   {
+    href: '/catalogo',
+    label: '2. Catálogo de Produtos',
+    shortLabel: 'Catálogo',
+    badge: '25',
+    icon: Boxes,
+    allowedRoles: ['admin', 'fiscal_approver', 'operator'],
+  },
+  {
     href: '/matching',
-    label: 'Matching (PIRE / VIR)',
-    shortLabel: 'Matching',
-    badge: '16',
+    label: '3. Correspondências',
+    shortLabel: 'Vínculos',
+    badge: '296',
     icon: GitCompare,
     allowedRoles: ['admin', 'operator'],
   },
   {
+    href: '/pendencias',
+    label: '4. Central de Pendências',
+    shortLabel: 'Pendências',
+    badge: '302',
+    icon: ClipboardList,
+    allowedRoles: ['admin', 'fiscal_approver', 'operator'],
+  },
+  {
     href: '/fiscal/ean',
-    label: 'Fiscal · EAN (GVE)',
+    label: '↳ Fiscal · EAN (GTIN)',
     shortLabel: 'EAN',
-    badge: '6',
     icon: Barcode,
     allowedRoles: ['admin', 'fiscal_approver'],
+    isSubItem: true,
   },
   {
     href: '/fiscal/ncm',
-    label: 'Fiscal · NCM (NVE)',
+    label: '↳ Fiscal · NCM (Dupla)',
     shortLabel: 'NCM',
-    badge: '3',
     icon: FileCheck2,
+    allowedRoles: ['admin', 'fiscal_approver'],
+    isSubItem: true,
+  },
+  {
+    href: '/publicacoes',
+    label: '5. Publicações e Sinc.',
+    shortLabel: 'Publicar',
+    icon: Send,
+    allowedRoles: ['admin', 'operator'],
+  },
+  {
+    href: '/qualidade-margem',
+    label: '6. Qualidade e Margem',
+    shortLabel: 'Margem',
+    icon: TrendingUp,
+    allowedRoles: ['admin', 'fiscal_approver', 'operator'],
+  },
+  {
+    href: '/canais',
+    label: '7. Canais e Regras',
+    shortLabel: 'Canais',
+    icon: Sliders,
+    allowedRoles: ['admin'],
+  },
+  {
+    href: '/auditoria',
+    label: '8. Auditoria e Histórico',
+    shortLabel: 'Auditoria',
+    icon: History,
     allowedRoles: ['admin', 'fiscal_approver'],
   },
 ];
@@ -114,9 +169,9 @@ interface ChannelStatus {
 }
 
 const CHANNELS: ChannelStatus[] = [
-  { id: 'bling', name: 'Bling v3', detail: 'Soberano · 3 req/s', online: true },
-  { id: 'ml', name: 'Mercado Livre', detail: 'Seller 184060242', online: true },
-  { id: 'ns', name: 'Nuvemshop', detail: 'Store 6667412', online: true },
+  { id: 'bling', name: 'Bling ERP v3', detail: 'Fonte Soberana · 3 req/s', online: true },
+  { id: 'ml', name: 'Mercado Livre', detail: 'JHS SHOPPING (184060242)', online: true },
+  { id: 'ns', name: 'Nuvemshop', detail: 'Loja 6667412', online: true },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -141,7 +196,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {/* Sidebar Desktop Retrátil */}
         <aside
           className={`hidden md:flex flex-col border-r border-zinc-800/80 bg-zinc-900/60 transition-all duration-200 ${
-            collapsed ? 'w-20' : 'w-64'
+            collapsed ? 'w-20' : 'w-68'
           }`}
         >
           <div className="flex h-16 items-center justify-between border-b border-zinc-800/80 px-4">
@@ -155,7 +210,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     Bling Sync HUB
                   </span>
                   <span className="block text-[11px] text-zinc-400">
-                    O Bling manda · Shadow
+                    Centro Operacional · Shadow
                   </span>
                 </div>
               )}
@@ -174,10 +229,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
           </div>
 
-          <nav className="flex-1 space-y-1 p-3">
+          <nav className="flex-1 space-y-1 overflow-y-auto p-3">
             {!collapsed && (
               <p className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                Operação &amp; Filas ({currentUser.roleLabel})
+                Navegação ({currentUser.roleLabel})
               </p>
             )}
             {visibleNavItems.map((item) => {
@@ -192,13 +247,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   key={item.href}
                   href={item.href}
                   title={collapsed ? item.label : undefined}
-                  className={`flex items-center justify-between rounded-lg px-3 py-2.5 text-sm font-medium transition ${
+                  className={`flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition ${
+                    item.isSubItem && !collapsed ? 'ml-3 border-l border-zinc-800 pl-3' : ''
+                  } ${
                     isActive
                       ? 'border border-zinc-700/80 bg-zinc-800/90 text-white shadow-sm'
                       : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
                   }`}
                 >
-                  <span className="flex items-center gap-3">
+                  <span className="flex items-center gap-2.5">
                     <Icon
                       className={`h-4 w-4 shrink-0 ${
                         isActive ? 'text-emerald-400' : 'text-zinc-400'
@@ -208,7 +265,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   </span>
                   {!collapsed && item.badge && (
                     <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                         isActive
                           ? 'bg-emerald-500/20 text-emerald-300'
                           : 'bg-zinc-800 text-zinc-300'
@@ -227,10 +284,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
                 <div className="flex items-center gap-2 text-xs font-medium text-emerald-400">
                   <Radio className="h-3.5 w-3.5" />
-                  <span>Soberania Bling ERP v3</span>
+                  <span>O Bling manda</span>
                 </div>
                 <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
-                  Estoque, preço, SKU e fiscal nunca são sobrescritos por marketplaces.
+                  Os marketplaces enriquecem. O HUB valida, coordena e registra.
                 </p>
               </div>
             </div>
@@ -241,10 +298,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="flex flex-1 flex-col min-w-0 pb-16 md:pb-0">
           {/* Header Superior */}
           <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800/80 bg-zinc-950/90 px-6 py-3 backdrop-blur">
-            {/* Status de Conexão Refinado com Indicadores Pulsantes */}
             <div className="flex flex-wrap items-center gap-2">
               <span className="mr-1 text-xs font-medium uppercase tracking-wider text-zinc-500">
-                Canais:
+                Integrações:
               </span>
               {CHANNELS.map((ch) => (
                 <div
@@ -272,12 +328,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               ))}
             </div>
 
-            {/* Indicador do Usuário Logado + Seletor RBAC de Simulação */}
+            {/* Indicador do Usuário Logado + Seletor RBAC */}
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/70 px-2.5 py-1 text-xs text-zinc-400">
                 <UserCheck className="h-3.5 w-3.5 text-zinc-400" />
                 <label htmlFor="rbac-role-select" className="sr-only">
-                  Simular Papel RBAC
+                  Alternar Papel RBAC
                 </label>
                 <select
                   id="rbac-role-select"
@@ -286,13 +342,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   className="bg-transparent text-xs font-medium text-zinc-200 focus:outline-none cursor-pointer"
                 >
                   <option value="admin" className="bg-zinc-900">
-                    Visão: Admin (Acesso Total)
+                    Papel: Administrador (Total)
                   </option>
                   <option value="fiscal_approver" className="bg-zinc-900">
-                    Visão: Fiscal Approver (/fiscal/*)
+                    Papel: Revisor Fiscal (EAN/NCM)
                   </option>
                   <option value="operator" className="bg-zinc-900">
-                    Visão: Operator (/matching)
+                    Papel: Operador (Catálogo/Vínculos)
                   </option>
                 </select>
               </div>
@@ -326,7 +382,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Menu Inferior Mobile */}
         <nav className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden items-center justify-around border-t border-zinc-800 bg-zinc-900/95 px-2 py-2 backdrop-blur">
-          {visibleNavItems.map((item) => {
+          {visibleNavItems.slice(0, 5).map((item) => {
             const Icon = item.icon;
             const isActive =
               item.href === '/'
