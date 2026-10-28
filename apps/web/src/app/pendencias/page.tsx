@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   ClipboardList,
@@ -13,7 +13,10 @@ import {
   ImageIcon,
   DollarSign,
   RotateCcw,
+  RefreshCw,
+  CheckCircle2,
 } from 'lucide-react';
+import { apiFetch } from '../../utils/api-client';
 
 export type PendingCategory =
   | 'ean_ausente_divergente'
@@ -32,7 +35,7 @@ interface UnifiedPendingItem {
   sku: string;
   productId: string;
   productName: string;
-  channel: 'Bling ERP' | 'Mercado Livre' | 'Nuvemshop' | 'Multi-canal';
+  channel: string;
   createdAt: string;
   reasonPlain: string;
   impactPlain: string;
@@ -43,167 +46,35 @@ interface UnifiedPendingItem {
   technicalDetail: string;
 }
 
-const UNIFIED_PENDINGS: UnifiedPendingItem[] = [
-  {
-    id: 'pend-1',
-    category: 'ean_ausente_divergente',
-    categoryLabel: 'EAN ausente ou divergente',
-    sku: 'Sem SKU (Bling #16719381290)',
-    productId: '16719381290',
-    productName: 'CONTATOR AUXILIAR 2NA+2NF',
-    channel: 'Bling ERP',
-    createdAt: 'Hoje, 15:42',
-    reasonPlain:
-      'O produto está sem código de barras (GTIN/EAN) válido no Bling; o Mercado Livre possui um EAN sugerido aguardando conferência.',
-    impactPlain:
-      'Bloqueia a criação de novos anúncios e a atualização de ficha técnica (estoque e pausa continuam normais).',
-    responsibleRole: 'Revisor Fiscal',
-    actionLabel: 'Comparar fontes e enviar para aprovação',
-    actionHref: '/fiscal/ean',
-    severity: 'critical',
-    technicalDetail: 'Motor GVE · blocker: ean_invalid_or_risk · Tabela: ean_pending_validation',
-  },
-  {
-    id: 'pend-2',
-    category: 'ncm_divergente',
-    categoryLabel: 'NCM divergente',
-    sku: 'Mercurio 400w e40',
-    productId: '16723377536',
-    productName: 'Lâmpada Vapor Mercúrio 400w Hpl E40 Branco-neutro',
-    channel: 'Mercado Livre',
-    createdAt: 'Hoje, 14:18',
-    reasonPlain:
-      'Sugestão de NCM 8539.32.00 já recebeu a 1ª confirmação fiscal, mas exige a 2ª confirmação por outro revisor com nota da TIPI.',
-    impactPlain:
-      'Publicação de conteúdo retida até conclusão da dupla confirmação fiscal.',
-    responsibleRole: 'Revisor Fiscal',
-    actionLabel: 'Concluir 2ª aprovação de NCM',
-    actionHref: '/fiscal/ncm',
-    severity: 'critical',
-    technicalDetail: 'Motor NVE · status: pending_second · Constraint: second_review_by <> first_review_by',
-  },
-  {
-    id: 'pend-3',
-    category: 'sku_sem_correspondencia',
-    categoryLabel: 'SKU sem correspondência',
-    sku: '13621',
-    productId: '16722020114',
-    productName: 'Isolador Epoxi Paralelo Barramento 30x30x3/8 Cx. 10un.',
-    channel: 'Nuvemshop',
-    createdAt: 'Hoje, 13:50',
-    reasonPlain:
-      'O SKU coincide com o anúncio NS-314517886, mas o título no canal é diferente. Exige confirmação humana antes de vincular.',
-    impactPlain:
-      'Enquanto não vinculado, o HUB não enriquece conteúdo nem sincroniza este anúncio.',
-    responsibleRole: 'Operador',
-    actionLabel: 'Comparar candidatos e confirmar vínculo',
-    actionHref: '/matching',
-    severity: 'warning',
-    technicalDetail: 'Motor PIRE · score: 78/100 · sinal: sku_exact + title_divergent_warning',
-  },
-  {
-    id: 'pend-4',
-    category: 'variacao_nao_identificada',
-    categoryLabel: 'Variação não identificada',
-    sku: 'Infra Ray 220V 250W - Kit 5',
-    productId: '16723148832',
-    productName: 'Kit 5 un. Lâmpada Infravermelha 220V Aquecimento Secagem 250W',
-    channel: 'Mercado Livre',
-    createdAt: 'Ontem, 19:10',
-    reasonPlain:
-      'A família User Product MLBU-FAM-882910 possui itens que apontam para 2 produtos pais diferentes no Bling.',
-    impactPlain:
-      'Família colocada em quarentena para evitar partir o agrupamento do Mercado Livre.',
-    responsibleRole: 'Operador',
-    actionLabel: 'Conferir produto pai, voltagem e SKU',
-    actionHref: '/matching',
-    severity: 'critical',
-    technicalDetail: 'Motor PIRE/VIR · status: quarantine · family_multi_parent_conflict',
-  },
-  {
-    id: 'pend-5',
-    category: 'conteudo_incompleto',
-    categoryLabel: 'Conteúdo incompleto',
-    sku: 'Infra Ray 220V 250W',
-    productId: '16722891360',
-    productName: 'Lâmpada Infravermelha 220V Aquecimento Secagem 250W',
-    channel: 'Multi-canal',
-    createdAt: 'Ontem, 18:05',
-    reasonPlain:
-      'Descrição técnica abaixo de 180 caracteres para o Mercado Livre e campos de SEO (tags e meta description) vazios na Nuvemshop.',
-    impactPlain:
-      'Nota de prontidão (38/100 no ML e 34/100 na Nuvemshop) abaixo do mínimo exigido para publicação.',
-    responsibleRole: 'Operador',
-    actionLabel: 'Editar ou aprovar título, descrição e SEO',
-    actionHref: '/catalogo/16722891360',
-    severity: 'warning',
-    technicalDetail: 'Motores CQS + CRE · blockers: score_ml_below_50, score_ns_below_45',
-  },
-  {
-    id: 'pend-6',
-    category: 'imagens_invalidas',
-    categoryLabel: 'Imagens duplicadas ou inválidas',
-    sku: 'Mercurio 400w e40',
-    productId: '16723377536',
-    productName: 'Lâmpada Vapor Mercúrio 400w Hpl E40 Branco-neutro',
-    channel: 'Mercado Livre',
-    createdAt: 'Ontem, 17:20',
-    reasonPlain:
-      'Falta imagem de capa elegível (>= 500x500 px sem marca d’água) e ao menos 3 fotos validadas para o Mercado Livre.',
-    impactPlain:
-      'Reduz a nota de prontidão no Mercado Livre em 20 pontos.',
-    responsibleRole: 'Operador',
-    actionLabel: 'Comparar, selecionar e validar imagens',
-    actionHref: '/catalogo/16723377536',
-    severity: 'info',
-    technicalDetail: 'Motor IQRE · code: add_ml_images_cover',
-  },
-  {
-    id: 'pend-7',
-    category: 'preco_abaixo_custo',
-    categoryLabel: 'Preço abaixo do custo',
-    sku: 'DPS-VCL-275V',
-    productId: '16714624025',
-    productName: 'DPS CLAMPER VCL SLIM 275V',
-    channel: 'Nuvemshop',
-    createdAt: 'Ontem, 16:40',
-    reasonPlain:
-      'Preço de venda configurado na loja (R$ 34,90) está abaixo do custo cadastrado no Bling (R$ 39,50).',
-    impactPlain:
-      'Venda com margem bruta negativa (-13,1%). Por regra do sistema, não bloqueia o envio de estoque.',
-    responsibleRole: 'Financeiro',
-    actionLabel: 'Consultar custo, preço e margem estimada',
-    actionHref: '/qualidade-margem',
-    severity: 'critical',
-    technicalDetail: 'Motor APE · alert_code: price_below_cost (não-bloqueante)',
-  },
-  {
-    id: 'pend-8',
-    category: 'publicacao_falha',
-    categoryLabel: 'Publicação com falha',
-    sku: 'BOT-34-209R',
-    productId: '16706185677',
-    productName: 'BOTOEIRA 34-209R CAIXA ALTA- 9 FUROS (3X3) 22 MM - ALUMINIO',
-    channel: 'Mercado Livre',
-    createdAt: '22/10, 16:15',
-    reasonPlain:
-      'O Mercado Livre recusou o passo de atualização de medidas porque a categoria ainda não possui atributo de dimensões habilitado.',
-    impactPlain:
-      'Os passos anteriores (estoque e preço) foram preservados; apenas o passo de medidas aguarda reconciliação.',
-    responsibleRole: 'Operador',
-    actionLabel: 'Ver causa, corrigir dados e reprocessar com segurança',
-    actionHref: '/publicacoes',
-    severity: 'warning',
-    technicalDetail: 'Motor APE · step: measures · HTTP 400 validation_error',
-  },
-];
-
 export default function CentralPendenciasPage() {
+  const [items, setItems] = useState<UnifiedPendingItem[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [liveFromDb, setLiveFromDb] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedRole, setSelectedRole] = useState<string>('all');
   const [showTech, setShowTech] = useState<boolean>(false);
 
-  const filtered = UNIFIED_PENDINGS.filter((item) => {
+  const loadPendings = async () => {
+    setLoading(true);
+    try {
+      const json = await apiFetch<{ items?: UnifiedPendingItem[] }>('/api/dashboard/pendings');
+      setItems(json.items ?? []);
+      setLiveFromDb(true);
+      setLoadError(null);
+    } catch {
+      setLiveFromDb(false);
+      setLoadError('Não foi possível carregar as pendências da API. Os dados abaixo podem estar desatualizados.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadPendings();
+  }, []);
+
+  const filtered = items.filter((item) => {
     if (selectedCategory !== 'all' && item.category !== selectedCategory) {
       return false;
     }
@@ -229,6 +100,8 @@ export default function CentralPendenciasPage() {
         return <DollarSign className="h-4 w-4 text-rose-400" />;
       case 'publicacao_falha':
         return <RotateCcw className="h-4 w-4 text-amber-400" />;
+      default:
+        return <AlertTriangle className="h-4 w-4 text-amber-400" />;
     }
   };
 
@@ -236,24 +109,43 @@ export default function CentralPendenciasPage() {
     <main className="mx-auto max-w-6xl px-6 py-8">
       <header className="flex flex-col justify-between gap-4 border-b border-zinc-800 pb-6 sm:flex-row sm:items-center">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <ClipboardList className="h-6 w-6 text-amber-400" />
             <h1 className="text-2xl font-bold text-white">
               Central Unificada de Pendências
             </h1>
+            <span
+              className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                liveFromDb
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                  : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+              }`}
+            >
+              {liveFromDb ? 'Lendo pendências reais do PostgreSQL' : 'Modo demonstração'}
+            </span>
           </div>
           <p className="mt-1 text-sm text-zinc-400">
             Fila única de decisões operacionais, fiscais e financeiras: cada item explica o problema, o impacto e o próximo passo claro.
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowTech((prev) => !prev)}
-          className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-medium text-zinc-300 hover:border-zinc-700 hover:text-white"
-        >
-          {showTech ? 'Ocultar códigos dos motores' : 'Exibir diagnóstico técnico'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowTech((prev) => !prev)}
+            className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs font-medium text-zinc-300 hover:border-zinc-700 hover:text-white"
+          >
+            {showTech ? 'Ocultar códigos dos motores' : 'Exibir diagnóstico técnico'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void loadPendings()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Atualizar</span>
+          </button>
+        </div>
       </header>
 
       {/* Barra de Filtros */}
@@ -268,7 +160,7 @@ export default function CentralPendenciasPage() {
           onChange={(e) => setSelectedCategory(e.target.value)}
           className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-xs text-zinc-200"
         >
-          <option value="all">Todos os tipos de pendência (8 categorias)</option>
+          <option value="all">Todos os tipos de pendência</option>
           <option value="ean_ausente_divergente">EAN ausente ou divergente</option>
           <option value="ncm_divergente">NCM divergente (Dupla aprovação)</option>
           <option value="sku_sem_correspondencia">SKU sem correspondência</option>
@@ -294,6 +186,24 @@ export default function CentralPendenciasPage() {
           Exibindo <strong className="text-white">{filtered.length}</strong> pendências prioritárias
         </span>
       </section>
+
+      {loadError && (
+        <div role="alert" className="mt-6 flex items-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-rose-400" />
+          <span>{loadError}</span>
+        </div>
+      )}
+
+      {!loading && !loadError && filtered.length === 0 && (
+        <div className="mt-6 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-200">
+          <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+          <span>Nenhuma pendência encontrada para os filtros selecionados.</span>
+        </div>
+      )}
+
+      {loading && items.length === 0 && (
+        <p className="mt-6 text-sm text-zinc-400" role="status">Carregando pendências...</p>
+      )}
 
       {/* Lista de Pendências */}
       <section className="mt-6 space-y-4">

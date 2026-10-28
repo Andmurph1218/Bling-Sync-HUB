@@ -1,8 +1,8 @@
 'use client';
 
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Boxes,
@@ -17,52 +17,65 @@ import {
   ChevronLeft,
   ChevronRight,
   ShieldCheck,
-  UserCheck,
   Radio,
+  LogOut,
+  Loader2,
 } from 'lucide-react';
+import { apiFetch } from '../utils/api-client';
 
 export type UserRole = 'admin' | 'fiscal_approver' | 'operator';
 
-interface RoleUser {
+export interface SessionUser {
+  id: string;
   name: string;
   email: string;
+  roles: UserRole[];
+  /** Papel principal usado para exibição (admin > fiscal_approver > operator). */
   role: UserRole;
   roleLabel: string;
   initials: string;
 }
 
-export const ROLE_USERS: Record<UserRole, RoleUser> = {
-  admin: {
-    name: 'Admin JHS',
-    email: 'admin@blingsync.local',
-    role: 'admin',
-    roleLabel: 'Administrador',
-    initials: 'AD',
-  },
-  fiscal_approver: {
-    name: 'Carla Mendes (Fiscal 1)',
-    email: 'fiscal1@blingsync.local',
-    role: 'fiscal_approver',
-    roleLabel: 'Revisor Fiscal',
-    initials: 'CM',
-  },
-  operator: {
-    name: 'Lucas Operação',
-    email: 'operador@blingsync.local',
-    role: 'operator',
-    roleLabel: 'Operador',
-    initials: 'LO',
-  },
+const ROLE_LABELS: Record<UserRole, string> = {
+  admin: 'Administrador',
+  fiscal_approver: 'Revisor Fiscal',
+  operator: 'Operador',
 };
 
-interface RoleContextValue {
-  currentUser: RoleUser;
-  setRole: (role: UserRole) => void;
+function toSessionUser(raw: { id: string; name: string; email: string; roles: UserRole[] }): SessionUser {
+  const role: UserRole = raw.roles.includes('admin')
+    ? 'admin'
+    : raw.roles.includes('fiscal_approver')
+    ? 'fiscal_approver'
+    : 'operator';
+  const initials =
+    raw.name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0]!.toUpperCase())
+      .join('') || 'US';
+  return { ...raw, role, roleLabel: raw.roles.map((r) => ROLE_LABELS[r]).join(' · '), initials };
 }
 
+interface RoleContextValue {
+  currentUser: SessionUser;
+  hasRole: (...roles: UserRole[]) => boolean;
+}
+
+const ANONYMOUS: SessionUser = {
+  id: '',
+  name: 'Visitante',
+  email: '',
+  roles: [],
+  role: 'operator',
+  roleLabel: 'Sem sessão',
+  initials: '--',
+};
+
 const RoleContext = createContext<RoleContextValue>({
-  currentUser: ROLE_USERS.admin,
-  setRole: () => undefined,
+  currentUser: ANONYMOUS,
+  hasRole: () => false,
 });
 
 export function useCurrentRole() {
@@ -73,116 +86,107 @@ interface NavItem {
   href: string;
   label: string;
   shortLabel: string;
-  badge?: string;
   icon: React.ComponentType<{ className?: string }>;
   allowedRoles: UserRole[];
   isSubItem?: boolean;
 }
 
 /**
- * Arquitetura de Navegação nas 8 Áreas Operacionais (Seção 4 de docs/bling_sync_hub_evolucao_dashboard.md)
- * preservando /matching, /fiscal/ean e /fiscal/ncm.
+ * Arquitetura de Navegação nas 8 Áreas Operacionais (Seção 4 de docs/bling_sync_hub_evolucao_dashboard.md),
+ * filtrada pelos papéis reais da sessão.
  */
 const NAV_ITEMS: NavItem[] = [
-  {
-    href: '/',
-    label: '1. Visão Geral',
-    shortLabel: 'Início',
-    icon: LayoutDashboard,
-    allowedRoles: ['admin', 'fiscal_approver', 'operator'],
-  },
-  {
-    href: '/catalogo',
-    label: '2. Catálogo de Produtos',
-    shortLabel: 'Catálogo',
-    badge: '25',
-    icon: Boxes,
-    allowedRoles: ['admin', 'fiscal_approver', 'operator'],
-  },
-  {
-    href: '/matching',
-    label: '3. Correspondências',
-    shortLabel: 'Vínculos',
-    badge: '296',
-    icon: GitCompare,
-    allowedRoles: ['admin', 'operator'],
-  },
-  {
-    href: '/pendencias',
-    label: '4. Central de Pendências',
-    shortLabel: 'Pendências',
-    badge: '302',
-    icon: ClipboardList,
-    allowedRoles: ['admin', 'fiscal_approver', 'operator'],
-  },
-  {
-    href: '/fiscal/ean',
-    label: '↳ Fiscal · EAN (GTIN)',
-    shortLabel: 'EAN',
-    icon: Barcode,
-    allowedRoles: ['admin', 'fiscal_approver'],
-    isSubItem: true,
-  },
-  {
-    href: '/fiscal/ncm',
-    label: '↳ Fiscal · NCM (Dupla)',
-    shortLabel: 'NCM',
-    icon: FileCheck2,
-    allowedRoles: ['admin', 'fiscal_approver'],
-    isSubItem: true,
-  },
-  {
-    href: '/publicacoes',
-    label: '5. Publicações e Sinc.',
-    shortLabel: 'Publicar',
-    icon: Send,
-    allowedRoles: ['admin', 'operator'],
-  },
-  {
-    href: '/qualidade-margem',
-    label: '6. Qualidade e Margem',
-    shortLabel: 'Margem',
-    icon: TrendingUp,
-    allowedRoles: ['admin', 'fiscal_approver', 'operator'],
-  },
-  {
-    href: '/canais',
-    label: '7. Canais e Regras',
-    shortLabel: 'Canais',
-    icon: Sliders,
-    allowedRoles: ['admin'],
-  },
-  {
-    href: '/auditoria',
-    label: '8. Auditoria e Histórico',
-    shortLabel: 'Auditoria',
-    icon: History,
-    allowedRoles: ['admin', 'fiscal_approver'],
-  },
+  { href: '/', label: '1. Visão Geral', shortLabel: 'Início', icon: LayoutDashboard, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { href: '/catalogo', label: '2. Catálogo de Produtos', shortLabel: 'Catálogo', icon: Boxes, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { href: '/matching', label: '3. Correspondências', shortLabel: 'Vínculos', icon: GitCompare, allowedRoles: ['admin', 'operator'] },
+  { href: '/pendencias', label: '4. Central de Pendências', shortLabel: 'Pendências', icon: ClipboardList, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { href: '/fiscal/ean', label: '↳ Fiscal · EAN (GTIN)', shortLabel: 'EAN', icon: Barcode, allowedRoles: ['admin', 'fiscal_approver'], isSubItem: true },
+  { href: '/fiscal/ncm', label: '↳ Fiscal · NCM (Dupla)', shortLabel: 'NCM', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'], isSubItem: true },
+  { href: '/publicacoes', label: '5. Publicações e Sinc.', shortLabel: 'Publicar', icon: Send, allowedRoles: ['admin', 'operator'] },
+  { href: '/qualidade-margem', label: '6. Qualidade e Margem', shortLabel: 'Margem', icon: TrendingUp, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { href: '/canais', label: '7. Canais e Regras', shortLabel: 'Canais', icon: Sliders, allowedRoles: ['admin'] },
+  { href: '/auditoria', label: '8. Auditoria e Histórico', shortLabel: 'Auditoria', icon: History, allowedRoles: ['admin', 'fiscal_approver'] },
 ];
 
-interface ChannelStatus {
-  id: string;
-  name: string;
-  detail: string;
-  online: boolean;
+interface OauthRow {
+  provider: string;
+  expires_at: string;
 }
 
-const CHANNELS: ChannelStatus[] = [
-  { id: 'bling', name: 'Bling ERP v3', detail: 'Fonte Soberana · 3 req/s', online: true },
-  { id: 'ml', name: 'Mercado Livre', detail: 'JHS SHOPPING (184060242)', online: true },
-  { id: 'ns', name: 'Nuvemshop', detail: 'Loja 6667412', online: true },
+const CHANNEL_META: Array<{ provider: string; name: string; detail: string }> = [
+  { provider: 'bling', name: 'Bling ERP v3', detail: 'Fonte soberana' },
+  { provider: 'mercadolivre', name: 'Mercado Livre', detail: 'JHS SHOPPING' },
+  { provider: 'nuvemshop', name: 'Nuvemshop', detail: 'Loja 6667412' },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
-  const [role, setRole] = useState<UserRole>('admin');
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [oauthRows, setOauthRows] = useState<OauthRow[] | null>(null);
 
-  const currentUser = ROLE_USERS[role];
-  const visibleNavItems = NAV_ITEMS.filter((item) =>
-    item.allowedRoles.includes(currentUser.role)
-  );
+  const isLoginPage = pathname === '/login';
+
+  useEffect(() => {
+    if (isLoginPage) {
+      setChecking(false);
+      return;
+    }
+    let cancelled = false;
+    setChecking(true);
+    void (async () => {
+      try {
+        const me = await apiFetch<{ user: { id: string; name: string; email: string; roles: UserRole[] } }>('/auth/me');
+        if (cancelled) return;
+        setUser(toSessionUser(me.user));
+        try {
+          const state = await apiFetch<{ channels: { oauth: OauthRow[] } }>('/api/dashboard/operational-state');
+          if (!cancelled) setOauthRows(state.channels.oauth);
+        } catch {
+          if (!cancelled) setOauthRows(null);
+        }
+      } catch {
+        if (!cancelled) {
+          setUser(null);
+          router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+        }
+      } finally {
+        if (!cancelled) setChecking(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoginPage, pathname, router]);
+
+  const handleLogout = async () => {
+    try {
+      await apiFetch('/auth/logout', { method: 'POST' });
+    } finally {
+      setUser(null);
+      router.replace('/login');
+    }
+  };
+
+  if (isLoginPage) {
+    return <div className="min-h-screen bg-zinc-950 text-zinc-100">{children}</div>;
+  }
+
+  if (checking || !user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-300">
+        <div className="flex items-center gap-2 text-sm" role="status">
+          <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+          <span>Verificando sessão...</span>
+        </div>
+      </div>
+    );
+  }
+
+  const hasRole = (...roles: UserRole[]) => user.roles.some((r) => roles.includes(r));
+  const visibleNavItems = NAV_ITEMS.filter((item) => hasRole(...item.allowedRoles));
 
   const roleBadgeStyle: Record<UserRole, string> = {
     admin: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
@@ -190,10 +194,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     operator: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
   };
 
+  const now = Date.now();
+  const channels = CHANNEL_META.map((meta) => {
+    if (oauthRows === null) {
+      return { ...meta, state: 'unknown' as const, label: 'Estado não verificado' };
+    }
+    const row = oauthRows.find((o) => o.provider === meta.provider);
+    if (!row) return { ...meta, state: 'offline' as const, label: 'Desconectado' };
+    const expired = new Date(row.expires_at).getTime() < now;
+    return expired
+      ? { ...meta, state: 'expired' as const, label: 'Token expirado' }
+      : { ...meta, state: 'online' as const, label: 'Conectado' };
+  });
+
+  const dotClass = (state: 'online' | 'offline' | 'expired' | 'unknown') =>
+    state === 'online' ? 'bg-emerald-500' : state === 'unknown' ? 'bg-zinc-500' : state === 'expired' ? 'bg-amber-500' : 'bg-rose-500';
+
   return (
-    <RoleContext.Provider value={{ currentUser, setRole }}>
+    <RoleContext.Provider value={{ currentUser: user, hasRole }}>
       <div className="flex min-h-screen bg-zinc-950 text-zinc-100">
-        {/* Sidebar Desktop Retrátil */}
         <aside
           className={`hidden md:flex flex-col border-r border-zinc-800/80 bg-zinc-900/60 transition-all duration-200 ${
             collapsed ? 'w-20' : 'w-68'
@@ -206,48 +225,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
               {!collapsed && (
                 <div className="leading-tight">
-                  <span className="block text-sm font-bold tracking-tight text-white">
-                    Bling Sync HUB
-                  </span>
-                  <span className="block text-[11px] text-zinc-400">
-                    Centro Operacional · Shadow
-                  </span>
+                  <span className="block text-sm font-bold tracking-tight text-white">Bling Sync HUB</span>
+                  <span className="block text-[11px] text-zinc-400">Centro Operacional · Shadow</span>
                 </div>
               )}
             </Link>
             <button
               type="button"
               onClick={() => setCollapsed((prev) => !prev)}
-              title={collapsed ? 'Expandir menu' : 'Recolher menu'}
-              className="rounded-md border border-zinc-800 bg-zinc-900 p-1.5 text-zinc-400 hover:border-zinc-700 hover:text-white"
+              aria-label={collapsed ? 'Expandir menu' : 'Recolher menu'}
+              className="rounded-md border border-zinc-800 bg-zinc-900 p-1.5 text-zinc-400 hover:border-zinc-700 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
             >
-              {collapsed ? (
-                <ChevronRight className="h-4 w-4" />
-              ) : (
-                <ChevronLeft className="h-4 w-4" />
-              )}
+              {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
           </div>
 
-          <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+          <nav aria-label="Navegação principal" className="flex-1 space-y-1 overflow-y-auto p-3">
             {!collapsed && (
               <p className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-                Navegação ({currentUser.roleLabel})
+                Navegação ({user.roleLabel})
               </p>
             )}
             {visibleNavItems.map((item) => {
               const Icon = item.icon;
-              const isActive =
-                item.href === '/'
-                  ? pathname === '/'
-                  : pathname.startsWith(item.href);
-
+              const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
               return (
                 <Link
                   key={item.href}
                   href={item.href}
                   title={collapsed ? item.label : undefined}
-                  className={`flex items-center justify-between rounded-lg px-3 py-2 text-xs font-medium transition ${
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
                     item.isSubItem && !collapsed ? 'ml-3 border-l border-zinc-800 pl-3' : ''
                   } ${
                     isActive
@@ -255,25 +263,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
                   }`}
                 >
-                  <span className="flex items-center gap-2.5">
-                    <Icon
-                      className={`h-4 w-4 shrink-0 ${
-                        isActive ? 'text-emerald-400' : 'text-zinc-400'
-                      }`}
-                    />
-                    {!collapsed && <span>{item.label}</span>}
-                  </span>
-                  {!collapsed && item.badge && (
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                        isActive
-                          ? 'bg-emerald-500/20 text-emerald-300'
-                          : 'bg-zinc-800 text-zinc-300'
-                      }`}
-                    >
-                      {item.badge}
-                    </span>
-                  )}
+                  <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-emerald-400' : 'text-zinc-400'}`} />
+                  {!collapsed && <span>{item.label}</span>}
                 </Link>
               );
             })}
@@ -294,104 +285,66 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )}
         </aside>
 
-        {/* Área Principal */}
         <div className="flex flex-1 flex-col min-w-0 pb-16 md:pb-0">
-          {/* Header Superior */}
           <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800/80 bg-zinc-950/90 px-6 py-3 backdrop-blur">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="mr-1 text-xs font-medium uppercase tracking-wider text-zinc-500">
-                Integrações:
-              </span>
-              {CHANNELS.map((ch) => (
+            <div className="flex flex-wrap items-center gap-2" aria-label="Estado das integrações">
+              <span className="mr-1 text-xs font-medium uppercase tracking-wider text-zinc-500">Integrações:</span>
+              {channels.map((ch) => (
                 <div
-                  key={ch.id}
-                  title={ch.detail}
+                  key={ch.provider}
+                  title={`${ch.detail} · ${ch.label}`}
                   className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/90 px-3 py-1 text-xs"
                 >
-                  <span className="relative flex h-2 w-2">
-                    <span
-                      className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${
-                        ch.online ? 'bg-emerald-400' : 'bg-rose-400'
-                      }`}
-                    />
-                    <span
-                      className={`relative inline-flex h-2 w-2 rounded-full ${
-                        ch.online ? 'bg-emerald-500' : 'bg-rose-500'
-                      }`}
-                    />
+                  <span className="relative flex h-2 w-2" aria-hidden="true">
+                    {ch.state === 'online' && (
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                    )}
+                    <span className={`relative inline-flex h-2 w-2 rounded-full ${dotClass(ch.state)}`} />
                   </span>
                   <span className="font-medium text-zinc-200">{ch.name}</span>
-                  <span className="hidden lg:inline text-[11px] text-zinc-500">
-                    {ch.detail}
-                  </span>
+                  <span className="text-[11px] text-zinc-400">{ch.label}</span>
                 </div>
               ))}
             </div>
 
-            {/* Indicador do Usuário Logado + Seletor RBAC */}
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/70 px-2.5 py-1 text-xs text-zinc-400">
-                <UserCheck className="h-3.5 w-3.5 text-zinc-400" />
-                <label htmlFor="rbac-role-select" className="sr-only">
-                  Alternar Papel RBAC
-                </label>
-                <select
-                  id="rbac-role-select"
-                  value={currentUser.role}
-                  onChange={(e) => setRole(e.target.value as UserRole)}
-                  className="bg-transparent text-xs font-medium text-zinc-200 focus:outline-none cursor-pointer"
-                >
-                  <option value="admin" className="bg-zinc-900">
-                    Papel: Administrador (Total)
-                  </option>
-                  <option value="fiscal_approver" className="bg-zinc-900">
-                    Papel: Revisor Fiscal (EAN/NCM)
-                  </option>
-                  <option value="operator" className="bg-zinc-900">
-                    Papel: Operador (Catálogo/Vínculos)
-                  </option>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-2.5 pl-1">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-xs font-bold text-white">
-                  {currentUser.initials}
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-xs font-bold text-white" aria-hidden="true">
+                  {user.initials}
                 </div>
                 <div className="hidden sm:block leading-tight">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-white">
-                      {currentUser.name}
-                    </span>
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${roleBadgeStyle[currentUser.role]}`}
-                    >
-                      {currentUser.roleLabel}
+                    <span className="text-xs font-semibold text-white">{user.name}</span>
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${roleBadgeStyle[user.role]}`}>
+                      {user.roleLabel}
                     </span>
                   </div>
-                  <span className="block text-[11px] text-zinc-400">
-                    {currentUser.email}
-                  </span>
+                  <span className="block text-[11px] text-zinc-400">{user.email}</span>
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => void handleLogout()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-300 hover:border-zinc-700 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                <span>Sair</span>
+              </button>
             </div>
           </header>
 
-          {/* Conteúdo da Rota */}
           <div className="flex-1">{children}</div>
         </div>
 
-        {/* Menu Inferior Mobile */}
-        <nav className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden items-center justify-around border-t border-zinc-800 bg-zinc-900/95 px-2 py-2 backdrop-blur">
+        <nav aria-label="Navegação móvel" className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden items-center justify-around border-t border-zinc-800 bg-zinc-900/95 px-2 py-2 backdrop-blur">
           {visibleNavItems.slice(0, 5).map((item) => {
             const Icon = item.icon;
-            const isActive =
-              item.href === '/'
-                ? pathname === '/'
-                : pathname.startsWith(item.href);
+            const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
             return (
               <Link
                 key={item.href}
                 href={item.href}
+                aria-current={isActive ? 'page' : undefined}
                 className={`flex flex-col items-center gap-1 rounded-md px-3 py-1 text-xs ${
                   isActive ? 'text-emerald-400 font-semibold' : 'text-zinc-400'
                 }`}

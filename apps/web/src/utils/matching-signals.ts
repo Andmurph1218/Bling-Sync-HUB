@@ -39,6 +39,16 @@ export function translateMatchingSignal(rawSignal: string): TranslatedSignal {
     };
   }
 
+  // Padrão name_jw_70_89 (faixa de similaridade parcial — sinal auxiliar, não forte)
+  const jwRange = normalized.match(/^name_jw_(\d{1,3})_(\d{1,3})$/i);
+  if (jwRange) {
+    return {
+      raw: rawSignal,
+      label: `Nome ${jwRange[1]}–${jwRange[2]}% similar (sinal fraco)`,
+      tone: 'warning',
+    };
+  }
+
   // Padrão name_jw_92 ou name_jw: 92
   const jwMatch = normalized.match(/^name_jw[_:\s]+(\d{1,3})$/i);
   if (jwMatch) {

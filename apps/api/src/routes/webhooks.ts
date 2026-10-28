@@ -11,8 +11,10 @@ import { logger } from '../lib/logger.js';
 export const webhooksRouter = Router();
 
 function getWebhookSecretForSource(source: WebhookSource): string {
-  dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
-  dotenv.config({ path: path.resolve(process.cwd(), '../../.env'), override: true });
+  if (!process.env.VITEST) {
+    dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
+    dotenv.config({ path: path.resolve(process.cwd(), '../../.env'), override: true });
+  }
   if (source === 'bling') {
     return (
       process.env.BLING_WEBHOOK_SECRET ||
@@ -73,7 +75,7 @@ webhooksRouter.post(
         rawBody,
         signatureHeader,
         secret,
-        queueDispatcher: {
+        queueDispatcher: process.env.VITEST ? undefined : {
           enqueue: async (webhookEventId: string) => {
             setImmediate(() => {
               processWebhookEventById(webhookEventId).catch((err) => {

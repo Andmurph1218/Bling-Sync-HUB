@@ -38,6 +38,14 @@ export interface MatchingComparisonItem {
   quarantineReason?: string;
   resolution?: 'confirmed' | 'rejected';
   rejectionReason?: string;
+  /** Campos usados na resolução real via POST /api/matching/resolve */
+  masterProductId?: string | null;
+  platformKey?: 'mercadolivre' | 'nuvemshop';
+  platformProductId?: string;
+  mlModel?: 'legacy_variations' | 'user_product' | null;
+  familyId?: string | null;
+  familyName?: string | null;
+  channelUrl?: string | null;
 }
 
 const REJECTION_REASONS = [
@@ -81,7 +89,8 @@ export function MatchDetailsDrawer({
     normalizeCompare(item.blingStatus) !== normalizeCompare(item.channelStatus);
 
   const blingUrl = buildBlingProductUrl(item.blingId);
-  const channelUrl = buildChannelAnnouncementUrl(item.platform, item.channelId);
+  const channelUrl = item.channelUrl ?? buildChannelAnnouncementUrl(item.platform, item.channelId);
+  const canDecide = Boolean(item.masterProductId);
 
   const handleConfirmClick = () => {
     onConfirm(item);
@@ -490,8 +499,9 @@ export function MatchDetailsDrawer({
           <div className="flex items-center justify-between gap-3">
             <button
               type="button"
+              disabled={!canDecide}
               onClick={() => setRejectPopoverOpen((prev) => !prev)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/50 bg-transparent px-4 py-2 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/15"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/50 bg-transparent px-4 py-2 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/15 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Ban className="h-4 w-4" />
               Rejeitar Par
@@ -499,8 +509,10 @@ export function MatchDetailsDrawer({
 
             <button
               type="button"
+              disabled={!canDecide}
+              title={canDecide ? undefined : 'Sem candidato no Bling para vincular'}
               onClick={handleConfirmClick}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Check className="h-4 w-4" />
               Confirmar Vínculo

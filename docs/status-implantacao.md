@@ -284,3 +284,23 @@ URLs prontas para colar nos painéis de desenvolvedor:
    - Confirme que `GET /estoques/saldos` e `GET /produtos/lojas` já preencheram `product_variants.stock` e `variant_channel_prices`.
    - Como `admin`, chame `PUT /admin/controls/sync-owner/mercadolivre` (e/ou `nuvemshop`) enviando `{"stock_price": "hub", "content": "hub"}`. A mudança será gravada em `control_changes` e o **APE** assumirá o envio de estoque e preço P1 (< 2 min).
 
+---
+
+## 6. Evolução do Dashboard (docs/bling_sync_hub_evolucao_dashboard.md) — 28/10/2026
+
+### Implantado
+- **Login real**: tela `/login` com sessão por cookie `HttpOnly` (`/auth/login`, `/auth/me`, `/auth/logout`). O seletor de papel simulado foi removido; o menu e as ações respeitam os papéis reais (Operador, Revisor Fiscal, Administrador).
+- **Endpoints protegidos**: todas as rotas `/api/dashboard/*` exigem sessão (`401` sem login). Simulação restrita a Operador/Administrador; auditoria restrita a Administrador/Revisor Fiscal (`403` para os demais).
+- **8 áreas operacionais** com dados reais do PostgreSQL: Visão Geral, Catálogo e Ficha Única (7 abas), Correspondências, Central de Pendências, Fiscal EAN, Fiscal NCM, Publicações, Qualidade e Margem, Canais e Auditoria. Estados de carregamento, vazio e erro em todas as telas (sem números fictícios).
+- **Correspondências (`/matching`)**: fila real (`matching_queue`) com título, SKU, EAN, preço e link do anúncio, comparação com o candidato do Bling e decisões reais via `POST /api/matching/resolve` (confirmar ou rejeitar par em `match_rejections`), inclusive em lote.
+- **Fiscal**: aprovação/rejeição real de EAN (somente papel Revisor Fiscal, com validação GS1) e dupla confirmação real de NCM com nota TIPI obrigatória e bloqueio do mesmo revisor na 2ª etapa.
+- **Canais (`/canais`)**: estado real dos tokens OAuth (incluindo ausência de renovação automática), responsável por estoque/preço e conteúdo, modo shadow/live e depósitos. A integração nativa aparece como **"Estado não verificado"**, pois a API do Bling não expõe essa informação.
+- **10 motores (Seção 6)** com estrutura padronizada e **10 indicadores administrativos (Seção 9)** com fórmula, fonte e período, incluindo tempo médio de resolução calculado.
+- **Publicações (`/publicacoes`)**: simulação sem escrita externa e histórico real de `push_jobs`/`push_job_steps`.
+
+### Decisões e limitações registradas
+- **Reprocessamento real desativado** na interface: sem conector com confirmação remota, o motor de publicação marcaria passos como concluídos sem confirmação do canal. Exige autorização explícita antes de habilitar.
+- **Senhas iniciais**: o `.env` não define `BOOTSTRAP_*_PASSWORD`, portanto os 4 usuários foram criados com as senhas padrão do `bootstrap.ts`. Trocar antes de expor o Dashboard fora da máquina local.
+- Testes: 15 suítes / 58 testes aprovados (`dashboard_evolution.test.ts` cobre autenticação, 10 motores, 10 indicadores, ficha, simulador, margem, auditoria, publicações e fila normalizada).
+- Pendente de pessoas: validação com operadores (Seção 11 do plano de evolução).
+

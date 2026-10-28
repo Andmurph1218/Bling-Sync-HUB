@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Check,
   X,
@@ -22,116 +22,78 @@ import {
   buildChannelAnnouncementUrl,
   translateMatchingSignal,
 } from '../../utils/matching-signals';
+import { apiFetch, ApiError } from '../../utils/api-client';
 
-const INITIAL_MATCHING_ROWS: MatchingComparisonItem[] = [
-  // Caso 1: Match com score 95 (SKU e Nome batendo — 2 sinais fortes concordantes)
-  {
-    id: 'mq-1',
-    blingId: '16723377536',
-    blingSku: 'Mercurio 400w e40',
-    blingName: 'Lâmpada Vapor Mercúrio 400w Hpl E40 Branco-neutro',
-    blingEan: '7891234567895',
-    blingPrice: 'R$ 89,90',
-    blingStatus: 'Ativo',
-    channelId: 'MLB3948172610',
-    platform: 'Mercado Livre',
-    channelTitle: 'Lâmpada Vapor Mercúrio 400w Hpl E40 Branco-neutro',
-    channelSku: 'Mercurio 400w e40',
-    channelEan: '7891234567895',
-    channelPrice: 'R$ 89,90',
-    channelStatus: 'Ativo',
-    pireScore: 95,
-    strongSignals: ['sku_exact', 'name_jw: 96'],
-    status: 'Sugestão',
-  },
-  // Caso 2: Match onde o SKU é idêntico, mas o Nome é completamente divergente (anúncio reutilizado)
-  {
-    id: 'mq-2',
-    blingId: '16722020114',
-    blingSku: '13621',
-    blingName: 'Isolador Epoxi Paralelo Barramento 30x30x3/8 Cx. 10un.',
-    blingEan: '7898912345601',
-    blingPrice: 'R$ 142,00',
-    blingStatus: 'Ativo',
-    channelId: 'NS-314517886',
-    platform: 'Nuvemshop',
-    channelTitle: 'Disjuntor Bipolar DIN 40A Curva C (Anúncio Reutilizado)',
-    channelSku: '13621',
-    channelEan: '7890009998887',
-    channelPrice: 'R$ 39,90',
-    channelStatus: 'Ativo',
-    pireScore: 78,
-    strongSignals: ['sku_exact', 'title_divergent_warning'],
-    status: 'Sugestão',
-  },
-  // Caso 3: Match em quarentena com EAN conflitante (mais de um dono no Bling)
-  {
-    id: 'mq-3',
-    blingId: '16719381290',
-    blingSku: 'CONT-AUX-2NA2NF',
-    blingName: 'CONTATOR AUXILIAR 2NA+2NF 220V',
-    blingEan: '7896543210988',
-    blingPrice: 'R$ 64,50',
-    blingStatus: 'Ativo',
-    channelId: 'MLB4019283711',
-    platform: 'Mercado Livre',
-    channelTitle: 'Contator Auxiliar 2NA+2NF Bobina 220V Industrial',
-    channelSku: 'CONT-AUX-ML',
-    channelEan: '7896543210988',
-    channelPrice: 'R$ 68,00',
-    channelStatus: 'Ativo',
-    pireScore: 42,
-    strongSignals: ['ean_shared_conflict', 'name_jw: 92'],
-    status: 'Quarentena',
-    quarantineReason:
-      'EAN 7896543210988 compartilhado entre dois master_products distintos no Bling (bloqueado até desempate humano).',
-  },
-  // Caso 4: Sugestão por alta similaridade de nome (sinal único <= 80)
-  {
-    id: 'mq-4',
-    blingId: '16722891360',
-    blingSku: 'Infra Ray 220V 250W',
-    blingName: 'Lâmpada Infravermelha 220V Aquecimento Secagem 250W',
-    blingEan: '7894445556661',
-    blingPrice: 'R$ 54,90',
-    blingStatus: 'Ativo',
-    channelId: 'NS-314532102',
-    platform: 'Nuvemshop',
-    channelTitle: 'Lâmpada Infravermelha 250W 220V Secagem Industrial',
-    channelSku: 'INFRA-250-220',
-    channelEan: '7894445556661',
-    channelPrice: 'R$ 54,90',
-    channelStatus: 'Ativo',
-    pireScore: 80,
-    strongSignals: ['name_jw: 92'],
-    status: 'Sugestão',
-  },
-  // Caso 5: Família User Product em quarentena no ML
-  {
-    id: 'mq-5',
-    blingId: '16723148832',
-    blingSku: 'Infra Ray 220V 250W - Kit 5',
-    blingName: 'Kit 5 un. Lâmpada Infravermelha 220V Aquecimento Secagem 250W',
-    blingEan: '7894445557774',
-    blingPrice: 'R$ 249,00',
-    blingStatus: 'Ativo',
-    channelId: 'MLBU-FAM-882910',
-    platform: 'Mercado Livre',
-    channelTitle: 'Kit Lâmpada Infravermelha 250W (Família User Product)',
-    channelSku: 'KIT5-INFRA-220',
-    channelEan: 'Não informado',
-    channelPrice: 'R$ 259,00',
-    channelStatus: 'Ativo',
-    pireScore: 45,
-    strongSignals: ['family_multi_parent_conflict'],
-    status: 'Quarentena',
-    quarantineReason:
-      'Itens da mesma family_id apontam para 2 produtos pais diferentes no Bling; o hub nunca parte a família.',
-  },
-];
+interface QueueApiItem {
+  queueId: string;
+  platform: 'mercadolivre' | 'nuvemshop';
+  platformProductId: string;
+  mlModel: 'legacy_variations' | 'user_product' | null;
+  familyId: string | null;
+  familyName: string | null;
+  itemStatus: string;
+  bestScore: number | null;
+  channel: {
+    title: string;
+    sku: string | null;
+    ean: string | null;
+    price: string | null;
+    status: string | null;
+    url: string | null;
+  };
+  candidate: {
+    masterProductId: string;
+    blingId: string | null;
+    blingSku: string;
+    name: string | null;
+    ean: string | null;
+    price: string | null;
+    status: string | null;
+    strongSignals: string[];
+    auxiliarySignals: string[];
+  } | null;
+}
+
+const money = (v: string | null) => (v ? `R$ ${Number(v).toFixed(2).replace('.', ',')}` : '—');
+
+function toComparisonItem(q: QueueApiItem): MatchingComparisonItem {
+  const quarantine = q.itemStatus === 'quarantine';
+  return {
+    id: q.queueId,
+    blingId: q.candidate?.blingId ?? '',
+    blingSku: q.candidate ? q.candidate.blingSku || '(Sem SKU)' : '(sem candidato)',
+    blingName: q.candidate?.name ?? 'Nenhum produto do Bling sugerido',
+    blingEan: q.candidate?.ean ?? 'Ausente',
+    blingPrice: money(q.candidate?.price ?? null),
+    blingStatus: q.candidate?.status === 'active' ? 'Ativo' : q.candidate?.status ?? '—',
+    channelId: q.platformProductId,
+    platform: q.platform === 'mercadolivre' ? 'Mercado Livre' : 'Nuvemshop',
+    channelTitle: q.channel.title,
+    channelSku: q.channel.sku ?? 'Não informado',
+    channelEan: q.channel.ean ?? 'Não informado',
+    channelPrice: money(q.channel.price),
+    channelStatus: q.channel.status ?? '—',
+    pireScore: q.bestScore ?? 0,
+    strongSignals: [...(q.candidate?.strongSignals ?? []), ...(q.candidate?.auxiliarySignals ?? [])],
+    status: quarantine ? 'Quarentena' : 'Sugestão',
+    quarantineReason: quarantine
+      ? 'Conflito de identidade (EAN compartilhado ou família ligada a mais de um produto do Bling). Exige decisão humana.'
+      : undefined,
+    masterProductId: q.candidate?.masterProductId ?? null,
+    platformKey: q.platform,
+    platformProductId: q.platformProductId,
+    mlModel: q.mlModel,
+    familyId: q.familyId,
+    familyName: q.familyName,
+    channelUrl: q.channel.url,
+  };
+}
 
 export default function MatchingPage() {
-  const [rows, setRows] = useState<MatchingComparisonItem[]>(INITIAL_MATCHING_ROWS);
+  const [rows, setRows] = useState<MatchingComparisonItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [activeDrawerItemId, setActiveDrawerItemId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -148,67 +110,106 @@ export default function MatchingPage() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const handleConfirmSingle = (row: MatchingComparisonItem) => {
-    setRows((prev) =>
-      prev.map((r) => (r.id === row.id ? { ...r, resolution: 'confirmed' } : r))
-    );
-    setSelectedIds((prev) => prev.filter((id) => id !== row.id));
-    pushToast(
-      'success',
-      'Vínculo confirmado com sucesso! Push de conteúdo será agendado.',
-      `${row.blingSku} ↔ ${row.channelId} (${row.platform})`
-    );
+  const loadQueue = useCallback(async () => {
+    setLoading(true);
+    try {
+      const json = await apiFetch<{ items: QueueApiItem[] }>('/api/matching/queue');
+      setRows(json.items.map(toComparisonItem));
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(
+        err instanceof ApiError && err.status === 403
+          ? 'Seu papel não tem acesso à fila de correspondências (restrita a Operador e Administrador).'
+          : 'Não foi possível carregar a fila de correspondências da API local.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadQueue();
+  }, [loadQueue]);
+
+  const resolve = async (
+    row: MatchingComparisonItem,
+    action: 'confirm' | 'reject_candidate',
+    reason?: string
+  ): Promise<boolean> => {
+    if (!row.masterProductId || !row.platformKey || !row.platformProductId) return false;
+    try {
+      await apiFetch('/api/matching/resolve', {
+        method: 'POST',
+        json: {
+          platform: row.platformKey,
+          platformProductId: row.platformProductId,
+          action,
+          masterProductId: row.masterProductId,
+          reason,
+          ...(row.mlModel ? { mlModel: row.mlModel } : {}),
+          ...(row.familyId ? { familyId: row.familyId } : {}),
+          ...(row.familyName ? { familyName: row.familyName } : {}),
+        },
+      });
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === row.id
+            ? { ...r, resolution: action === 'confirm' ? 'confirmed' : 'rejected', rejectionReason: reason }
+            : r
+        )
+      );
+      setSelectedIds((prev) => prev.filter((id) => id !== row.id));
+      return true;
+    } catch (err) {
+      pushToast(
+        'warning',
+        'Não foi possível registrar a decisão.',
+        err instanceof Error ? err.message : row.channelId
+      );
+      return false;
+    }
   };
 
-  const handleRejectSingle = (row: MatchingComparisonItem, reason?: string) => {
-    setRows((prev) =>
-      prev.map((r) =>
-        r.id === row.id
-          ? { ...r, resolution: 'rejected', rejectionReason: reason }
-          : r
-      )
-    );
-    setSelectedIds((prev) => prev.filter((id) => id !== row.id));
-    pushToast(
-      'warning',
-      'Par rejeitado. O produto não voltará a ser sugerido para este anúncio.',
-      reason
-        ? `Motivo gravado em match_rejections: ${reason}`
-        : `Par (${row.blingSku}, ${row.channelId}) gravado em match_rejections.`
-    );
+  const handleConfirmSingle = async (row: MatchingComparisonItem) => {
+    if (await resolve(row, 'confirm')) {
+      pushToast(
+        'success',
+        'Vínculo confirmado e gravado em platform_links.',
+        `${row.blingSku} ↔ ${row.channelId} (${row.platform}). Nenhuma escrita foi feita no canal.`
+      );
+    }
   };
 
-  const handleBulkConfirm = () => {
-    if (selectedIds.length === 0) return;
-    const count = selectedIds.length;
-    setRows((prev) =>
-      prev.map((r) =>
-        selectedIds.includes(r.id) ? { ...r, resolution: 'confirmed' } : r
-      )
-    );
+  const handleRejectSingle = async (row: MatchingComparisonItem, reason?: string) => {
+    if (await resolve(row, 'reject_candidate', reason)) {
+      pushToast(
+        'warning',
+        'Par rejeitado. O produto não voltará a ser sugerido para este anúncio.',
+        reason
+          ? `Motivo gravado em match_rejections: ${reason}`
+          : `Par (${row.blingSku}, ${row.channelId}) gravado em match_rejections.`
+      );
+    }
+  };
+
+  const runBulk = async (action: 'confirm' | 'reject_candidate') => {
+    const targets = rows.filter((r) => selectedIds.includes(r.id) && !r.resolution);
+    setBusy(true);
+    let ok = 0;
+    for (const row of targets) {
+      if (await resolve(row, action, action === 'reject_candidate' ? 'Rejeição em lote' : undefined)) ok += 1;
+    }
+    setBusy(false);
     setSelectedIds([]);
     pushToast(
-      'success',
-      'Vínculo confirmado com sucesso! Push de conteúdo será agendado.',
-      `${count} item(ns) confirmados em lote e vinculados em platform_links.`
+      action === 'confirm' ? 'success' : 'warning',
+      action === 'confirm' ? `${ok} vínculo(s) confirmado(s).` : `${ok} par(es) rejeitado(s) permanentemente.`,
+      ok < targets.length ? `${targets.length - ok} item(ns) sem candidato ou com erro foram ignorados.` : undefined
     );
   };
 
-  const handleBulkReject = () => {
-    if (selectedIds.length === 0) return;
-    const count = selectedIds.length;
-    setRows((prev) =>
-      prev.map((r) =>
-        selectedIds.includes(r.id) ? { ...r, resolution: 'rejected' } : r
-      )
-    );
-    setSelectedIds([]);
-    pushToast(
-      'warning',
-      'Par rejeitado. O produto não voltará a ser sugerido para este anúncio.',
-      `${count} par(es) gravados permanentemente em match_rejections.`
-    );
-  };
+  const handleBulkConfirm = () => void runBulk('confirm');
+  const handleBulkReject = () => void runBulk('reject_candidate');
 
   const toggleSelectRow = (id: string) => {
     setSelectedIds((prev) =>
@@ -216,7 +217,7 @@ export default function MatchingPage() {
     );
   };
 
-  const selectableRows = rows.filter((r) => !r.resolution);
+  const selectableRows = rows.filter((r) => !r.resolution && r.masterProductId);
   const allSelected =
     selectableRows.length > 0 &&
     selectableRows.every((r) => selectedIds.includes(r.id));
@@ -231,6 +232,8 @@ export default function MatchingPage() {
 
   const activeDrawerItem =
     rows.find((r) => r.id === activeDrawerItemId) ?? null;
+  const suggestionCount = rows.filter((r) => !r.resolution && r.status === 'Sugestão').length;
+  const quarantineCount = rows.filter((r) => !r.resolution && r.status === 'Quarentena').length;
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -247,10 +250,10 @@ export default function MatchingPage() {
         </div>
         <div className="flex items-center gap-2 text-xs">
           <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 font-medium text-amber-300">
-            14 Sugestões
+            {suggestionCount} Sugestões
           </span>
           <span className="rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1 font-medium text-rose-300">
-            2 em Quarentena
+            {quarantineCount} em Quarentena
           </span>
         </div>
       </header>
@@ -285,6 +288,21 @@ export default function MatchingPage() {
               Rejeitar Selecionados
             </button>
           </div>
+        </div>
+      )}
+
+      {loadError && (
+        <div role="alert" className="mt-6 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">
+          {loadError}
+        </div>
+      )}
+      {loading && rows.length === 0 && (
+        <p className="mt-6 text-sm text-zinc-400" role="status">Carregando fila de correspondências...</p>
+      )}
+      {!loading && !loadError && rows.length === 0 && (
+        <div className="mt-6 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-200">
+          <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+          <span>Nenhum anúncio aguardando decisão de vínculo.</span>
         </div>
       )}
 
@@ -342,7 +360,7 @@ export default function MatchingPage() {
                     >
                       <input
                         type="checkbox"
-                        disabled={Boolean(row.resolution)}
+                        disabled={Boolean(row.resolution) || !row.masterProductId || busy}
                         checked={isSelected}
                         onChange={() => toggleSelectRow(row.id)}
                         aria-label={`Selecionar ${row.blingSku}`}
@@ -492,16 +510,18 @@ export default function MatchingPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleConfirmSingle(row)}
-                            className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/25"
+                            onClick={() => void handleConfirmSingle(row)}
+                            disabled={!row.masterProductId || busy}
+                            className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Check className="h-3.5 w-3.5" />
                             Confirmar Vínculo
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleRejectSingle(row)}
-                            className="inline-flex items-center gap-1 rounded-md border border-rose-500/40 bg-rose-500/15 px-2.5 py-1.5 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25"
+                            onClick={() => void handleRejectSingle(row)}
+                            disabled={!row.masterProductId || busy}
+                            className="inline-flex items-center gap-1 rounded-md border border-rose-500/40 bg-rose-500/15 px-2.5 py-1.5 text-xs font-semibold text-rose-300 transition hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <X className="h-3.5 w-3.5" />
                             Rejeitar Par

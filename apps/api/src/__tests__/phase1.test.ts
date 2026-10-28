@@ -52,10 +52,10 @@ describe('Fase 1 — Schema Completo (Migrations 1 a 12 sobem e descem, Seeds, �
     setPool(null);
   });
 
-  it('1. Sobe as 12 migrations em ordem e popula os seeds iniciais (eixos, aliases, limites, DLM, depósitos e lojas)', async () => {
+  it('1. Sobe as 13 migrations em ordem e popula os seeds iniciais (eixos, aliases, limites, DLM, depósitos e lojas)', async () => {
     const applied = await runAllMigrationsUp({ stripPartitionClauseForMemDb: true });
-    expect(applied).toHaveLength(12);
-    expect(ALL_MIGRATIONS).toHaveLength(12);
+    expect(applied).toHaveLength(13);
+    expect(ALL_MIGRATIONS).toHaveLength(13);
 
     const axesCount = await query<{ count: number }>(
       `SELECT count(*)::int AS count FROM attribute_axes`
@@ -200,14 +200,14 @@ describe('Fase 1 — Schema Completo (Migrations 1 a 12 sobem e descem, Seeds, �
     expect(upSql).toContain('PARTITION OF identity_resolution_logs FOR VALUES FROM');
   });
 
-  it('4. Garante idempotência no up e desce todas as 12 migrations (down) removendo todas as tabelas de domínio', async () => {
-    // Reexecutar up quando todas as 12 já subiram deve ser no-op (idempotente)
+  it('4. Garante idempotência no up e desce todas as 13 migrations (down) removendo todas as tabelas de domínio', async () => {
+    // Reexecutar up quando todas as 13 já subiram deve ser no-op (idempotente)
     const noopUp = await runAllMigrationsUp({ stripPartitionClauseForMemDb: true });
     expect(noopUp).toHaveLength(0);
 
-    // Desce todas as 12 migrations na ordem inversa (12 -> 1)
+    // Desce todas as 13 migrations na ordem inversa (13 -> 1)
     const reverted = await runAllMigrationsDown({ stripPartitionClauseForMemDb: true });
-    expect(reverted).toHaveLength(12);
+    expect(reverted).toHaveLength(13);
 
     const remaining = await query<{ count: number }>(
       `SELECT count(*)::int AS count FROM pgmigrations`

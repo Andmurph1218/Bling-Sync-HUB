@@ -1,3 +1,5 @@
+import { apiFetch } from './api-client';
+
 export interface OperationalKpiMetric {
   value: number;
   definition: string;
@@ -245,16 +247,8 @@ export async function fetchOperationalState(): Promise<{
   data: OperationalStatePayload;
   liveFromDatabase: boolean;
 }> {
-  const apiUrl =
-    process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
   try {
-    const res = await fetch(`${apiUrl}/api/dashboard/operational-state`, {
-      cache: 'no-store',
-    });
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    const json = (await res.json()) as OperationalStatePayload;
+    const json = await apiFetch<OperationalStatePayload>('/api/dashboard/operational-state');
     return { data: json, liveFromDatabase: true };
   } catch {
     return { data: FALLBACK_OPERATIONAL_STATE, liveFromDatabase: false };
