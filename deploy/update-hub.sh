@@ -6,8 +6,25 @@ mkdir -p /tmp/bling-new
 tar -xf /tmp/bling-src.tar -C /tmp/bling-new
 cp -a /tmp/bling-new/Bling-Sync-HUB/. "$APP/"
 cd "$APP"
-npm run build --workspace=@bling-sync/api
-NEXT_PUBLIC_API_URL=https://hub.jhshopping.com.br NODE_OPTIONS=--max-old-space-size=1400 npm run build --workspace=@bling-sync/web
+# NODE_ENV=production no .env não pode vazar para o npm: isso omite devDependencies
+# e o build/migration ficam sem tsc e tsx.
+env -u NODE_ENV npm ci
+env -u NODE_ENV npm run build --workspace=@bling-sync/api
+env -u NODE_ENV NEXT_PUBLIC_API_URL=https://hub.jhshopping.com.br NODE_OPTIONS=--max-old-space-size=1400 npm run build --workspace=@bling-sync/web
+DATABASE_URL="$(python3 - <<'PY'
+from pathlib import Path
+for line in Path("/opt/bling-sync-hub/.env").read_text().splitlines():
+    if line.startswith("DATABASE_URL="):
+        print(line.split("=", 1)[1], end="")
+        break
+PY
+)"
+if [[ -z "${DATABASE_URL}" ]]; then
+  echo "DATABASE_URL ausente no .env" >&2
+  exit 1
+fi
+export DATABASE_URL
+npm run migrate:up
 chown -R blinghub:blinghub "$APP"
 chmod 600 "$APP/.env"
 NEXT_BIN="$(cd "$APP" && node -e "console.log(require.resolve('next/dist/bin/next'))")"

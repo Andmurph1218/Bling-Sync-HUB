@@ -31,7 +31,7 @@ script = open(os.path.join(os.path.dirname(__file__), "update-hub.sh"), "rb").re
 with sftp.file("/root/update-hub.sh", "w") as remote:
     remote.write(script.decode("utf-8"))
 sftp.close()
-stdin, stdout, stderr = client.exec_command("bash /root/update-hub.sh", timeout=900)
+stdin, stdout, stderr = client.exec_command("bash /root/update-hub.sh", timeout=1800)
 out = stdout.read().decode()
 err = stderr.read().decode()
 print(out[-6000:])
