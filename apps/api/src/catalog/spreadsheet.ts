@@ -105,12 +105,13 @@ export async function importCatalogWorkbook(file: Buffer): Promise<{ lines: Impo
   const ignoredPrice = ['preco', 'estoque', 'price', 'stock'].some((key) => columns.has(key));
   const ignoresBlingText = ['nome', 'name', 'descricao', 'description', 'categoria', 'category'].some((key) => columns.has(key));
   const imageColumn = columns.get('url da imagem') ?? columns.get('imagem') ?? columns.get('image_url');
-  const channelColumns: Array<{ key: string; platform: 'mercadolivre' | 'nuvemshop'; field: 'title' | 'description' }> = [
+  const channelColumnDefs: Array<{ key: string; platform: 'mercadolivre' | 'nuvemshop'; field: 'title' | 'description' }> = [
     { key: 'titulo mercadolivre', platform: 'mercadolivre', field: 'title' },
     { key: 'descricao mercadolivre', platform: 'mercadolivre', field: 'description' },
     { key: 'titulo nuvemshop', platform: 'nuvemshop', field: 'title' },
     { key: 'descricao nuvemshop', platform: 'nuvemshop', field: 'description' },
-  ].filter((column) => columns.has(column.key));
+  ];
+  const channelColumns = channelColumnDefs.filter((column) => columns.has(column.key));
 
   const lines: ImportLine[] = [];
   for (let line = 2; line <= sheet.rowCount; line += 1) {

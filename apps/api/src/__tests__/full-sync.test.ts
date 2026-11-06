@@ -40,6 +40,7 @@ describe('sync completo do ERP', () => {
         return { page, pageSize, externalIds, done: externalIds.length < pageSize };
       },
       pullCatalogProduct: async (externalId: string) => catalog.get(externalId) ?? null,
+      createProduct: async () => ({ erp_id: '0', stockWarning: null }),
     } as ErpConnector;
 
     const report = await runFullCatalogSync(erp, {
@@ -85,6 +86,7 @@ describe('sync completo do ERP', () => {
         return product(12, 'P', { codigo: 'SKU-12', nome: 'Cor:Azul', variacao: { nome: 'Cor:Azul', ordem: 1 } });
       },
       listChildIds: async () => ['12'],
+      createProduct: async () => ({ erp_id: '0', stockWarning: null }),
     } as ErpConnector;
     const saved: Array<{ codigo: string; variacoes: number }> = [];
 

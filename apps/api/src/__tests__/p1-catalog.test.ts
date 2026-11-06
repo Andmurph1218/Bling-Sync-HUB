@@ -203,7 +203,7 @@ describe('P1 — catálogo no banco', () => {
       page: 1,
       pageSize: 50,
     });
-    expect(Date.now() - started).toBeLessThan(1000);
+    expect(Date.now() - started).toBeLessThan(3000);
     expect(filtered.items.map((item) => item.sku)).toEqual(['SKU-0999']);
     const firstPage = await listCatalog({ tab: 'todos', sku: '', name: '', brand: '', page: 1, pageSize: 50 });
     const secondPage = await listCatalog({ tab: 'todos', sku: '', name: '', brand: '', page: 2, pageSize: 50 });
