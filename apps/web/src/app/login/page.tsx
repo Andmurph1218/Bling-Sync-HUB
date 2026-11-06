@@ -18,12 +18,28 @@ function LoginForm() {
     setError(null);
     setSubmitting(true);
     try {
-      await apiFetch('/auth/login', { method: 'POST', json: { email, password } });
+      const session = await apiFetch<{ mustChangePassword?: boolean }>('/auth/login', {
+        method: 'POST',
+        json: { email, password },
+      });
+      if (session.mustChangePassword) {
+        router.replace('/conta/senha');
+        return;
+      }
       const next = params.get('next');
       router.replace(next && next.startsWith('/') && !next.startsWith('/login') ? next : '/');
     } catch (err) {
+      const rejectedDefault =
+        err instanceof ApiError &&
+        err.status === 403 &&
+        typeof err.body === 'object' &&
+        err.body !== null &&
+        'error' in err.body &&
+        (err.body as { error: unknown }).error === 'default_password_rejected';
       setError(
-        err instanceof ApiError && err.status === 401
+        rejectedDefault
+          ? 'A senha padrão do bootstrap não é aceita fora do ambiente de desenvolvimento.'
+          : err instanceof ApiError && err.status === 401
           ? 'E-mail ou senha inválidos.'
           : 'Não foi possível conectar à API local (http://localhost:3001). Verifique se ela está em execução.'
       );

@@ -11,6 +11,7 @@ import {
   Send,
   TrendingUp,
   Sliders,
+  Tags,
   History,
   Barcode,
   FileCheck2,
@@ -34,6 +35,7 @@ export interface SessionUser {
   role: UserRole;
   roleLabel: string;
   initials: string;
+  mustChangePassword: boolean;
 }
 
 const ROLE_LABELS: Record<UserRole, string> = {
@@ -42,7 +44,13 @@ const ROLE_LABELS: Record<UserRole, string> = {
   operator: 'Operador',
 };
 
-function toSessionUser(raw: { id: string; name: string; email: string; roles: UserRole[] }): SessionUser {
+function toSessionUser(raw: {
+  id: string;
+  name: string;
+  email: string;
+  roles: UserRole[];
+  mustChangePassword?: boolean;
+}): SessionUser {
   const role: UserRole = raw.roles.includes('admin')
     ? 'admin'
     : raw.roles.includes('fiscal_approver')
@@ -55,7 +63,13 @@ function toSessionUser(raw: { id: string; name: string; email: string; roles: Us
       .slice(0, 2)
       .map((p) => p[0]!.toUpperCase())
       .join('') || 'US';
-  return { ...raw, role, roleLabel: raw.roles.map((r) => ROLE_LABELS[r]).join(' · '), initials };
+  return {
+    ...raw,
+    role,
+    roleLabel: raw.roles.map((r) => ROLE_LABELS[r]).join(' · '),
+    initials,
+    mustChangePassword: raw.mustChangePassword === true,
+  };
 }
 
 interface RoleContextValue {
@@ -71,6 +85,7 @@ const ANONYMOUS: SessionUser = {
   role: 'operator',
   roleLabel: 'Sem sessão',
   initials: '--',
+  mustChangePassword: false,
 };
 
 const RoleContext = createContext<RoleContextValue>({
@@ -96,16 +111,17 @@ interface NavItem {
  * filtrada pelos papéis reais da sessão.
  */
 const NAV_ITEMS: NavItem[] = [
-  { href: '/', label: '1. Visão Geral', shortLabel: 'Início', icon: LayoutDashboard, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
-  { href: '/catalogo', label: '2. Catálogo de Produtos', shortLabel: 'Catálogo', icon: Boxes, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
-  { href: '/matching', label: '3. Correspondências', shortLabel: 'Vínculos', icon: GitCompare, allowedRoles: ['admin', 'operator'] },
-  { href: '/pendencias', label: '4. Central de Pendências', shortLabel: 'Pendências', icon: ClipboardList, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
-  { href: '/fiscal/ean', label: '↳ Fiscal · EAN (GTIN)', shortLabel: 'EAN', icon: Barcode, allowedRoles: ['admin', 'fiscal_approver'], isSubItem: true },
-  { href: '/fiscal/ncm', label: '↳ Fiscal · NCM (Dupla)', shortLabel: 'NCM', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'], isSubItem: true },
-  { href: '/publicacoes', label: '5. Publicações e Sinc.', shortLabel: 'Publicar', icon: Send, allowedRoles: ['admin', 'operator'] },
-  { href: '/qualidade-margem', label: '6. Qualidade e Margem', shortLabel: 'Margem', icon: TrendingUp, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
-  { href: '/canais', label: '7. Canais e Regras', shortLabel: 'Canais', icon: Sliders, allowedRoles: ['admin'] },
-  { href: '/auditoria', label: '8. Auditoria e Histórico', shortLabel: 'Auditoria', icon: History, allowedRoles: ['admin', 'fiscal_approver'] },
+  { href: '/', label: 'Início', shortLabel: 'Início', icon: LayoutDashboard, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { href: '/catalogo', label: 'Catálogo', shortLabel: 'Catálogo', icon: Boxes, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { href: '/completude', label: 'Completude', shortLabel: 'Completude', icon: ClipboardList, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { href: '/atributos', label: 'Atributos', shortLabel: 'Atributos', icon: Tags, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { href: '/fiscal/ean', label: 'Código de barras', shortLabel: 'EAN', icon: Barcode, allowedRoles: ['admin', 'fiscal_approver'], isSubItem: true },
+  { href: '/fiscal/ncm', label: 'Classificação fiscal', shortLabel: 'NCM', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'], isSubItem: true },
+  { href: '/qualidade-margem', label: 'Qualidade do cadastro', shortLabel: 'Qualidade', icon: TrendingUp, allowedRoles: ['admin', 'fiscal_approver', 'operator'], isSubItem: true },
+  { href: '/publicacoes', label: 'Publicações', shortLabel: 'Publicar', icon: Send, allowedRoles: ['admin', 'operator'] },
+  { href: '/vinculos', label: 'Vínculos', shortLabel: 'Vínculos', icon: GitCompare, allowedRoles: ['admin', 'operator'] },
+  { href: '/canais', label: 'Canais', shortLabel: 'Canais', icon: Sliders, allowedRoles: ['admin'] },
+  { href: '/auditoria', label: 'Auditoria', shortLabel: 'Auditoria', icon: History, allowedRoles: ['admin', 'fiscal_approver'] },
 ];
 
 interface OauthRow {
@@ -138,7 +154,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setChecking(true);
     void (async () => {
       try {
-        const me = await apiFetch<{ user: { id: string; name: string; email: string; roles: UserRole[] } }>('/auth/me');
+        const me = await apiFetch<{ user: { id: string; name: string; email: string; roles: UserRole[]; mustChangePassword?: boolean } }>('/auth/me');
         if (cancelled) return;
         setUser(toSessionUser(me.user));
         try {
@@ -174,7 +190,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return <div className="min-h-screen bg-zinc-950 text-zinc-100">{children}</div>;
   }
 
-  if (checking || !user) {
+  if (user?.mustChangePassword && pathname !== '/conta/senha') {
+    router.replace('/conta/senha');
+  }
+
+  if (checking || !user || (user.mustChangePassword && pathname !== '/conta/senha')) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-300">
         <div className="flex items-center gap-2 text-sm" role="status">
@@ -337,7 +357,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav aria-label="Navegação móvel" className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden items-center justify-around border-t border-zinc-800 bg-zinc-900/95 px-2 py-2 backdrop-blur">
-          {visibleNavItems.slice(0, 5).map((item) => {
+          {visibleNavItems.filter((item) => !item.isSubItem).slice(0, 5).map((item) => {
             const Icon = item.icon;
             const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
             return (

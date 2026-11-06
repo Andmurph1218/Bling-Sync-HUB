@@ -63,8 +63,9 @@ export default function CentralPendenciasPage() {
       setLiveFromDb(true);
       setLoadError(null);
     } catch {
+      setItems([]);
       setLiveFromDb(false);
-      setLoadError('Não foi possível carregar as pendências da API. Os dados abaixo podem estar desatualizados.');
+      setLoadError('Não foi possível ler as pendências. Nenhum item de exemplo é exibido.');
     } finally {
       setLoading(false);
     }
@@ -112,7 +113,7 @@ export default function CentralPendenciasPage() {
           <div className="flex flex-wrap items-center gap-2">
             <ClipboardList className="h-6 w-6 text-amber-400" />
             <h1 className="text-2xl font-bold text-white">
-              Central Unificada de Pendências
+              Completude
             </h1>
             <span
               className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${
@@ -121,7 +122,7 @@ export default function CentralPendenciasPage() {
                   : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
               }`}
             >
-              {liveFromDb ? 'Lendo pendências reais do PostgreSQL' : 'Modo demonstração'}
+              {liveFromDb ? 'Lendo pendências do banco' : 'Sem leitura do banco'}
             </span>
           </div>
           <p className="mt-1 text-sm text-zinc-400">

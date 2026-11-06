@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Check, AlertCircle, CheckCircle2, ShieldAlert, Lock, RefreshCw } from 'lucide-react';
-import { TechTooltip } from '../../../components/tech-tooltip';
 import { useCurrentRole } from '../../../components/app-shell';
 import { apiFetch, ApiError } from '../../../utils/api-client';
 
@@ -118,7 +117,7 @@ export default function FiscalNcmPage() {
     <main className="mx-auto max-w-6xl px-6 py-8">
       <header className="flex flex-col justify-between gap-4 border-b border-zinc-800 pb-6 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-white">Dupla Confirmação de NCM (<TechTooltip term="NVE" />)</h1>
+          <h1 className="text-2xl font-bold text-white">Classificação fiscal (NCM)</h1>
           <p className="mt-1 text-sm text-zinc-400">
             Cada NCM sugerido exige duas confirmações por Revisores Fiscais distintos, cada uma com nota obrigatória de consulta à TIPI. Enquanto isso, a publicação de conteúdo fica bloqueada.
           </p>

@@ -3,10 +3,6 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  Boxes,
-  CheckCircle2,
-  ClipboardList,
-  AlertOctagon,
   ArrowRight,
   ShieldCheck,
   RefreshCw,
@@ -17,29 +13,87 @@ import {
 } from 'lucide-react';
 import {
   fetchOperationalState,
-  FALLBACK_OPERATIONAL_STATE,
   OperationalStatePayload,
 } from '../utils/operational-state';
+import { EmptySkuNotice } from '../components/empty-sku-notice';
+import { apiFetch } from '../utils/api-client';
+
+interface CatalogHome {
+  cards: {
+    products: { value: number; href: string };
+    ready: { value: number; href: string };
+    incomplete: { value: number; href: string };
+    unlinked: { value: number; href: string };
+    syncProblems: { value: number; href: string };
+    publicationsToday: { value: number; sent: number; failed: number; queued: number; href: string };
+  };
+  completenessPct: number;
+  gaps: { missingSku: number; missingCategory: number; missingCover: number };
+  lastSyncOk: string | null;
+  lastSyncError: string | null;
+  channels: Array<{ provider: string; expires_at: string; has_refresh: boolean }>;
+}
 
 export default function HomePage() {
-  const [state, setState] = useState<OperationalStatePayload>(
-    FALLBACK_OPERATIONAL_STATE
-  );
-  const [liveFromDb, setLiveFromDb] = useState<boolean>(false);
+  const [state, setState] = useState<OperationalStatePayload | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [showTechDetails, setShowTechDetails] = useState<boolean>(false);
+  const [catalogHome, setCatalogHome] = useState<CatalogHome | null>(null);
+  const [catalogHomeError, setCatalogHomeError] = useState<string | null>(null);
 
   const loadState = async () => {
     setLoading(true);
-    const result = await fetchOperationalState();
-    setState(result.data);
-    setLiveFromDb(result.liveFromDatabase);
-    setLoading(false);
+    try {
+      const [operational, home] = await Promise.allSettled([
+        fetchOperationalState(),
+        apiFetch<CatalogHome>('/api/catalog/home'),
+      ]);
+      if (operational.status === 'fulfilled') {
+        setState(operational.value);
+        setLoadError(null);
+      } else {
+        setState(null);
+        setLoadError('Não foi possível ler o banco. Nenhum número de exemplo é exibido.');
+      }
+      if (home.status === 'fulfilled') {
+        setCatalogHome(home.value);
+        setCatalogHomeError(null);
+      } else {
+        setCatalogHome(null);
+        setCatalogHomeError('Não foi possível ler os cards do catálogo.');
+      }
+    } catch {
+      setState(null);
+      setLoadError('Não foi possível ler o banco. Nenhum número de exemplo é exibido.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     void loadState();
   }, []);
+
+  if (!state) {
+    return (
+      <main className="mx-auto max-w-6xl px-6 py-8">
+        <h1 className="text-2xl font-bold tracking-tight text-white">Início</h1>
+        <p className="mt-4 text-sm text-zinc-300" role="status">
+          {loading ? 'Lendo o catálogo...' : loadError}
+        </p>
+        {!loading && (
+          <button
+            type="button"
+            onClick={() => void loadState()}
+            className="mt-4 rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-200"
+          >
+            Tentar de novo
+          </button>
+        )}
+      </main>
+    );
+  }
 
   const { kpis, channels, recentWebhooks } = state;
 
@@ -49,24 +103,10 @@ export default function HomePage() {
       <header className="flex flex-col justify-between gap-4 border-b border-zinc-800 pb-6 lg:flex-row lg:items-center">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight text-white">
-              Centro de Controle Operacional
-            </h1>
-            <span
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-                liveFromDb
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                  : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-              }`}
-            >
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  liveFromDb ? 'bg-emerald-400' : 'bg-amber-400'
-                }`}
-              />
-              {liveFromDb
-                ? 'Dados confirmados do PostgreSQL 16'
-                : 'Modo demonstração (API local indisponível)'}
+            <h1 className="text-2xl font-bold tracking-tight text-white">Início</h1>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-300">
+              <span className="h-2 w-2 rounded-full bg-emerald-400" />
+              Dados lidos do banco
             </span>
           </div>
           <p className="mt-1 text-sm text-zinc-400">
@@ -94,6 +134,20 @@ export default function HomePage() {
         </div>
       </header>
 
+      {state.emptySkuCount > 0 && (
+        <section className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm text-rose-100">
+            <EmptySkuNotice />
+            <span>
+              {state.emptySkuCount} produto(s) sem SKU. Eles não entram na lista de envio até o SKU ser preenchido no Bling.
+            </span>
+          </div>
+          <Link href="/catalogo" className="text-xs font-semibold text-rose-100 underline">
+            Ver no catálogo
+          </Link>
+        </section>
+      )}
+
       {/* Faixa 1 — Estado Operacional e Responsabilidade por Canal */}
       <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
@@ -120,162 +174,43 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Hierarquia 2: Impacto no Negócio — 4 Indicadores Principais Clicáveis */}
       <section className="mt-8">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">
-            2. Impacto no Negócio (Clique para abrir a listagem filtrada)
-          </h2>
-          <span className="text-xs text-zinc-500">
-            Calculado em: {new Date(state.calculatedAt).toLocaleTimeString('pt-BR')}
-          </span>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {/* KPI 1: Produtos Monitorados */}
-          <Link
-            href={kpis.monitoredProducts.targetHref}
-            className="group flex flex-col justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 transition hover:border-zinc-600"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                Produtos Monitorados
-              </span>
-              <span className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-2 text-sky-400">
-                <Boxes className="h-4 w-4" />
-              </span>
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">Catálogo</h2>
+        {catalogHomeError && <p className="mt-3 text-sm text-rose-200" role="alert">{catalogHomeError}</p>}
+        {catalogHome && (
+          <>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {[
+                ['Produtos no catálogo', catalogHome.cards.products.value, catalogHome.cards.products.href],
+                ['Prontos para publicar', catalogHome.cards.ready.value, catalogHome.cards.ready.href],
+                ['Incompletos', catalogHome.cards.incomplete.value, catalogHome.cards.incomplete.href],
+                ['Sem vínculo', catalogHome.cards.unlinked.value, catalogHome.cards.unlinked.href],
+                ['Problemas de sync', catalogHome.cards.syncProblems.value, catalogHome.cards.syncProblems.href],
+                ['Publicações hoje', catalogHome.cards.publicationsToday.value, catalogHome.cards.publicationsToday.href],
+              ].map(([label, value, href]) => (
+                <Link key={String(href)} href={String(href)} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 hover:border-zinc-600">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">{label}</p>
+                  <p className="mt-2 text-3xl font-bold text-white">{value}</p>
+                  {label === 'Publicações hoje' && (
+                    <p className="mt-1 text-[11px] text-zinc-400">
+                      {catalogHome.cards.publicationsToday.sent} enviadas · {catalogHome.cards.publicationsToday.failed} falhas · {catalogHome.cards.publicationsToday.queued} na fila
+                    </p>
+                  )}
+                </Link>
+              ))}
             </div>
-            <div className="mt-3">
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-white">
-                  {kpis.monitoredProducts.value}
-                </span>
-                <span className="text-xs text-zinc-400">
-                  ({kpis.monitoredProducts.variantsCount} variações ativas)
-                </span>
+            <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 text-xs text-zinc-300">
+              <p className="font-semibold text-white">Turbine seu catálogo · {catalogHome.completenessPct}% prontos</p>
+              <p className="mt-1">Última sync ok: {catalogHome.lastSyncOk ? new Date(catalogHome.lastSyncOk).toLocaleString('pt-BR') : 'nenhuma'} · última com erro: {catalogHome.lastSyncError ? new Date(catalogHome.lastSyncError).toLocaleString('pt-BR') : 'nenhuma'}</p>
+              <p className="mt-1">Canais com token: {catalogHome.channels.length}. Renovação automática só quando o canal devolveu credencial de renovação.</p>
+              <div className="mt-2 flex flex-wrap gap-3">
+                <Link href="/catalogo" className="underline">{catalogHome.gaps.missingSku} sem SKU</Link>
+                <Link href="/completude" className="underline">{catalogHome.gaps.missingCategory} sem categoria</Link>
+                <Link href="/completude" className="underline">{catalogHome.gaps.missingCover} sem imagem</Link>
               </div>
-              <p className="mt-2 text-xs text-zinc-400">
-                {kpis.monitoredProducts.definition}
-              </p>
-              {showTechDetails && (
-                <p className="mt-2 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[10px] text-zinc-400">
-                  Fonte: {kpis.monitoredProducts.source}
-                </p>
-              )}
-              <span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-sky-400 group-hover:underline">
-                Abrir catálogo <ArrowRight className="h-3.5 w-3.5" />
-              </span>
             </div>
-          </Link>
-
-          {/* KPI 2: Prontos para Publicar */}
-          <Link
-            href={kpis.readyToPublish.targetHref}
-            className="group flex flex-col justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 transition hover:border-emerald-500/50"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                Prontos para Publicar
-              </span>
-              <span className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2 text-emerald-400">
-                <CheckCircle2 className="h-4 w-4" />
-              </span>
-            </div>
-            <div className="mt-3">
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-emerald-400">
-                  {kpis.readyToPublish.value}
-                </span>
-                <span className="text-xs text-zinc-400">
-                  de {kpis.readyToPublish.totalEvaluated} avaliados
-                </span>
-              </div>
-              <p className="mt-2 text-xs text-zinc-400">
-                {kpis.readyToPublish.definition}
-              </p>
-              {showTechDetails && (
-                <p className="mt-2 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[10px] text-zinc-400">
-                  Fonte: {kpis.readyToPublish.source} (Motor CRE)
-                </p>
-              )}
-              <span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-emerald-400 group-hover:underline">
-                Ver produtos aptos <ArrowRight className="h-3.5 w-3.5" />
-              </span>
-            </div>
-          </Link>
-
-          {/* KPI 3: Pendências de Ação */}
-          <Link
-            href={kpis.actionPendings.targetHref}
-            className="group flex flex-col justify-between rounded-xl border border-amber-500/30 bg-zinc-900/60 p-5 transition hover:border-amber-500/60"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                Pendências de Ação
-              </span>
-              <span className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-amber-400">
-                <ClipboardList className="h-4 w-4" />
-              </span>
-            </div>
-            <div className="mt-3">
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-amber-400">
-                  {kpis.actionPendings.value}
-                </span>
-                <span className="text-xs text-amber-300/90">
-                  ({kpis.actionPendings.breakdown.fiscalBlocks} bloqueios fiscais)
-                </span>
-              </div>
-              <p className="mt-2 text-xs text-zinc-400">
-                {kpis.actionPendings.definition}
-              </p>
-              {showTechDetails && (
-                <p className="mt-2 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[10px] text-zinc-400">
-                  Fonte: {kpis.actionPendings.source}
-                </p>
-              )}
-              <span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-amber-300 group-hover:underline">
-                Abrir Central de Pendências <ArrowRight className="h-3.5 w-3.5" />
-              </span>
-            </div>
-          </Link>
-
-          {/* KPI 4: Falhas de Sincronização */}
-          <Link
-            href={kpis.syncFailures.targetHref}
-            className="group flex flex-col justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 transition hover:border-rose-500/50"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                Falhas de Sincronização
-              </span>
-              <span className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-rose-400">
-                <AlertOctagon className="h-4 w-4" />
-              </span>
-            </div>
-            <div className="mt-3">
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold text-white">
-                  {kpis.syncFailures.value}
-                </span>
-                <span className="text-xs text-zinc-400">
-                  operações com falha
-                </span>
-              </div>
-              <p className="mt-2 text-xs text-zinc-400">
-                {kpis.syncFailures.definition}
-              </p>
-              {showTechDetails && (
-                <p className="mt-2 rounded border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[10px] text-zinc-400">
-                  Fonte: {kpis.syncFailures.source} (Motor APE)
-                </p>
-              )}
-              <span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-zinc-300 group-hover:underline">
-                Ver fila de publicações <ArrowRight className="h-3.5 w-3.5" />
-              </span>
-            </div>
-          </Link>
-        </div>
+          </>
+        )}
       </section>
 
       {/* Hierarquia 3: Ação Prioritária (Indicador -> Problema -> Impacto -> Ação -> Resultado) */}
@@ -325,7 +260,7 @@ export default function HomePage() {
               </ul>
             </div>
             <Link
-              href="/matching"
+              href="/vinculos"
               className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-emerald-500"
             >
               <span>Comparar candidatos e confirmar vínculo</span>
@@ -384,7 +319,7 @@ export default function HomePage() {
               <div className="flex items-center justify-between">
                 <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-xs font-semibold text-amber-300">
                   <AlertTriangle className="h-3 w-3" />
-                  14 produtos com conteúdo incompleto
+                  {state.contentIncompleteCount} produtos com conteúdo incompleto
                 </span>
                 <span className="text-xs text-zinc-400">Responsável: Operador</span>
               </div>
@@ -454,6 +389,13 @@ export default function HomePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/70">
+              {recentWebhooks.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-6 text-sm text-zinc-400">
+                    Nenhum evento recente no banco.
+                  </td>
+                </tr>
+              )}
               {recentWebhooks.map((wh) => (
                 <tr key={wh.id} className="hover:bg-zinc-900/70">
                   <td className="py-2.5 pr-4 font-semibold uppercase text-zinc-200">

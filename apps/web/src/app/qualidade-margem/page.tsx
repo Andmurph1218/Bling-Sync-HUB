@@ -9,10 +9,12 @@ import {
   BarChart3,
 } from 'lucide-react';
 import { apiFetch } from '../../utils/api-client';
+import { EmptySkuNotice, isBlankSku } from '../../components/empty-sku-notice';
 
 interface MarginItem {
   blingId: string;
   sku: string;
+  skuBlank?: boolean;
   productName: string;
   salePrice: number;
   costPrice: number | null;
@@ -67,7 +69,7 @@ export default function QualidadeMargemPage() {
           <div className="flex flex-wrap items-center gap-2">
             <TrendingUp className="h-6 w-6 text-emerald-400" />
             <h1 className="text-2xl font-bold text-white">
-              Proteção Comercial, Margem &amp; Indicadores Administrativos
+              Qualidade do cadastro
             </h1>
             <span
               className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${
@@ -76,7 +78,7 @@ export default function QualidadeMargemPage() {
                   : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
               }`}
             >
-              {liveFromDb ? 'Dados reais do PostgreSQL 16' : 'Modo demonstração'}
+              {liveFromDb ? 'Dados lidos do banco' : 'Sem leitura do banco'}
             </span>
           </div>
           <p className="mt-1 text-sm text-zinc-400">
@@ -163,7 +165,7 @@ export default function QualidadeMargemPage() {
                 >
                   <td className="px-4 py-4">
                     <div className="font-mono text-xs font-semibold text-emerald-400">
-                      {row.sku}
+                      {row.skuBlank || isBlankSku(row.sku) ? <EmptySkuNotice /> : row.sku}
                     </div>
                     <div className="mt-0.5 text-xs text-white">
                       {row.productName}

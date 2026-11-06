@@ -1,24 +1,37 @@
 # Documentação de Implantação — Bling Sync HUB
 
-Data de referência: **22 de outubro de 2026**  
+Data de referência: **5 de novembro de 2026**  
+Último commit de código no `main`: `e7aac52` (28/10/2026)  
 Especificação normativa: [plano-mestre.md](plano-mestre.md)  
 Resumo executivo: [descricao.md](descricao.md)  
-Registro de revisão e maturidade: [revisao-plano-mestre.md](revisao-plano-mestre.md)
+Registro de revisão e maturidade: [revisao-plano-mestre.md](revisao-plano-mestre.md)  
+Plano de evolução do dashboard: [bling_sync_hub_evolucao_dashboard.md](bling_sync_hub_evolucao_dashboard.md)
 
 ---
 
-## 0. Síntese da Revisão do Plano Mestre (revisão de 22/10/2026)
+## 0. Em que fase estamos (síntese de 05/11/2026)
 
-Revisão de `revisao-plano-mestre.md` concluída nesta data. Conclusões registradas:
+| Camada | Estado |
+|---|---|
+| Espinha do Plano Mestre (Fases 0, 0.5 e 1 a 12) | **Concluída** |
+| Evolução do Dashboard (Etapas 0 a 4 do plano de evolução) | **Concluída** |
+| Homologação real (Passos 1 a 7) | **Concluída até a 1ª sync `shadow`** |
+| Fase atual | **Homologação operacional em `shadow` + `bling_native`** |
+| Evolução v2 — P0 | **P0.1 a P0.5 implantados em 05/11/2026. P0.6 aguarda painel externo** |
 
-1. **Regras fechadas pela revisão — todas implementadas e testadas**: CQS determinístico sem REPLACE em grade A/B, matching multi-sinal (2 sinais fortes, EAN sozinho ≤ 80), webhook com HMAC + INSERT antes do HTTP 200, push por passo sem PUT do produto inteiro, detecção de eco via `hub_writes`, soberania de nome/descrição do Bling em `channel_content_overrides`, dupla confirmação de NCM por 2 usuários com nota de TIPI.
-2. **Ajustes incorporados depois — todos cobertos em código**: convivência `bling_native`/`hub` em `channel_sync_owners`, estoque publicado somando apenas depósitos `seller` com `include_in_push`, `product_variants.stock` nascendo `NULL`, `meli_facility` somente leitura, kit como SKU único, preço por loja com `follow_store_price`, alerta `price_below_cost` não-bloqueante, `match_rejections` permanente, `push_jobs_active` excluindo `locked`, família User Product com `family_confidence`, EAN `duplicate` e NCM `conflict` entre variantes, controles administrativos auditados em `control_changes`, OAuth em `oauth_tokens` fora do Redis.
+Não há fase de código da seção 13 do plano-mestre em aberto. O trabalho restante é operação, calibração e telas/admin ainda não cobertos pela evolução.
+
+1. **Regras fechadas pela revisão — implementadas e testadas**: CQS determinístico sem REPLACE em grade A/B, matching multi-sinal (2 sinais fortes, EAN sozinho ≤ 80), webhook com HMAC + INSERT antes do HTTP 200, push por passo sem PUT do produto inteiro, detecção de eco via `hub_writes`, soberania de nome/descrição do Bling em `channel_content_overrides`, dupla confirmação de NCM por 2 usuários com nota de TIPI.
+2. **Ajustes incorporados depois — cobertos em código**: convivência `bling_native`/`hub` em `channel_sync_owners`, estoque publicado somando apenas depósitos `seller` com `include_in_push`, `product_variants.stock` nascendo `NULL`, `meli_facility` somente leitura, kit como SKU único, preço por loja com `follow_store_price`, alerta `price_below_cost` não-bloqueante, `match_rejections` permanente, `push_jobs_active` excluindo `locked`, família User Product com `family_confidence`, EAN `duplicate` e NCM `conflict` entre variantes, controles administrativos auditados em `control_changes`, OAuth em `oauth_tokens` fora do Redis.
 3. **Maturidade da spec: 99/100** (média das 8 áreas — princípios 100, schema 99, motores 100, fluxos 100, contratos 98, auth 98, operação 100, cronograma 100).
-4. **Pendências apontadas pela revisão e já encaminhadas na implantação real**: credenciais OAuth dos 3 canais conectadas (`oauth_tokens`), webhooks de produto recebendo eventos reais (Bling e Nuvemshop confirmados em 22/10). Pendências de homologação em aberto:
+4. **Homologação já feita**: OAuth dos 3 canais em `oauth_tokens`; webhooks de produto Bling e Nuvemshop recebendo eventos; 1ª sync `shadow` executada em 22/10 (15 produtos Bling, 50 anúncios ML, 50 produtos Nuvemshop); login real e 8 áreas do dashboard com dados do PostgreSQL (28/10).
+5. **Pendências de homologação ainda abertas**:
    - Desmarcar recurso `order`/`orderNF` na assinatura de webhooks do app do Bling (pedidos ficam na integração nativa);
-   - Confirmar scope `offline_access` no app do Mercado Livre (token atual não retornou `refresh_token`) e cadastrar a URL de notificação `https://rickety-lash-passive.ngrok-free.dev/webhooks/mercadolivre`;
-   - Executar a primeira sincronização de catálogo em modo `shadow` (Passo 7).
-5. **Escopo fora do hub confirmado**: pedidos, financeiro, NF-e, frete, serviços (`tipo != 'P'`), margem/comissão, motor de CEST/origem e escrita em `meli_facility`.
+   - Confirmar scope `offline_access` no app do Mercado Livre (token atual não retornou `refresh_token`) e manter a URL de notificação `https://rickety-lash-passive.ngrok-free.dev/webhooks/mercadolivre` cadastrada;
+   - Validar a interface com operadores (Seção 11 do plano de evolução);
+   - No próximo login local, trocar a senha na tela `/conta/senha` (os quatro usuários do bootstrap já estão com `must_change_password`). Fora de desenvolvimento a senha padrão é recusada;
+   - Só depois de validar matching/fiscal: virar `enrichment_controls.mode` para `live` e, se desejado, `stock_price` para `hub` (com a nativa de estoque/preço desligada e a entrada de pedidos mantida no Bling).
+6. **Escopo fora do hub confirmado**: pedidos, financeiro, NF-e, frete, serviços (`tipo != 'P'`), margem/comissão, motor de CEST/origem e escrita em `meli_facility`.
 
 ---
 
@@ -54,7 +67,7 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 |---|---|---|---|
 | **Fase 0** | Monorepo, Docker, Migration 001, Auth Argon2id + Sessão SHA-256, RBAC e Trilha de Controle | **Concluída** | `GET /health` (200/503) + login de dois papéis (`operator` e `fiscal_approver`) + bloqueio 403 cruzado + gravação transacional em `control_changes` (`phase0.test.ts` — 4/4 testes) |
 | **Fase 0.5** | 19+ Fixtures Sanitizados (Bling v3, ML Legado/User Product/Full/UPtin, Nuvemshop `inventory_levels`) + Mappers Puros | **Concluída** | Mappers cobrindo simples (`S`), variação (`V`), kit (`E`), variação-kit (`V`+`E`), saldos (`seller` vs `ml_full`), preço de loja, `429` e `product.deleted` + `GET 404/200` (`phase0_5.test.ts` — 9/9 testes) |
-| **Fase 1** | Schema Completo do PostgreSQL 16 (Migrations 001 a 012 com `up` e `down`, partições, índices e seeds) | **Concluída** | Subida das 12 migrations (`up`), validação de constraints e índices parciais, geração das 70 partições mensais (14 meses × 5 tabelas) e descida completa (`down`) (`phase1.test.ts` — 4/4 testes) |
+| **Fase 1** | Schema Completo do PostgreSQL 16 (Migrations 001 a 012 com `up` e `down`, partições, índices e seeds) | **Concluída** | Subida das 12 migrations (`up`), validação de constraints e índices parciais, geração das 70 partições mensais (14 meses × 5 tabelas) e descida completa (`down`) (`phase1.test.ts`). A Migration 13 (`empty-sku-handling`) entrou depois, na homologação real, para SKU vazio |
 | **Fase 2** | Conectores HTTP, Rate Limiter Global do Bling (3 req/s + 120.000/dia) e Renovação Single-Flight de `oauth_tokens` | **Concluída** | Dois jobs concorrentes não passam de 3 req/s e respeitam fila de prioridades; cota diária preserva reserva P1; refresh OAuth é single-flight com rotação criptografada; ML faz retry em 409 com `X-Version` e pula `meli_facility` (`phase2.test.ts` — 5/5 testes) |
 | **Fase 3** | Motores Fiscais Puros: **GVE** (GS1 + `duplicate` + fila humana) e **NVE** (`0000.00.00` + `conflict` + dupla confirmação) | **Concluída** | Vetores GS1 (8, 12, 13, 14, Brasil 789/790, ISBN, faixa 200 e placeholders) e NCM `0000.00.00`; EAN repetido entre variantes marca `duplicate` e resolve ao descontinuar; NCM em conflito entre variantes marca `conflict` no pai sem gerar sugestão; dupla confirmação por 2 usuários `fiscal_approver` distintos com nota de TIPI (`phase3.test.ts` — 5/5 testes) |
 | **Fase 4** | Motores de Identidade: **PIRE** (pai) e **VIR** (variante e matriz) | **Concluída** | EAN sozinho fica em `suggestion` ($\le 80$); 2 sinais fortes concordantes fazem auto-vínculo (95); EAN compartilhado entre dois produtos cai em `quarantine`; família User Product com sinais em dois pais cai em `quarantine` sem partir a família; `match_rejections` impede novo match; VIR normaliza `comboKey` por aliases (`Medium -> M`), consolida condições por `user_product_id` com trilha `control_changes`, detecta `missing_ml`/`extra_ml` e conta `user_product_seller` não publica `variations` (`phase4.test.ts` — 4/4 testes) |
@@ -84,7 +97,7 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 - **Mappers Puros (`mappers.ts`)**:
   - `mapBlingProductToCatalog`, `computePublishableStockFromBalances`, `resolveVariantChannelPrice`, `resolveBlingLifecycleSignal`, `classifyApiHttpError`, `mapMercadoLivreListingGroup`, `mapMercadoLivreStockLocations`, `applyMlUptinMigration` e `mapNuvemshopProduct`.
 
-#### 2.3 Banco de Dados — As 12 Migrations (`apps/api/src/db/migrations/*`)
+#### 2.3 Banco de Dados — As 15 Migrations (`apps/api/src/db/migrations/*`)
 1. `1729080000001_identity-and-controls.ts`: `users`, `user_roles`, `sessions`, `oauth_tokens`, `stock_warehouses`, `channel_stores`, `channel_sync_owners`, `enrichment_controls`, `control_changes` (com trigger de imutabilidade), `sync_cursors`, `hub_writes`.
 2. `1729080000002_products-variants-and-axes.ts`: `master_products`, `product_variants` (com índice único parcial `uq_one_default_variant`), `product_components`, `variant_stock_balances`, `variant_channel_prices`, `attribute_axes`, `product_axes`, `attribute_value_aliases`, `variant_attributes`.
 3. `1729080000003_platform-links-and-matching.ts`: `platform_links` (com constraint `family_confidence` para `user_product`), `platform_variant_links`, `ml_selling_conditions`, `ml_stock_locations`, `platform_items`, `matching_queue`, `match_rejections`, `variant_matrix_analysis`.
@@ -97,6 +110,9 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 10. `1729080000010_dlm-policies-and-runs.ts`: `dlm_retention_policies`, `dlm_job_runs`.
 11. `1729080000011_indexes.ts`: 15 índices operacionais de busca e fila.
 12. `1729080000012_partitions-and-seeds.ts`: 70 partições mensais (14 meses para as 5 tabelas particionadas) + seeds iniciais (`attribute_axes`, `attribute_value_aliases`, `platform_image_limits`, `dlm_retention_policies`, `channel_sync_owners`, `enrichment_controls`, `stock_warehouses`, `channel_stores`).
+13. `1729080000013_empty-sku-handling.ts`: corrige colisão de SKU vazio na constraint `UNIQUE` ao importar catálogo real do Bling (homologação 22/10).
+14. `1729080000014_must-change-password.ts`: coluna `users.must_change_password` e marcação dos quatro usuários do bootstrap (P0.2, aplicada no banco local em 05/11/2026).
+15. `1729080000015_catalog-v2.ts`: `master_products.archived_at`, `hub_categories`, vínculo `hub_category_id` e mapas `channel_category_maps`, `channel_attribute_maps`, `channel_attribute_value_maps` (P1, 06/11/2026).
 
 #### 2.4 Conectores, Rate Limiter Global e OAuth Single-Flight (`apps/api/src/connectors/*`)
 - **`bling-rate-limiter.ts`**: Balde único de 3 req/s com fila ordenada por prioridade (`token` > `webhook_p1_push_stock` > `stock_sync` > `price_check` > `delta_enrich` > `full_enrich`), proteção de 20 req/60s em `/oauth/token` e repartição da cota diária de 120.000 chamadas (`full_enrich` pausa em 96.000; jobs não-P1 param em 108.000 preservando 12.000 chamadas para P1/webhook/push).
@@ -182,12 +198,33 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 
 ---
 
-## 3. O Que Falta Implantar (Próximos Passos de Homologação e Expansão de Telas)
+## 3. O Que Falta (Homologação Operacional e Lacunas de Tela)
 
-Todas as **14 fases da espinha dorsal (Fase 0, Fase 0.5 e Fases 1 a 12)** definidas na Seção 13 do Plano Mestre estão **concluídas e validadas com 52 testes automatizados**. Os próximos passos de evolução contínua são:
+Todas as **14 fases da espinha dorsal (Fase 0, Fase 0.5 e Fases 1 a 12)** da Seção 13 do Plano Mestre estão **concluídas**. A evolução do dashboard (Etapas 0 a 4) também está **concluída** e coberta por `dashboard_evolution.test.ts`. No total há **15 suítes** de teste na API.
 
-1. **Telas Complementares do Dashboard (Seção 12)**: expansão visual das rotas `/produtos`, `/produtos/:id`, `/imagens`, `/variacoes`, `/qualidade`, `/push`, `/webhooks`, `/admin/controles`, `/admin/dlm` e `/admin/aliases` sobre as APIs e motores já implementados.
-2. **Homologação com Credenciais de Produção**: conexão das variáveis `.env` reais (`BLING_CLIENT_ID`, `ML_CLIENT_ID`, `NS_CLIENT_ID`) em ambiente Docker Compose e calibração em amostra real do limiar heurístico de marca d'água do IQRE.
+### Já entregue no lugar das rotas da Seção 12
+
+| Rota do plano | Rota atual | Estado |
+|---|---|---|
+| `/` | `/` | Visão geral com dados reais |
+| `/produtos` / `/produtos/:id` | `/catalogo` / `/catalogo/[id]` | Catálogo e ficha única (7 abas) |
+| `/matching` | `/matching` | Fila real + drawer + bulk |
+| `/fiscal/ean` / `/fiscal/ncm` | `/fiscal/ean` / `/fiscal/ncm` | Aprovação real |
+| `/qualidade` | `/qualidade-margem` | CRE, margem e alertas |
+| `/push` | `/publicacoes` | Simulação + histórico (reprocessamento real desativado) |
+| (admin de loja/dono) | `/canais` | OAuth, sync owners, depósitos |
+| (trilha) | `/auditoria` | Histórico e diagnóstico |
+| (fila unificada) | `/pendencias` | Central operacional |
+
+### Ainda em aberto
+
+1. **Telas da Seção 12 ainda sem página dedicada**: `/imagens`, `/variacoes`, `/webhooks`, `/admin/dlm` e `/admin/aliases`. Parte da informação já aparece dentro da ficha, de `/publicacoes` ou de `/canais`; falta a superfície própria.
+2. **Calibração do IQRE**: limiar heurístico de marca d'água ainda depende de amostra real maior.
+3. **Mercado Livre**: confirmar `offline_access` (refresh) e a URL de notificação no painel do app.
+4. **Bling**: desmarcar webhooks de pedido/NF no app (fora do escopo do hub).
+5. **Validação com operadores** (Seção 11 do plano de evolução) e troca das senhas padrão do bootstrap.
+6. **Virada controlada**: `shadow` → `live` no conteúdo; depois, se fizer sentido, `bling_native` → `hub` em estoque/preço, mantendo a entrada de pedidos no Bling.
+7. **Reprocessamento real de publicação**: permanece desativado na UI até haver autorização explícita e confirmação remota do canal.
 
 ---
 
@@ -225,12 +262,12 @@ Siga esta sequência exata para colocar o **Bling Sync HUB** em operação com o
    - `ML_CLIENT_ID`, `ML_CLIENT_SECRET`, `ML_WEBHOOK_SECRET`
    - `NS_CLIENT_ID`, `NS_CLIENT_SECRET`, `NS_WEBHOOK_SECRET`
 
-### Passo 3 — Rodar o Bootstrap do Banco (Migrations 1–12 + 70 Partições + Usuários Iniciais) — **[CONCLUÍDO / ATIVO]**
+### Passo 3 — Rodar o Bootstrap do Banco (Migrations 1–13 + 70 Partições + Usuários Iniciais) — **[CONCLUÍDO / ATIVO]**
 1. Comando `npm run bootstrap` executado com sucesso no PostgreSQL 16 (`bling_sync_postgres`):
    ```bash
    npm run bootstrap
    ```
-2. Aplicadas todas as **12 migrations**, criadas as **70 partições mensais**, registradas as triggers de imutabilidade (`trg_control_changes_immutable`, `trg_ncm_audit_immutable`, `trg_*_archive_immutable`), populados os seeds iniciais e criados os **4 usuários iniciais**:
+2. Aplicadas as migrations (1–13 na homologação; a 14 `must-change-password` entrou no P0 em 05/11/2026), criadas as **70 partições mensais**, registradas as triggers de imutabilidade (`trg_control_changes_immutable`, `trg_ncm_audit_immutable`, `trg_*_archive_immutable`), populados os seeds iniciais e criados os **4 usuários iniciais**:
    - **Admin**: `admin@blingsync.local` (papel `admin`)
    - **Fiscal 1**: `fiscal1@blingsync.local` (papel `fiscal_approver` — 1ª revisão NCM / aprovação de EAN)
    - **Fiscal 2**: `fiscal2@blingsync.local` (papel `fiscal_approver` — 2ª revisão obrigatória de NCM com nota de TIPI)
@@ -286,7 +323,9 @@ URLs prontas para colar nos painéis de desenvolvedor:
 
 ---
 
-## 6. Evolução do Dashboard (docs/bling_sync_hub_evolucao_dashboard.md) — 28/10/2026
+## 6. Evolução do Dashboard (docs/bling_sync_hub_evolucao_dashboard.md) — **[CONCLUÍDA em 28/10/2026]**
+
+Etapas 0 a 4 do plano de evolução foram implantadas. O dashboard operacional está no `main` (`e7aac52`).
 
 ### Implantado
 - **Login real**: tela `/login` com sessão por cookie `HttpOnly` (`/auth/login`, `/auth/me`, `/auth/logout`). O seletor de papel simulado foi removido; o menu e as ações respeitam os papéis reais (Operador, Revisor Fiscal, Administrador).
@@ -300,7 +339,52 @@ URLs prontas para colar nos painéis de desenvolvedor:
 
 ### Decisões e limitações registradas
 - **Reprocessamento real desativado** na interface: sem conector com confirmação remota, o motor de publicação marcaria passos como concluídos sem confirmação do canal. Exige autorização explícita antes de habilitar.
-- **Senhas iniciais**: o `.env` não define `BOOTSTRAP_*_PASSWORD`, portanto os 4 usuários foram criados com as senhas padrão do `bootstrap.ts`. Trocar antes de expor o Dashboard fora da máquina local.
-- Testes: 15 suítes / 58 testes aprovados (`dashboard_evolution.test.ts` cobre autenticação, 10 motores, 10 indicadores, ficha, simulador, margem, auditoria, publicações e fila normalizada).
+- **Senhas iniciais**: ver seção 7 (P0.2). O próximo login local exige troca em `/conta/senha`.
+- Testes após o P0: 16 suítes / 62 testes aprovados (`dashboard_evolution.test.ts` e `p0-password.test.ts`).
 - Pendente de pessoas: validação com operadores (Seção 11 do plano de evolução).
+
+---
+
+## 7. Evolução v2 — P0 (05/11/2026)
+
+Fonte: seção 10 de [bling_sync_hub_evolucao_dashboard.md](bling_sync_hub_evolucao_dashboard.md).  
+Migration aplicada no PostgreSQL local: `1729080000014_must-change-password`.  
+Testes: 16 suítes / 62 testes (`npm test` na raiz). Typecheck da API e do web aprovados.
+
+| Item | Estado | O que ficou |
+|---|---|---|
+| P0.1 Dados de exemplo | **Feito** | Catálogo e início não usam mais produto, SKU ou número fictício. Se a API falha, a tela mostra erro ou vazio. O cartão “14 produtos com conteúdo incompleto” passou a usar `contentIncompleteCount` lido do banco |
+| P0.2 Senha | **Feito no código; troca ainda depende do próximo login** | Fora de `development`/`test`, senha padrão do bootstrap não abre sessão. Em desenvolvimento o login abre só a tela `/conta/senha`. Os quatro usuários locais já estão com `must_change_password = true`. Em produção o bootstrap recusa criar usuário sem `BOOTSTRAP_*_PASSWORD` diferente da padrão |
+| P0.3 Linguagem | **Feito** | Menu: Início, Catálogo, Completude, Código de barras, Classificação fiscal, Qualidade do cadastro, Publicações, Vínculos, Canais, Auditoria. Títulos das páginas deixaram de usar sigla de motor. Sigla continua só no painel “Ver fontes e siglas técnicas” e na Auditoria |
+| P0.4 SKU vazio | **Feito** | Lista, ficha, início, qualidade e publicações mostram “Sem SKU — não sincroniza”. A simulação tira esses produtos da lista de envio (`excludedEmptySku`). `enqueueOrPromotePushJob` recusa variante com SKU vazio (`empty_sku_not_syncable`) |
+| P0.5 Excluir | **Já era assim; conferido** | Não há botão de excluir produto para o operador. Arquivar continua no P1.3 |
+| P0.6 Painéis externos | **Aberto** | A tela Canais avisa quando o Mercado Livre está sem renovação e lembra de manter webhooks de pedido/NF desligados no Bling. O token do ML ainda não tem `refresh_token`: falta habilitar `offline_access` no app e autorizar de novo. A assinatura de pedido/NF no app do Bling continua por desmarcar no painel |
+
+Abas **Atributos** e **Problemas** não entram no menu neste P0. Elas nascem no P1.7 e na home do P1.1.
+
+**Próximo login:** usar a senha atual do bootstrap e definir uma senha nova em `/conta/senha`. Sem essa troca o restante do HUB responde `403 password_change_required`.
+
+---
+
+## 8. Evolução v2 — P1 (06/11/2026)
+
+Fonte: seção 10 de [bling_sync_hub_evolucao_dashboard.md](bling_sync_hub_evolucao_dashboard.md).  
+Migration: `1729080000015_catalog-v2`.  
+Testes: 17 suítes / 69 testes (`npm test` na raiz), incluindo `p1-catalog.test.ts`. Typecheck da API e do web aprovados.
+
+| Item | Estado | O que ficou |
+|---|---|---|
+| P1.1 Home | **Feito no código** | Seis cards leem `GET /api/catalog/home` e abrem `/catalogo`, `/catalogo?status=ready`, `/completude`, `/vinculos`, `/problemas` e `/publicacoes`. A faixa mostra % pronto, última sync e as lacunas sem SKU, sem categoria e sem imagem. O número do card é o mesmo `counts` da lista |
+| P1.2 Lista | **Feito no código** | `/catalogo` tem filtros, abas com contador, colunas da seção 6.2 e ações Editar, Duplicar, Depósitos e Arquivar. Não há Excluir. Lista de envio, importação e exportação aparecem vazias: a publicação e a planilha ficam no P2. Teste com 1.000 SKUs filtra em menos de 1 s no pg-mem |
+| P1.3 Arquivar | **Feito** | `archived_at` tira o produto de Todos e coloca em Arquivados. Desarquivar devolve. `catalog_status` permanece `active`. Nenhuma chamada ao ERP |
+| P1.4 Ficha | **Feito no código** | Abas Geral, Variações, Imagens, Atributos, Canais e Fiscal. O nome do ERP é texto, não campo editável. Categoria do catálogo é escolhida na aba Geral |
+| P1.5 Completude | **Feito** | Checklist calculado em `evaluateCatalogChecklist`, com frase em português e link Corrigir. A aba Completude usa a mesma conta da home |
+| P1.6 Categorias | **Feito** | `hub_categories` e vínculo do produto. Sem categoria, o checklist diz “Sem categoria”. Nada é atribuído automaticamente |
+| P1.7 Atributos | **Feito no código** | `/atributos` mapeia categoria × canal nos modos fixo, dinâmico e manual. Verde só quando todo obrigatório tem modo resolvido |
+| P1.8 Fixtures | **Feito** | Mercado Livre `MLB999001` (BRAND e COLOR obrigatórios) e Nuvemshop `ns-cat-lamps`. Sem escrita ao vivo no canal |
+| P1.9 Materialização | **Feito** | `CREATE` e `CONTENT` recebem `attributes` só quando o mapa está verde e completo. Campo manual obrigatório deixa o payload sem atributos |
+
+Escrita ao vivo nos canais continua desligada. `shadow` e `bling_native` não mudaram. P0.6 continua aberto: `offline_access` do Mercado Livre e webhooks de pedido/NF no Bling dependem dos painéis externos.
+
+Conferência no navegador, já com a sessão do operador: a home mostra 25 produtos, 0 prontos e 25 incompletos; o catálogo em Todos e a tela Completude repetem 25. O filtro do SKU `13621` deixa 1 produto na lista. A tela Atributos lê a fixture do Mercado Livre (marca dinâmica, cor e linha fixas). A ficha não foi aberta pelo clique automatizado.
 

@@ -1,3 +1,4 @@
+import { isBlankSku } from '../catalog/blank-sku.js';
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireRole } from '../auth/middleware.js';
@@ -129,6 +130,7 @@ dashboardRouter.get(
         failedPushJobsRes,
         recentWebhooksRes,
         catalogProductsRes,
+        emptySkuCountRes,
       ] = await Promise.all([
         query<{ provider: string; expires_at: Date | string; updated_at: Date | string; has_refresh: boolean }>(
           `SELECT provider, expires_at, updated_at, (refresh_token_enc IS NOT NULL) AS has_refresh
@@ -259,6 +261,11 @@ dashboardRouter.get(
            ORDER BY mp.updated_at DESC
            LIMIT 25`
         ),
+        query<{ count: number }>(
+          `SELECT count(*)::int AS count
+           FROM master_products
+           WHERE catalog_status = 'active' AND bling_sku = ''`
+        ),
       ]);
 
       const monitoredProductsCount = productsCountRes.rows[0]?.count ?? 0;
@@ -291,6 +298,17 @@ dashboardRouter.get(
       const fiscalRiskProductsCount = ncmConflictsRes.rows[0]?.count ?? 0;
       const belowCostCount = belowCostRes.rows[0]?.count ?? 0;
       const failedPushJobsCount = failedPushJobsRes.rows[0]?.count ?? 0;
+      const emptySkuCount = emptySkuCountRes.rows[0]?.count ?? 0;
+      const contentBlockers = new Set([
+        'score_ml_below_50',
+        'score_ns_below_45',
+        'ml_category_not_verified',
+      ]);
+      const contentIncompleteCount = new Set(
+        readinessRowsRes.rows
+          .filter((row) => (row.blockers ?? []).some((code) => contentBlockers.has(code)))
+          .map((row) => row.master_product_id)
+      ).size;
 
       const variantsWithInvalidEan = readinessRowsRes.rows.filter((r) =>
         (r.blockers ?? []).includes('ean_invalid_or_risk')
@@ -366,6 +384,8 @@ dashboardRouter.get(
         },
         recentWebhooks: recentWebhooksRes.rows,
         catalogProducts: catalogProductsRes.rows,
+        emptySkuCount,
+        contentIncompleteCount,
       });
     } catch (error) {
       next(error);
@@ -1909,6 +1929,8 @@ dashboardRouter.post(
       ]);
 
       const totalProcessed = productsRes.rows.length;
+      const sendableRows = productsRes.rows.filter((p) => !isBlankSku(p.bling_sku));
+      const excludedEmptySku = totalProcessed - sendableRows.length;
       const aptItems = productsRes.rows.filter(
         (p) => p.publishable_ml || p.publishable_ns
       );
@@ -1932,6 +1954,7 @@ dashboardRouter.post(
           blockedByFiscalRule: fiscalBlockedItems.length,
           awaitingContentOrCategory: awaitingContentApproval.length,
           ignoredStockPriceByNativeOwner: totalProcessed,
+          excludedEmptySku,
         },
         syncOwners: ownersRes.rows,
         enrichmentControls: controlsRes.rows,
@@ -1944,9 +1967,9 @@ dashboardRouter.post(
           'ncm / cest / tax_origin (dados fiscais da NF-e)',
           'name / description mestres do Bling',
         ],
-        plannedProductDiffs: productsRes.rows.slice(0, 15).map((p) => ({
+        plannedProductDiffs: sendableRows.slice(0, 15).map((p) => ({
           blingId: p.bling_id,
-          sku: p.bling_sku || `(Sem SKU · #${p.bling_id})`,
+          sku: p.bling_sku,
           name: p.name ?? `Produto #${p.bling_id}`,
           stockPriceAction:
             'IGNORADO (responsabilidade configurada em bling_native)',
@@ -2004,7 +2027,8 @@ dashboardRouter.get(
 
         return {
           blingId: r.bling_id,
-          sku: r.bling_sku || `(Sem SKU · #${r.bling_id})`,
+          sku: isBlankSku(r.bling_sku) ? '' : r.bling_sku,
+          skuBlank: isBlankSku(r.bling_sku),
           productName: r.name ?? `Produto #${r.bling_id}`,
           salePrice,
           costPrice: hasValidCost ? rawCost : null,

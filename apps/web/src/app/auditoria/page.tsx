@@ -68,7 +68,7 @@ export default function AuditoriaPage() {
           <div className="flex flex-wrap items-center gap-2">
             <History className="h-6 w-6 text-emerald-400" />
             <h1 className="text-2xl font-bold text-white">
-              Auditoria, Rastreabilidade &amp; Diagnóstico dos 10 Motores
+              Auditoria
             </h1>
             <span
               className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${
@@ -77,7 +77,7 @@ export default function AuditoriaPage() {
                   : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
               }`}
             >
-              {liveFromDb ? 'Trilha real do PostgreSQL 16' : 'Modo demonstração'}
+              {liveFromDb ? 'Trilha lida do banco' : 'Sem leitura do banco'}
             </span>
           </div>
           <p className="mt-1 text-sm text-zinc-400">

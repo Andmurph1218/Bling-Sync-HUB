@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   ShieldCheck,
@@ -17,6 +18,7 @@ import {
 import { buildBlingProductUrl } from '../../../utils/matching-signals';
 import { translateBlockerToPlainPortuguese } from '../../../utils/operational-state';
 import { apiFetch, ApiError } from '../../../utils/api-client';
+import { EmptySkuNotice, isBlankSku } from '../../../components/empty-sku-notice';
 
 interface PushAttemptRow {
   id: string;
@@ -30,24 +32,33 @@ interface PushAttemptRow {
   failureReason: string | null;
 }
 
-type ProductTab =
-  | 'resumo'
-  | 'dados_mestres'
-  | 'conteudo'
-  | 'variacoes'
-  | 'fiscal'
-  | 'publicacao'
-  | 'historico';
+type ProductTab = 'geral' | 'variacoes' | 'imagens' | 'atributos' | 'canais' | 'fiscal';
 
 const TABS: Array<{ id: ProductTab; label: string }> = [
-  { id: 'resumo', label: '1. Resumo' },
-  { id: 'dados_mestres', label: '2. Dados Mestres (Bling)' },
-  { id: 'conteudo', label: '3. Conteúdo & Imagens' },
-  { id: 'variacoes', label: '4. Variações' },
-  { id: 'fiscal', label: '5. Fiscal (EAN / NCM / CEST)' },
-  { id: 'publicacao', label: '6. Publicação' },
-  { id: 'historico', label: '7. Histórico' },
+  { id: 'geral', label: 'Geral' },
+  { id: 'variacoes', label: 'Variações' },
+  { id: 'imagens', label: 'Imagens' },
+  { id: 'atributos', label: 'Atributos' },
+  { id: 'canais', label: 'Canais' },
+  { id: 'fiscal', label: 'Fiscal' },
 ];
+
+interface CatalogSheet {
+  item: {
+    id: string;
+    name: string | null;
+    brand: string | null;
+    checklist: { percent: number; items: Array<{ code: string; ok: boolean; title: string; fixHref: string }> };
+  };
+  images: Array<{ url_normalized: string; is_cover_eligible: boolean; rights_status: string; position_ml: number | null; position_ns: number | null }>;
+  storePrices: Array<{ platform: string; store_price: string | null; store_promotional_price: string | null }>;
+  category: { id: string; name: string } | null;
+}
+
+interface HubCategoryOption {
+  id: string;
+  name: string;
+}
 
 interface ProductDetailPayload {
   product: {
@@ -136,27 +147,39 @@ interface ProductDetailPayload {
   }>;
 }
 
-export default function FichaUnicaProdutoPage({
+function FichaUnicaProdutoPage({
   params,
 }: {
   params: { id: string };
 }) {
-  const [activeTab, setActiveTab] = useState<ProductTab>('resumo');
+  const searchParams = useSearchParams();
+  const requested = searchParams.get('aba');
+  const initialTab: ProductTab =
+    requested === 'variacoes' || requested === 'imagens' || requested === 'atributos' || requested === 'canais' || requested === 'fiscal'
+      ? requested
+      : 'geral';
+  const [activeTab, setActiveTab] = useState<ProductTab>(initialTab);
   const [detail, setDetail] = useState<ProductDetailPayload | null>(null);
   const [liveFromDb, setLiveFromDb] = useState<boolean>(false);
   const [loadState, setLoadState] = useState<'loading' | 'ok' | 'notfound' | 'error'>('loading');
   const [pushAttempts, setPushAttempts] = useState<PushAttemptRow[]>([]);
+  const [sheet, setSheet] = useState<CatalogSheet | null>(null);
+  const [categories, setCategories] = useState<HubCategoryOption[]>([]);
   const blingId = params.id;
 
   useEffect(() => {
     void (async () => {
       setLoadState('loading');
       try {
-        const [json, push] = await Promise.all([
+        const [json, push, sheetPayload, categoryPayload] = await Promise.all([
           apiFetch<ProductDetailPayload>(`/api/dashboard/products/${encodeURIComponent(blingId)}`),
           apiFetch<{ attempts: PushAttemptRow[] }>('/api/dashboard/push-attempts').catch(() => ({ attempts: [] })),
+          apiFetch<CatalogSheet>(`/api/catalog/products/${encodeURIComponent(blingId)}/sheet`).catch(() => null),
+          apiFetch<{ categories: HubCategoryOption[] }>('/api/catalog/categories').catch(() => ({ categories: [] })),
         ]);
         setDetail(json);
+        setSheet(sheetPayload);
+        setCategories(categoryPayload.categories);
         setPushAttempts(push.attempts.filter((a) => a.productName === json.product.name));
         setLiveFromDb(true);
         setLoadState('ok');
@@ -213,9 +236,13 @@ export default function FichaUnicaProdutoPage({
             <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 font-mono text-xs font-semibold text-emerald-300">
               Bling ID #{prod?.bling_id ?? blingId}
             </span>
-            <span className="rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-0.5 font-mono text-xs text-zinc-200">
-              SKU: {prod?.bling_sku || '(Sem SKU cadastrado)'}
-            </span>
+            {isBlankSku(prod?.bling_sku) ? (
+              <EmptySkuNotice />
+            ) : (
+              <span className="rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-0.5 font-mono text-xs text-zinc-200">
+                SKU: {prod?.bling_sku}
+              </span>
+            )}
             <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-300">
               <ShieldCheck className="h-3.5 w-3.5" />
               {liveFromDb
@@ -241,13 +268,23 @@ export default function FichaUnicaProdutoPage({
             <span>Abrir no Bling</span>
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
-          <Link
-            href="/publicacoes"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
-          >
-            <Send className="h-3.5 w-3.5" />
-            <span>Simular Sincronização</span>
-          </Link>
+          {isBlankSku(prod?.bling_sku) ? (
+            <span
+              className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-semibold text-rose-200"
+              title="Produto sem SKU não entra na lista de envio"
+            >
+              <Send className="h-3.5 w-3.5" />
+              Não entra na lista de envio
+            </span>
+          ) : (
+            <Link
+              href="/publicacoes"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
+            >
+              <Send className="h-3.5 w-3.5" />
+              <span>Simular sincronização</span>
+            </Link>
+          )}
         </div>
       </header>
 
@@ -271,7 +308,7 @@ export default function FichaUnicaProdutoPage({
 
       {/* Conteúdo da Aba Selecionada */}
       <section className="mt-6">
-        {activeTab === 'resumo' && (
+        {activeTab === 'geral' && (
           <div className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="rounded-xl border border-emerald-500/30 bg-zinc-900/60 p-5">
@@ -348,7 +385,7 @@ export default function FichaUnicaProdutoPage({
           </div>
         )}
 
-        {activeTab === 'dados_mestres' && (
+        {activeTab === 'geral' && (
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
             <div className="flex items-center gap-2 text-sm font-bold text-white">
               <Database className="h-4 w-4 text-emerald-400" />
@@ -358,6 +395,44 @@ export default function FichaUnicaProdutoPage({
               Estes valores jamais são sobrescritos por dados vindos do Mercado Livre ou da Nuvemshop.
             </p>
 
+            <p className="mt-1 text-xs text-zinc-400">
+              Nome do ERP, somente leitura: <strong className="text-zinc-100">{prod.name ?? 'Sem nome'}</strong>
+              {' '}· Marca: {prod.brand || sheet?.item.brand || 'Sem marca'}
+            </p>
+            <label className="mt-3 block text-xs text-zinc-300">
+              Categoria do catálogo
+              <select
+                value={sheet?.category?.id ?? ''}
+                onChange={(event) => {
+                  const hubCategoryId = event.target.value || null;
+                  void apiFetch(`/api/catalog/products/${prod.id}/category`, {
+                    method: 'PUT',
+                    json: { hubCategoryId },
+                  }).then(() => {
+                    const selected = categories.find((category) => category.id === hubCategoryId) ?? null;
+                    setSheet((current) => current ? { ...current, category: selected } : current);
+                  });
+                }}
+                className="mt-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-white"
+              >
+                <option value="">Sem categoria</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>{category.name}</option>
+                ))}
+              </select>
+            </label>
+            {sheet && (
+              <ul className="mt-4 space-y-1 text-xs">
+                {sheet.item.checklist.items.map((item) => (
+                  <li key={item.code} className={item.ok ? 'text-emerald-300' : 'text-amber-200'}>
+                    {item.title}
+                    {!item.ok && (
+                      <Link href={item.fixHref} className="ml-2 underline">Corrigir</Link>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
             <div className="mt-4 grid gap-3 sm:grid-cols-4">
               <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
                 <span className="text-[11px] uppercase text-zinc-400">Preço de Cadastro</span>
@@ -394,7 +469,7 @@ export default function FichaUnicaProdutoPage({
           </div>
         )}
 
-        {activeTab === 'conteudo' && (
+        {activeTab === 'imagens' && (
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
             <div className="flex items-center gap-2 text-sm font-bold text-white">
               <FileText className="h-4 w-4 text-sky-400" />
@@ -405,6 +480,16 @@ export default function FichaUnicaProdutoPage({
             </p>
 
             <div className="mt-4 overflow-x-auto">
+              {(sheet?.images.length ?? 0) === 0 && (
+                <p className="mb-3 text-xs text-zinc-400">Nenhuma imagem elegível no banco.</p>
+              )}
+              <ul className="mb-4 space-y-1 text-xs text-zinc-300">
+                {sheet?.images.map((image) => (
+                  <li key={image.url_normalized}>
+                    {image.is_cover_eligible ? 'Capa' : 'Imagem'} · ML {image.position_ml ?? '—'} · NS {image.position_ns ?? '—'} · {image.rights_status}
+                  </li>
+                ))}
+              </ul>
               <table className="w-full text-left text-xs">
                 <thead className="border-b border-zinc-800 text-[11px] uppercase text-zinc-400">
                   <tr>
@@ -427,7 +512,7 @@ export default function FichaUnicaProdutoPage({
                       {mainVar?.net_weight ?? '—'} kg / {mainVar?.gross_weight ?? '—'} kg
                     </td>
                     <td className="py-3 pl-4 text-zinc-300">
-                      Grupo B (CQS) — enriquecível apenas se o Bling estiver vazio ou com sentinela
+                      Peso — só enriquece se o Bling estiver vazio ou com valor sentinela
                     </td>
                   </tr>
                   <tr>
@@ -470,6 +555,18 @@ export default function FichaUnicaProdutoPage({
           </div>
         )}
 
+        {activeTab === 'atributos' && (
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 text-sm text-zinc-200">
+            <h2 className="font-bold text-white">Atributos usados no mapeamento</h2>
+            <p className="mt-2 text-xs text-zinc-400">
+              Marca: {prod.brand || 'sem marca'}. Os mapas por categoria ficam em Atributos.
+            </p>
+            <Link href="/atributos" className="mt-3 inline-block text-xs font-semibold text-emerald-300 underline">
+              Abrir mapas da categoria
+            </Link>
+          </div>
+        )}
+
         {activeTab === 'fiscal' && (
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 space-y-4">
             <div className="flex items-center gap-2 text-sm font-bold text-white">
@@ -483,7 +580,7 @@ export default function FichaUnicaProdutoPage({
                   {mainVar?.ean || 'Ausente'}
                 </p>
                 <span className="text-[11px] text-zinc-400">
-                  Status GVE: {mainVar?.ean_status ?? 'sem variante'}
+                  Situação: {mainVar?.ean_status ?? 'sem variante'}
                 </span>
               </div>
               <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3.5">
@@ -492,7 +589,7 @@ export default function FichaUnicaProdutoPage({
                   {prod?.ncm || 'Ausente'}
                 </p>
                 <span className="text-[11px] text-emerald-400">
-                  Status NVE: {prod.ncm_status}
+                  Situação: {prod.ncm_status}
                 </span>
               </div>
               <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3.5">
@@ -513,14 +610,22 @@ export default function FichaUnicaProdutoPage({
           </div>
         )}
 
-        {activeTab === 'publicacao' && (
+        {activeTab === 'canais' && (
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
             <h2 className="text-sm font-bold text-white">
-              Estado de Publicação por Passo (APE)
+              Estado de publicação por passo
             </h2>
             <p className="mt-1 text-xs text-zinc-400">
               Enquanto <code className="text-zinc-300">stock_price = bling_native</code>, passos de estoque e preço permanecem sob controle nativo do Bling.
             </p>
+            <ul className="mt-3 space-y-1 text-xs text-zinc-300">
+              {(sheet?.storePrices.length ?? 0) === 0 && <li>Nenhum preço de loja lido para a variante padrão.</li>}
+              {sheet?.storePrices.map((price) => (
+                <li key={price.platform}>
+                  {price.platform === 'mercadolivre' ? 'Mercado Livre' : 'Nuvemshop'}: loja {price.store_price ?? '—'} · promo {price.store_promotional_price ?? '—'}
+                </li>
+              ))}
+            </ul>
             {pushAttempts.length === 0 ? (
               <div className="mt-4 flex items-center gap-3 text-xs text-zinc-300">
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />
@@ -550,7 +655,7 @@ export default function FichaUnicaProdutoPage({
           </div>
         )}
 
-        {activeTab === 'historico' && (
+        {activeTab === 'canais' && detail.qualityHistory.length > 0 && (
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
             <div className="flex items-center gap-2 text-sm font-bold text-white">
               <History className="h-4 w-4 text-zinc-300" />
@@ -585,5 +690,13 @@ export default function FichaUnicaProdutoPage({
         )}
       </section>
     </main>
+  );
+}
+
+export default function Page(props: { params: { id: string } }) {
+  return (
+    <React.Suspense fallback={<main className="px-6 py-8 text-sm text-zinc-300">Carregando ficha...</main>}>
+      <FichaUnicaProdutoPage {...props} />
+    </React.Suspense>
   );
 }

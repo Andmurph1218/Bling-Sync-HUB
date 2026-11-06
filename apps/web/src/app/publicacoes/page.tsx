@@ -44,6 +44,7 @@ interface SimulationResult {
     blockedByFiscalRule: number;
     awaitingContentOrCategory: number;
     ignoredStockPriceByNativeOwner: number;
+    excludedEmptySku: number;
   };
   syncOwners: Array<{ platform: string; stock_price: string; content: string }>;
   protectedBlingFields: string[];
@@ -90,6 +91,16 @@ export default function PublicacoesPage() {
     })();
   }, []);
 
+  const [today, setToday] = useState<{ value: number; sent: number; failed: number; queued: number } | null>(null);
+
+  useEffect(() => {
+    void apiFetch<{ cards: { publicationsToday: { value: number; sent: number; failed: number; queued: number } } }>(
+      '/api/catalog/home'
+    )
+      .then((home) => setToday(home.cards.publicationsToday))
+      .catch(() => setToday(null));
+  }, []);
+
   const s = simResult?.summary;
 
   return (
@@ -99,12 +110,17 @@ export default function PublicacoesPage() {
           <div className="flex items-center gap-2">
             <Send className="h-6 w-6 text-emerald-400" />
             <h1 className="text-2xl font-bold text-white">
-              Simulador de Sincronização &amp; Histórico de Publicações
+              Publicações
             </h1>
           </div>
           <p className="mt-1 text-sm text-zinc-400">
             Simule o impacto sobre os produtos reais do banco antes de qualquer escrita nos canais e acompanhe cada tentativa por passo.
           </p>
+          {today && (
+            <p className="mt-2 text-sm text-zinc-200" role="status">
+              Publicações hoje: {today.value} ({today.sent} enviadas, {today.failed} falhas, {today.queued} na fila)
+            </p>
+          )}
         </div>
 
         <button
@@ -136,6 +152,11 @@ export default function PublicacoesPage() {
 
         {s && (
           <>
+            {s.excludedEmptySku > 0 && (
+              <p className="mt-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-100" role="status">
+                {s.excludedEmptySku} produto(s) sem SKU ficaram fora da lista de envio. Eles não sincronizam até o SKU ser preenchido no Bling.
+              </p>
+            )}
             <div className="mt-4 grid gap-3 sm:grid-cols-4">
               <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
                 <span className="text-xs text-zinc-400">Produtos analisados</span>

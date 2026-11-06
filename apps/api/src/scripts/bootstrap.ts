@@ -13,8 +13,14 @@
 import { getPool, query } from '../db/pool.js';
 import { runAllMigrationsUp } from '../db/migrator.js';
 import { createUser } from '../auth/service.js';
+import { hashPassword } from '../auth/crypto.js';
+import {
+  isBootstrapDefaultPassword,
+  resolveBootstrapPassword,
+} from '../auth/password-policy.js';
 import { UserRole } from '../auth/types.js';
 import { logger } from '../lib/logger.js';
+import { env } from '../config/env.js';
 
 const INITIAL_USERS: Array<{
   email: string;
@@ -32,7 +38,7 @@ const INITIAL_USERS: Array<{
   },
   {
     email: 'fiscal1@blingsync.local',
-    name: 'Aprovador Fiscal 01 (GVE / NVE)',
+    name: 'Aprovador Fiscal 01',
     passwordEnvKey: 'BOOTSTRAP_FISCAL1_PASSWORD',
     defaultPassword: 'ChangeMe!Fiscal01_2026',
     roles: ['fiscal_approver'],
@@ -46,7 +52,7 @@ const INITIAL_USERS: Array<{
   },
   {
     email: 'operador@blingsync.local',
-    name: 'Operador de Catálogo (PIRE / VIR / CQS)',
+    name: 'Operador de Catálogo',
     passwordEnvKey: 'BOOTSTRAP_OPERATOR_PASSWORD',
     defaultPassword: 'ChangeMe!Operator2026',
     roles: ['operator'],
@@ -66,17 +72,48 @@ export async function runBootstrap(): Promise<void> {
       `SELECT id FROM users WHERE email = $1`,
       [u.email]
     );
+    const envPassword = process.env[u.passwordEnvKey];
+    const { password } = resolveBootstrapPassword({
+      nodeEnv: env.NODE_ENV,
+      envPassword,
+      defaultPassword: u.defaultPassword,
+    });
+
     if (existing.rowCount && existing.rowCount > 0) {
-      logger.info('Usuário inicial já existe, mantendo registro', { email: u.email });
+      const current = await query<{ id: string; name: string; must_change_password: boolean }>(
+        `SELECT id, name, must_change_password FROM users WHERE email = $1`,
+        [u.email]
+      );
+      const row = current.rows[0];
+      if (row && (row.name.includes('GVE') || row.name.includes('PIRE') || row.name.includes('NVE') || row.name.includes('CQS'))) {
+        await query(`UPDATE users SET name = $2 WHERE id = $1`, [row.id, u.name]);
+      }
+      if (
+        row?.must_change_password &&
+        envPassword &&
+        envPassword.trim().length > 0 &&
+        !isBootstrapDefaultPassword(envPassword.trim())
+      ) {
+        const passwordHash = await hashPassword(envPassword.trim());
+        await query(
+          `UPDATE users SET password_hash = $2, must_change_password = true WHERE id = $1`,
+          [row.id, passwordHash]
+        );
+        logger.info('Senha temporária do ambiente aplicada; o primeiro login ainda exige troca', {
+          email: u.email,
+        });
+      } else {
+        logger.info('Usuário inicial já existe, mantendo registro', { email: u.email });
+      }
       continue;
     }
 
-    const password = process.env[u.passwordEnvKey] || u.defaultPassword;
     const created = await createUser({
       email: u.email,
       name: u.name,
       password,
       roles: u.roles,
+      mustChangePassword: true,
     });
     logger.info('Usuário inicial criado com sucesso', {
       id: created.id,

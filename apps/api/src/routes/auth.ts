@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { env } from '../config/env.js';
 import { withTransaction } from '../db/pool.js';
 import { extractOpaqueToken, requireAuth, requireRole } from '../auth/middleware.js';
-import { authenticateUser, createUser, revokeSessionByToken } from '../auth/service.js';
+import { DefaultPasswordRejectedError } from '../auth/password-policy.js';
+import { authenticateUser, changeOwnPassword, createUser, revokeSessionByToken } from '../auth/service.js';
 import { ROLES } from '../auth/types.js';
 
 export const authRouter = Router();
@@ -11,6 +12,11 @@ export const authRouter = Router();
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8),
 });
 
 const createUserSchema = z.object({
@@ -59,10 +65,16 @@ authRouter.post('/auth/login', async (req: Request, res: Response, next: NextFun
         email: result.user.email,
         name: result.user.name,
         roles: result.user.roles,
+        mustChangePassword: result.user.mustChangePassword,
       },
+      mustChangePassword: result.user.mustChangePassword,
       expiresAt: result.expiresAt.toISOString(),
     });
   } catch (error) {
+    if (error instanceof DefaultPasswordRejectedError) {
+      res.status(403).json({ error: error.code, message: error.message });
+      return;
+    }
     next(error);
   }
 });
@@ -88,8 +100,41 @@ authRouter.get('/auth/me', requireAuth, (req: Request, res: Response) => {
       email: user.email,
       name: user.name,
       roles: user.roles,
+      mustChangePassword: user.mustChangePassword,
     },
   });
+});
+
+authRouter.post('/auth/change-password', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = changePasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_payload', details: parsed.error.flatten() });
+      return;
+    }
+    await changeOwnPassword(req.user!.id, parsed.data.currentPassword, parsed.data.newPassword);
+    res.status(200).json({ status: 'password_changed' });
+  } catch (error) {
+    if (error instanceof DefaultPasswordRejectedError) {
+      res.status(400).json({
+        error: error.code,
+        message: 'A nova senha não pode ser uma senha padrão do bootstrap.',
+      });
+      return;
+    }
+    if (error instanceof Error && error.message === 'invalid_current_password') {
+      res.status(401).json({ error: 'invalid_current_password', message: 'Senha atual incorreta.' });
+      return;
+    }
+    if (error instanceof Error && error.message === 'same_password') {
+      res.status(400).json({
+        error: 'same_password',
+        message: 'A nova senha precisa ser diferente da senha atual.',
+      });
+      return;
+    }
+    next(error);
+  }
 });
 
 authRouter.post(

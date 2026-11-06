@@ -21,6 +21,8 @@
 import { PoolClient } from 'pg';
 import { query, withTransaction } from '../db/pool.js';
 import { resolveVariantChannelPrice } from '../contracts/mappers.js';
+import { isBlankSku } from '../catalog/blank-sku.js';
+import { loadMappedAttributePayload } from '../catalog/list.js';
 import { checkStepReadinessGate, PushStepType } from './cre.js';
 
 export type PushJobKind = 'STOCK_PRICE' | 'CONTENT' | 'CREATE';
@@ -116,6 +118,14 @@ export async function enqueueOrPromotePushJob(input: {
   changedFields: string[];
 }): Promise<{ pushJobId: string; promotedExisting: boolean }> {
   return withTransaction(async (client: PoolClient) => {
+    const skuRes = await client.query<{ bling_sku: string }>(
+      `SELECT bling_sku FROM product_variants WHERE id = $1`,
+      [input.variantId]
+    );
+    if (isBlankSku(skuRes.rows[0]?.bling_sku)) {
+      throw new Error('empty_sku_not_syncable');
+    }
+
     const existingPending = await client.query<{
       id: string;
       priority: PushPriority;
@@ -524,6 +534,12 @@ export async function executePushJobById(
           variant.stock !== null ? Math.max(0, Math.floor(Number(variant.stock))) : 0;
         const createdItemId = `${job.platform === 'mercadolivre' ? 'MLB' : 'NS'}-CREATED-${variant.bling_sku}`;
 
+        const mappedAttributes = await loadMappedAttributePayload(
+          client,
+          job.master_product_id,
+          job.variant_id,
+          job.platform
+        );
         const call: ChannelStepExecutorCalls = {
           step: 'CREATE',
           platform: job.platform,
@@ -533,6 +549,7 @@ export async function executePushJobById(
             sku: variant.bling_sku,
             price: resolvedPrice.effectivePrice,
             stock: initialStockFloor,
+            ...(mappedAttributes.length > 0 ? { attributes: mappedAttributes } : {}),
           },
         };
         if (options?.onExecuteChannelCall) {
@@ -822,12 +839,19 @@ export async function executePushJobById(
         }
         executedCalls.push(call);
       } else {
+        const mappedAttributes =
+          stepRow.step === 'product' || stepRow.step === 'description'
+            ? await loadMappedAttributePayload(client, job.master_product_id, job.variant_id, job.platform)
+            : [];
         const call: ChannelStepExecutorCalls = {
           step: stepRow.step,
           platform: job.platform,
           endpoint: `/${job.platform}/${stepRow.step}`,
           method: 'PUT',
-          payload: { step: stepRow.step },
+          payload: {
+            step: stepRow.step,
+            ...(mappedAttributes.length > 0 ? { attributes: mappedAttributes } : {}),
+          },
         };
         if (options?.onExecuteChannelCall) {
           await options.onExecuteChannelCall(call);

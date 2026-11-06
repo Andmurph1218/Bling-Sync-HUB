@@ -8,6 +8,7 @@ export interface AuthenticatedUser {
   name: string;
   roles: UserRole[];
   sessionId: string;
+  mustChangePassword: boolean;
 }
 
 declare global {

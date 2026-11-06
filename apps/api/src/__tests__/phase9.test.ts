@@ -282,4 +282,30 @@ describe('Fase 9 — Motor de Push Atômico APE (Sem PUT Completo, Eco do PUT N�
     );
     expect(alertRes.rows).toEqual([{ severity: 'critical', status: 'open' }]);
   });
+
+  it('5. Variante sem SKU não entra na fila de envio', async () => {
+    const prodRes = await query<{ id: string }>(
+      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+       VALUES ('9002-EMPTY', '', 'Produto sem SKU', 'P', 'S')
+       RETURNING id`
+    );
+    const masterId = prodRes.rows[0]!.id;
+    const varRes = await query<{ id: string }>(
+      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price)
+       VALUES ($1, '', true, 'S', 10)
+       RETURNING id`,
+      [masterId]
+    );
+
+    await expect(
+      enqueueOrPromotePushJob({
+        masterProductId: masterId,
+        variantId: varRes.rows[0]!.id,
+        platform: 'nuvemshop',
+        jobKind: 'STOCK_PRICE',
+        priority: 'P2',
+        changedFields: ['stock'],
+      })
+    ).rejects.toThrow('empty_sku_not_syncable');
+  });
 });

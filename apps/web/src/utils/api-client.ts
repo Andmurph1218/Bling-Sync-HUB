@@ -46,6 +46,17 @@ export async function apiFetch<T>(
   if (res.status === 401 && path !== '/auth/login' && path !== '/auth/me') {
     redirectToLogin();
   }
+  if (
+    res.status === 403 &&
+    typeof body === 'object' &&
+    body !== null &&
+    'error' in body &&
+    (body as { error: unknown }).error === 'password_change_required' &&
+    typeof window !== 'undefined' &&
+    !window.location.pathname.startsWith('/conta/senha')
+  ) {
+    window.location.href = '/conta/senha';
+  }
   if (!res.ok) {
     throw new ApiError(res.status, body);
   }

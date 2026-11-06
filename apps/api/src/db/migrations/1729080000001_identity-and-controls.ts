@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
   name          text NOT NULL,
   password_hash text NOT NULL,
   is_active     boolean NOT NULL DEFAULT true,
+  must_change_password boolean NOT NULL DEFAULT false,
   created_at    timestamptz NOT NULL DEFAULT now()
 );
 

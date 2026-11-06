@@ -77,123 +77,9 @@ export interface OperationalStatePayload {
     processed_at: string | null;
   }>;
   catalogProducts: CatalogProductSummary[];
+  emptySkuCount: number;
+  contentIncompleteCount: number;
 }
-
-export const FALLBACK_OPERATIONAL_STATE: OperationalStatePayload = {
-  calculatedAt: new Date().toISOString(),
-  kpis: {
-    monitoredProducts: {
-      value: 25,
-      variantsCount: 25,
-      definition: 'Total de produtos ativos importados do Bling ERP v3.',
-      source: 'master_products (catalog_status = active)',
-      period: 'Tempo real (estado atual)',
-      targetHref: '/catalogo',
-    },
-    readyToPublish: {
-      value: 1,
-      totalEvaluated: 15,
-      definition:
-        'Variantes que atendem aos requisitos fiscais e de conteúdo em pelo menos um canal.',
-      source: 'channel_readiness_scores (publishable_ml OR publishable_ns)',
-      period: 'Último cálculo de prontidão',
-      targetHref: '/catalogo?filter=ready',
-    },
-    actionPendings: {
-      value: 302,
-      breakdown: {
-        matchingSuggestions: 296,
-        matchingQuarantine: 0,
-        eanPending: 0,
-        eanDuplicates: 0,
-        ncmPendingFirst: 0,
-        ncmPendingSecond: 0,
-        fiscalBlocks: 6,
-      },
-      definition:
-        'Soma de itens aguardando decisão de operador ou revisor fiscal (correspondências, EAN, NCM e bloqueios).',
-      source:
-        'matching_queue + ean_pending_validation + ncm_manual_suggestions + product_variants',
-      period: 'Fila ativa aberta',
-      targetHref: '/pendencias',
-    },
-    syncFailures: {
-      value: 0,
-      belowCostAlerts: 0,
-      definition:
-        'Operações de publicação que falharam e exigem verificação antes de reprocessar.',
-      source: 'push_jobs (status = failed)',
-      period: 'Últimos 7 dias (retenção operacional)',
-      targetHref: '/publicacoes',
-    },
-  },
-  channels: {
-    oauth: [
-      {
-        provider: 'bling',
-        expires_at: '2026-10-28T04:00:00.000Z',
-        updated_at: '2026-10-27T21:00:00.000Z',
-      },
-      {
-        provider: 'mercadolivre',
-        expires_at: '2026-10-28T02:00:00.000Z',
-        updated_at: '2026-10-27T20:00:00.000Z',
-      },
-      {
-        provider: 'nuvemshop',
-        expires_at: '2126-09-26T20:00:00.000Z',
-        updated_at: '2026-10-20T20:00:00.000Z',
-      },
-    ],
-    syncOwners: [
-      { platform: 'mercadolivre', stock_price: 'bling_native', content: 'hub' },
-      { platform: 'nuvemshop', stock_price: 'bling_native', content: 'hub' },
-    ],
-    enrichmentControls: [
-      {
-        platform: 'mercadolivre',
-        mode: 'shadow',
-        kill_switch: false,
-        max_replaces_per_run: 25,
-      },
-      {
-        platform: 'nuvemshop',
-        mode: 'shadow',
-        kill_switch: false,
-        max_replaces_per_run: 25,
-      },
-    ],
-    warehouses: [
-      {
-        bling_warehouse_id: '14886768228',
-        name: 'Geral',
-        role: 'seller',
-        include_in_push: true,
-      },
-    ],
-  },
-  recentWebhooks: [
-    {
-      id: 'wh-1',
-      source: 'nuvemshop',
-      event_type: 'product/updated',
-      resource_id: '314532102',
-      status: 'processed',
-      ignore_reason: null,
-      processed_at: '2026-10-22T18:56:35.018Z',
-    },
-    {
-      id: 'wh-2',
-      source: 'bling',
-      event_type: 'stock.updated',
-      resource_id: '999999999',
-      status: 'processed',
-      ignore_reason: null,
-      processed_at: '2026-10-22T18:45:13.175Z',
-    },
-  ],
-  catalogProducts: [],
-};
 
 /**
  * Traduz bloqueios técnicos do CRE/GVE/NVE para linguagem operacional sem siglas obrigatórias.
@@ -243,14 +129,6 @@ export function translateBlockerToPlainPortuguese(code: string): {
   }
 }
 
-export async function fetchOperationalState(): Promise<{
-  data: OperationalStatePayload;
-  liveFromDatabase: boolean;
-}> {
-  try {
-    const json = await apiFetch<OperationalStatePayload>('/api/dashboard/operational-state');
-    return { data: json, liveFromDatabase: true };
-  } catch {
-    return { data: FALLBACK_OPERATIONAL_STATE, liveFromDatabase: false };
-  }
+export async function fetchOperationalState(): Promise<OperationalStatePayload> {
+  return apiFetch<OperationalStatePayload>('/api/dashboard/operational-state');
 }

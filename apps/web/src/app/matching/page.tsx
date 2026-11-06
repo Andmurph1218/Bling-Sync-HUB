@@ -91,6 +91,7 @@ function toComparisonItem(q: QueueApiItem): MatchingComparisonItem {
 
 export default function MatchingPage() {
   const [rows, setRows] = useState<MatchingComparisonItem[]>([]);
+  const [unlinkedTotal, setUnlinkedTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -130,6 +131,12 @@ export default function MatchingPage() {
   useEffect(() => {
     void loadQueue();
   }, [loadQueue]);
+
+  useEffect(() => {
+    void apiFetch<{ cards: { unlinked: { value: number } } }>('/api/catalog/home')
+      .then((home) => setUnlinkedTotal(home.cards.unlinked.value))
+      .catch(() => setUnlinkedTotal(null));
+  }, []);
 
   const resolve = async (
     row: MatchingComparisonItem,
@@ -240,13 +247,15 @@ export default function MatchingPage() {
       <header className="flex flex-col justify-between gap-4 border-b border-zinc-800 pb-6 sm:flex-row sm:items-center">
         <div>
           <h1 className="text-2xl font-bold text-white">
-            Fila de Matching Explicável (<TechTooltip term="PIRE" /> /{' '}
-            <TechTooltip term="VIR" />)
+            Vínculos
           </h1>
           <p className="mt-1 text-sm text-zinc-400">
             Clique em qualquer linha para abrir a comparação lado a lado. Recusas gravam par permanente em{' '}
             <TechTooltip term="match_rejections" />.
           </p>
+          {unlinkedTotal !== null && (
+            <p className="mt-2 text-sm text-zinc-200" role="status">Sem vínculo: {unlinkedTotal}</p>
+          )}
         </div>
         <div className="flex items-center gap-2 text-xs">
           <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 font-medium text-amber-300">
@@ -267,7 +276,7 @@ export default function MatchingPage() {
               {selectedIds.length} item(ns) selecionado(s)
             </span>
             <span className="text-zinc-400">
-              · Aplique uma decisão em lote na fila do PIRE
+              · Aplique uma decisão em lote na fila de vínculos
             </span>
           </div>
           <div className="flex items-center gap-2.5">
@@ -324,7 +333,7 @@ export default function MatchingPage() {
                 <th className="px-4 py-3.5">Produto Bling (SKU / Nome)</th>
                 <th className="px-4 py-3.5">Anúncio no Canal</th>
                 <th className="px-4 py-3.5">
-                  Score <TechTooltip term="PIRE" />
+                  Confiança do vínculo
                 </th>
                 <th className="px-4 py-3.5">Sinais Fortes (Explicação)</th>
                 <th className="px-4 py-3.5">Status</th>

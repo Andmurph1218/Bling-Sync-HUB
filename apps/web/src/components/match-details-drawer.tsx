@@ -116,7 +116,7 @@ export function MatchDetailsDrawer({
       <aside
         role="dialog"
         aria-modal="true"
-        aria-label="Resolução de Identidade: PIRE / VIR"
+        aria-label="Como o vínculo foi sugerido"
         className="relative z-10 flex h-full w-full max-w-2xl flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100 shadow-2xl"
       >
         {/* Cabeçalho do Sheet */}
@@ -124,8 +124,7 @@ export function MatchDetailsDrawer({
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
               <h2 className="text-lg font-bold text-white">
-                Resolução de Identidade: <TechTooltip term="PIRE" /> /{' '}
-                <TechTooltip term="VIR" />
+                Como o vínculo foi sugerido
               </h2>
               <span
                 className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-0.5 text-xs font-bold ${

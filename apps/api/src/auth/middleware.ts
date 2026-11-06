@@ -3,6 +3,11 @@ import { env } from '../config/env.js';
 import { resolveSessionByToken } from './service.js';
 import { UserRole } from './types.js';
 
+function isPasswordChangeExempt(req: Request): boolean {
+  const path = req.originalUrl.split('?')[0] ?? req.path;
+  return path === '/auth/me' || path === '/auth/logout' || path === '/auth/change-password';
+}
+
 export function extractOpaqueToken(req: Request): string | null {
   const cookieToken = req.cookies?.[env.SESSION_COOKIE_NAME];
   if (typeof cookieToken === 'string' && cookieToken.length > 0) {
@@ -39,6 +44,13 @@ export async function requireAuth(
     }
 
     req.user = user;
+    if (user.mustChangePassword && !isPasswordChangeExempt(req)) {
+      res.status(403).json({
+        error: 'password_change_required',
+        message: 'Troque a senha antes de usar o HUB.',
+      });
+      return;
+    }
     next();
   } catch (error) {
     next(error);

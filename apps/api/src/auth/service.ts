@@ -7,6 +7,11 @@ import {
   hashSessionToken,
   verifyPassword,
 } from './crypto.js';
+import {
+  DefaultPasswordRejectedError,
+  evaluateLoginPassword,
+  isBootstrapDefaultPassword,
+} from './password-policy.js';
 import { AuthenticatedUser, UserRole } from './types.js';
 
 export interface CreateUserInput {
@@ -14,6 +19,7 @@ export interface CreateUserInput {
   name: string;
   password: string;
   roles: UserRole[];
+  mustChangePassword?: boolean;
 }
 
 export interface LoginResult {
@@ -38,10 +44,10 @@ export async function createUser(input: CreateUserInput): Promise<{
 
   return withTransaction(async (client: PoolClient) => {
     const userRes = await client.query<{ id: string; email: string; name: string }>(
-      `INSERT INTO users (email, name, password_hash, is_active)
-       VALUES ($1, $2, $3, true)
+      `INSERT INTO users (email, name, password_hash, is_active, must_change_password)
+       VALUES ($1, $2, $3, true, $4)
        RETURNING id, email, name`,
-      [normalizedEmail, input.name.trim(), passwordHash]
+      [normalizedEmail, input.name.trim(), passwordHash, input.mustChangePassword === true]
     );
     const created = userRes.rows[0];
     if (!created) {
@@ -75,8 +81,9 @@ export async function authenticateUser(
     name: string;
     password_hash: string;
     is_active: boolean;
+    must_change_password: boolean;
   }>(
-    `SELECT id, email, name, password_hash, is_active
+    `SELECT id, email, name, password_hash, is_active, must_change_password
      FROM users
      WHERE email = $1`,
     [normalizedEmail]
@@ -91,6 +98,12 @@ export async function authenticateUser(
   if (!valid) {
     return null;
   }
+
+  const passwordPolicy = evaluateLoginPassword({
+    nodeEnv: env.NODE_ENV,
+    password,
+    mustChangePassword: user.must_change_password,
+  });
 
   const rolesRes = await query<{ role: UserRole }>(
     `SELECT role FROM user_roles WHERE user_id = $1 ORDER BY role ASC`,
@@ -121,6 +134,7 @@ export async function authenticateUser(
       name: user.name,
       roles,
       sessionId: sessionRow.id,
+      mustChangePassword: passwordPolicy.mustChangePassword,
     },
     opaqueToken,
     expiresAt,
@@ -141,6 +155,7 @@ export async function resolveSessionByToken(
     email: string;
     name: string;
     is_active: boolean;
+    must_change_password: boolean;
     expires_at: Date | string;
   }>(
     `SELECT
@@ -149,6 +164,7 @@ export async function resolveSessionByToken(
        u.email,
        u.name,
        u.is_active,
+       u.must_change_password,
        s.expires_at
      FROM sessions s
      INNER JOIN users u ON u.id = s.user_id
@@ -179,7 +195,40 @@ export async function resolveSessionByToken(
     name: row.name,
     roles: rolesRes.rows.map((r) => r.role),
     sessionId: row.session_id,
+    mustChangePassword: row.must_change_password,
   };
+}
+
+export async function changeOwnPassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<void> {
+  if (isBootstrapDefaultPassword(newPassword)) {
+    throw new DefaultPasswordRejectedError();
+  }
+  if (newPassword === currentPassword) {
+    throw new Error('same_password');
+  }
+
+  const userRes = await query<{ password_hash: string }>(
+    `SELECT password_hash FROM users WHERE id = $1 AND is_active = true`,
+    [userId]
+  );
+  const user = userRes.rows[0];
+  if (!user) {
+    throw new Error('user_not_found');
+  }
+  const valid = await verifyPassword(user.password_hash, currentPassword);
+  if (!valid) {
+    throw new Error('invalid_current_password');
+  }
+
+  const passwordHash = await hashPassword(newPassword);
+  await query(
+    `UPDATE users SET password_hash = $2, must_change_password = false WHERE id = $1`,
+    [userId, passwordHash]
+  );
 }
 
 export async function revokeSessionByToken(opaqueToken: string): Promise<void> {

@@ -69,7 +69,7 @@ export default function CanaisConfiguracoesPage() {
       <header className="border-b border-zinc-800 pb-6">
         <div className="flex items-center gap-2">
           <Sliders className="h-6 w-6 text-emerald-400" />
-          <h1 className="text-2xl font-bold text-white">Canais, Integrações Nativas &amp; Depósitos</h1>
+          <h1 className="text-2xl font-bold text-white">Canais</h1>
         </div>
         <p className="mt-1 text-sm text-zinc-400">
           Quem é responsável por estoque/preço e por conteúdo em cada canal, para evitar conflito entre o HUB e a integração nativa do Bling.
@@ -99,6 +99,16 @@ export default function CanaisConfiguracoesPage() {
                   {row && (
                     <p className="mt-2 text-zinc-400">
                       Expira em: {new Date(row.expires_at).toLocaleString('pt-BR')}
+                    </p>
+                  )}
+                  {p === 'mercadolivre' && row && !row.has_refresh && (
+                    <p className="mt-2 text-amber-200">
+                      O token não renova sozinho. No aplicativo do Mercado Livre, habilite o escopo offline_access e autorize de novo.
+                    </p>
+                  )}
+                  {p === 'bling' && (
+                    <p className="mt-2 text-zinc-400">
+                      No aplicativo do Bling, mantenha desligados os webhooks de pedido e de nota fiscal. O HUB não processa pedidos.
                     </p>
                   )}
                 </div>
