@@ -324,8 +324,8 @@ export async function processQueuedImagesWorkerBatch(options: {
              master_product_id, variant_id, source_url, url_normalized,
              source_platform, seller_id, average_hash, sha256_hash,
              width, height, format, size_bytes, rights_status,
-             quality_score, is_cover_eligible, updated_at
-           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, now())
+             quality_score, updated_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
            ON CONFLICT (master_product_id, url_normalized) DO UPDATE
              SET average_hash = EXCLUDED.average_hash,
                  sha256_hash = EXCLUDED.sha256_hash,
@@ -335,7 +335,6 @@ export async function processQueuedImagesWorkerBatch(options: {
                  size_bytes = EXCLUDED.size_bytes,
                  rights_status = EXCLUDED.rights_status,
                  quality_score = EXCLUDED.quality_score,
-                 is_cover_eligible = EXCLUDED.is_cover_eligible,
                  updated_at = now()
            RETURNING id`,
           [
@@ -353,11 +352,13 @@ export async function processQueuedImagesWorkerBatch(options: {
             probe.buffer.byteLength,
             rightsStatus,
             qualityScore,
-            coverEligible,
           ]
         );
 
         const productImageId = imgRes.rows[0]!.id;
+        if (coverEligible) {
+          await client.query(`UPDATE product_images SET is_cover_eligible = true WHERE id = $1`, [productImageId]);
+        }
 
         if (reviewReason) {
           await client.query(
@@ -480,18 +481,30 @@ export async function finalizeProductImagesIqre(
       height: number | null;
       rights_status: 'owned' | 'third_party_risk' | 'watermark_suspect' | 'approved' | 'rejected';
       quality_score: number;
-      is_cover_eligible: boolean;
     }>(
-      `SELECT id, average_hash, width, height, rights_status, quality_score, is_cover_eligible
-       FROM product_images
-       WHERE master_product_id = $1
+      `SELECT pi.id, pi.average_hash, pi.width, pi.height, pi.rights_status, pi.quality_score
+       FROM product_images pi
+       WHERE pi.id IN (
+         SELECT product_image_id
+         FROM image_processing_queue
+         WHERE master_product_id = $1 AND product_image_id IS NOT NULL
+       )
        FOR UPDATE`,
       [masterProductId]
     );
+    const visibleImages = imagesRes.rows.map((row) => ({
+      ...row,
+      is_cover_eligible: isEligibleForCover({
+        qualityScore: Number(row.quality_score),
+        rightsStatus: row.rights_status,
+        width: row.width ?? 0,
+        height: row.height ?? 0,
+      }),
+    }));
 
     // Ordena por maior resolução (width * height) DESC e depois por quality_score DESC para que o representante
     // mantido em cada cluster de Hamming <= 5 seja SEMPRE o de maior resolução (Seção 8.6 Etapa 3)
-    const sortedByResolution = [...imagesRes.rows].sort((a, b) => {
+    const sortedByResolution = [...visibleImages].sort((a, b) => {
       const areaA = (a.width ?? 0) * (a.height ?? 0);
       const areaB = (b.width ?? 0) * (b.height ?? 0);
       if (areaB !== areaA) return areaB - areaA;

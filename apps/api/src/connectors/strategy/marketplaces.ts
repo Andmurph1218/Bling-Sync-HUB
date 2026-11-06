@@ -1,10 +1,13 @@
 import { lookupChannelAttributeSpecs } from '../../catalog/channel-attributes.js';
+import { searchMercadoLivreListings } from './ml-listing-search.js';
 import { isOrderOrInvoiceEvent } from './catalog-mode.js';
 import {
   IncomingWebhook,
   ListingDraft,
   ListingResult,
+  ListingSearchInput,
   MarketplaceConnector,
+  RemoteListing,
   StockUpdate,
   StockUpdateResult,
   WebhookReceipt,
@@ -25,11 +28,26 @@ function receiveCatalogWebhook(event: IncomingWebhook): WebhookReceipt {
   return { accepted: true, reason: 'evento_de_catalogo' };
 }
 
+let listingSearchOverride: ((input: ListingSearchInput) => Promise<RemoteListing[]>) | null = null;
+
+/** Só os testes substituem a consulta ao Mercado Livre. */
+export function setListingSearchForTests(
+  search: ((input: ListingSearchInput) => Promise<RemoteListing[]>) | null
+): void {
+  listingSearchOverride = search;
+}
+
 export class MercadoLivreMarketplaceConnector implements MarketplaceConnector {
   readonly id = 'mercadolivre';
 
   async getCategoryAttributes(channelCategoryId: string) {
     return lookupChannelAttributeSpecs('mercadolivre', channelCategoryId).attributes;
+  }
+
+  async searchListings(input: ListingSearchInput): Promise<RemoteListing[]> {
+    if (listingSearchOverride) return listingSearchOverride(input);
+    if (process.env.VITEST === 'true') return [];
+    return searchMercadoLivreListings(input);
   }
 
   async createListing(draft: ListingDraft): Promise<ListingResult> {
@@ -50,6 +68,10 @@ export class NuvemshopMarketplaceConnector implements MarketplaceConnector {
 
   async getCategoryAttributes(channelCategoryId: string) {
     return lookupChannelAttributeSpecs('nuvemshop', channelCategoryId).attributes;
+  }
+
+  async searchListings(): Promise<RemoteListing[]> {
+    return [];
   }
 
   async createListing(draft: ListingDraft): Promise<ListingResult> {

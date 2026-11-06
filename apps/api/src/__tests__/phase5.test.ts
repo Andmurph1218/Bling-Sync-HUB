@@ -294,10 +294,14 @@ describe('Fase 5 — Motor de Imagens IQRE (Enfileiramento Assíncrono, Worker S
       position_ml: number | null;
       position_ns: number | null;
     }>(
-      `SELECT rights_status, position_bling, position_ml, position_ns
-       FROM product_images
-       WHERE master_product_id = $1
-       ORDER BY rights_status ASC`,
+      `SELECT pi.rights_status, pi.position_bling, pi.position_ml, pi.position_ns
+       FROM product_images pi
+       WHERE pi.id IN (
+         SELECT product_image_id
+         FROM image_processing_queue
+         WHERE master_product_id = $1 AND product_image_id IS NOT NULL
+       )
+       ORDER BY pi.rights_status ASC`,
       [prodCId]
     );
 

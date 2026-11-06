@@ -1,5 +1,14 @@
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const configuredApi = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
+const localApi = configuredApi === '' || configuredApi.includes('localhost') || configuredApi.includes('127.0.0.1');
+
+/**
+ * No navegador local a API é chamada no mesmo host do Next (rewrite).
+ * Assim o cookie de sessão nasce no host da página e o middleware de /admin consegue lê-lo.
+ * Em produção o endereço público continua valendo quando não é localhost.
+ */
+export const API_BASE_URL = typeof window === 'undefined' || !localApi
+  ? configuredApi || 'http://127.0.0.1:3001'
+  : '';
 
 export class ApiError extends Error {
   constructor(

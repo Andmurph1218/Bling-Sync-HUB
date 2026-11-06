@@ -1,8 +1,9 @@
-import { evaluateCatalogChecklist } from './completeness.js';
 import {
   AttributeMapInput,
+  isChannelMappingGreen,
   materializeChannelAttributes,
 } from './channel-attributes.js';
+import { ChecklistResult, evaluateCatalogChecklist } from './completeness.js';
 import { isBlankSku } from './blank-sku.js';
 import { query } from '../db/pool.js';
 
@@ -158,14 +159,14 @@ export async function recalculateCompleteness(ids: string[]): Promise<Array<{ id
       hub_category_id: string | null;
       price: string | null;
       ean_status: string | null;
-      has_cover: boolean;
+      cover_count: number;
     }>(
       `SELECT mp.bling_id, mp.bling_sku, mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id,
               pv.price::text AS price, pv.ean_status,
-              EXISTS (
-                SELECT 1 FROM product_images pi
-                WHERE pi.master_product_id = mp.id AND pi.is_cover_eligible = true
-              ) AS has_cover
+              (
+                SELECT count(*)::int FROM product_images pi
+                WHERE pi.master_product_id = $1 AND pi.is_cover_eligible = true
+              ) AS cover_count
        FROM master_products mp
        LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
        WHERE mp.id = $1`,
@@ -176,7 +177,7 @@ export async function recalculateCompleteness(ids: string[]): Promise<Array<{ id
     const checklist = evaluateCatalogChecklist({
       blingId: row.bling_id,
       sku: row.bling_sku,
-      hasCoverImage: row.has_cover,
+      hasCoverImage: Number(row.cover_count) > 0,
       hubCategoryId: row.hub_category_id,
       mappedPlatforms: [],
       greenPlatforms: [],
@@ -190,4 +191,102 @@ export async function recalculateCompleteness(ids: string[]): Promise<Array<{ id
     items.push({ id, percent: checklist.percent, ready: checklist.ready });
   }
   return items;
+}
+
+export async function checklistForChannel(
+  productId: string,
+  channel: PublishChannel
+): Promise<(ChecklistResult & { sku: string }) | null> {
+  const found = await query<{
+    bling_id: string;
+    bling_sku: string | null;
+    ncm_status: string;
+    ncm_fiscal_risk: boolean;
+    hub_category_id: string | null;
+    price: string | null;
+    ean: string | null;
+    ean_status: string | null;
+  }>(
+    `SELECT mp.bling_id, mp.bling_sku, mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id,
+            pv.price::text AS price, pv.ean, pv.ean_status
+     FROM master_products mp
+     LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
+     WHERE mp.id = $1`,
+    [productId]
+  );
+  const row = found.rows[0];
+  if (!row) return null;
+  const covers = await query<{ cover_count: number }>(
+    `SELECT count(*)::int AS cover_count
+     FROM product_images
+     WHERE master_product_id = $1 AND is_cover_eligible = true`,
+    [productId]
+  );
+  const coverCount = Number(covers.rows[0]?.cover_count ?? 0);
+
+  const maps = row.hub_category_id
+    ? await query<{
+        channel_attribute_id: string;
+        channel_attribute_name: string;
+        required: boolean;
+        mode: 'fixed' | 'dynamic' | 'manual' | null;
+        fixed_value: string | null;
+        source_field: string | null;
+      }>(
+        `SELECT am.channel_attribute_id, am.channel_attribute_name, am.required, am.mode, am.fixed_value, am.source_field
+         FROM channel_category_maps cm
+         LEFT JOIN channel_attribute_maps am ON am.channel_category_map_id = cm.id
+         WHERE cm.hub_category_id = $1 AND cm.platform = $2`,
+        [row.hub_category_id, channel]
+      )
+    : { rows: [] as Array<{
+        channel_attribute_id: string;
+        channel_attribute_name: string;
+        required: boolean;
+        mode: 'fixed' | 'dynamic' | 'manual' | null;
+        fixed_value: string | null;
+        source_field: string | null;
+      }> };
+
+  const mapInputs: AttributeMapInput[] = maps.rows
+    .filter((map) => map.channel_attribute_id && map.mode)
+    .map((map) => ({
+      channelAttributeId: map.channel_attribute_id,
+      channelAttributeName: map.channel_attribute_name,
+      required: map.required,
+      mode: map.mode as 'fixed' | 'dynamic' | 'manual',
+      fixedValue: map.fixed_value,
+      sourceField: map.source_field,
+      valueMaps: [],
+    }));
+  const green = maps.rows.length > 0 && mapInputs.length > 0 && isChannelMappingGreen(mapInputs);
+  const eanRequired = mapInputs.some(
+    (map) => map.required && (['GTIN', 'EAN', 'GTIN14'].includes(map.channelAttributeId) || map.sourceField === 'ean')
+  );
+  let duplicate = false;
+  if (row.ean) {
+    const owners = await query<{ count: number }>(
+      `SELECT count(DISTINCT master_product_id)::int AS count
+       FROM product_variants
+       WHERE ean = $1`,
+      [row.ean]
+    );
+    duplicate = (owners.rows[0]?.count ?? 0) > 1;
+  }
+  const checklist = evaluateCatalogChecklist({
+    blingId: row.bling_id,
+    sku: row.bling_sku,
+    hasCoverImage: coverCount > 0,
+    hubCategoryId: row.hub_category_id,
+    mappedPlatforms: green ? [channel] : [],
+    greenPlatforms: green ? [channel] : [],
+    eanStatus: row.ean_status,
+    eanRequired,
+    ncmStatus: row.ncm_status,
+    ncmFiscalRisk: row.ncm_fiscal_risk,
+    price: row.price === null ? null : Number(row.price),
+    hasDuplicateCandidate: duplicate,
+    channels: [channel],
+  });
+  return { ...checklist, sku: row.bling_sku ?? '' };
 }

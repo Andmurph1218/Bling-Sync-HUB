@@ -1,11 +1,17 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import express from 'express';
 import { z } from 'zod';
 import { requireAuth, requireRole } from '../auth/middleware.js';
 import { query, withTransaction } from '../db/pool.js';
 import { lookupChannelAttributeSpecs } from '../catalog/channel-attributes.js';
 import { listCatalog, CatalogTab } from '../catalog/list.js';
+import { listProblems } from '../catalog/problems.js';
 import { buildPublishPreview, recalculateCompleteness, PublishChannel } from '../catalog/publish-preview.js';
-import { createPublishJobs } from '../queues/publish-queue.js';
+import { enqueueReadyProducts } from '../queues/publish-queue.js';
+import { buildCatalogWorkbook, importCatalogWorkbook } from '../catalog/spreadsheet.js';
+import { createErpConnector } from '../connectors/strategy/factory.js';
+import { STOCK_LAUNCH_WARNING } from '../connectors/strategy/bling-erp.js';
+import { ErpRejectedError } from '../connectors/strategy/types.js';
 
 export const catalogRouter = Router();
 
@@ -14,6 +20,15 @@ const TABS = ['todos', 'publicados', 'completude', 'rejeitados', 'arquivados', '
 function parseTab(value: unknown): CatalogTab {
   return TABS.includes(value as CatalogTab) ? (value as CatalogTab) : 'todos';
 }
+
+catalogRouter.get('/api/problems', requireAuth, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const payload = await listProblems();
+    res.status(200).json(payload);
+  } catch (error) {
+    next(error);
+  }
+});
 
 catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: Response, next: NextFunction) => {
   try {
@@ -89,6 +104,7 @@ catalogRouter.get('/api/catalog/products', requireAuth, async (req: Request, res
       brand: String(req.query.brand ?? ''),
       page: Number.isFinite(page) ? page : 1,
       pageSize: Number.isFinite(pageSize) ? pageSize : 50,
+      gap: String(req.query.pendencia ?? '') || undefined,
     });
     res.status(200).json(listed);
   } catch (error) {
@@ -283,33 +299,8 @@ catalogRouter.post(
         res.status(400).json({ error: 'invalid_payload' });
         return;
       }
-      const queued: string[] = [];
-      const skipped: Array<{ id: string; reason: string }> = [];
-      for (const id of parsed.data.ids) {
-        const preview = await buildPublishPreview(id, parsed.data.channel);
-        if (!preview) {
-          skipped.push({ id, reason: 'nao_encontrado' });
-          continue;
-        }
-        if (!preview.payload.seller_custom_field) {
-          skipped.push({ id, reason: 'sem_sku' });
-          continue;
-        }
-        const [jobId] = await createPublishJobs([
-          {
-            productId: id,
-            channel: parsed.data.channel,
-            payload: {
-              sku: preview.payload.seller_custom_field,
-              price: preview.payload.price,
-              stock: preview.payload.available_quantity,
-              attributes: preview.payload.attributes,
-            },
-          },
-        ]);
-        if (jobId) queued.push(jobId);
-      }
-      res.status(202).json({ queued, skipped, published: false });
+      const result = await enqueueReadyProducts(parsed.data.ids, parsed.data.channel);
+      res.status(202).json({ ...result, published: false });
     } catch (error) {
       next(error);
     }
@@ -328,6 +319,46 @@ catalogRouter.post(
       }
       const items = await recalculateCompleteness(parsed.data.ids);
       res.status(200).json({ items, published: false });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+catalogRouter.post(
+  '/api/catalog/publish/batch',
+  requireRole('operator', 'admin'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const parsed = sendListSchema.safeParse(req.body ?? { ids: req.body?.ids, channel: 'mercadolivre' });
+      if (!parsed.success) {
+        res.status(400).json({ error: 'invalid_payload' });
+        return;
+      }
+      const result = await enqueueReadyProducts(parsed.data.ids, parsed.data.channel);
+      res.status(202).json({ ...result, published: false });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+catalogRouter.post(
+  '/api/catalog/:id/simulate',
+  requireRole('operator', 'admin'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!z.string().uuid().safeParse(req.params.id).success) {
+        res.status(400).json({ error: 'invalid_product_id' });
+        return;
+      }
+      const channel = req.query.channel === 'nuvemshop' ? 'nuvemshop' : 'mercadolivre';
+      const preview = await buildPublishPreview(req.params.id, channel as PublishChannel);
+      if (!preview) {
+        res.status(404).json({ error: 'not_found' });
+        return;
+      }
+      res.status(200).json(preview);
     } catch (error) {
       next(error);
     }
@@ -364,8 +395,9 @@ catalogRouter.get(
         error_message: string | null;
         sku: string;
         name: string | null;
+        bling_id: string;
       }>(
-        `SELECT pq.id, pq.channel, pq.status, pq.error_message, mp.bling_sku AS sku, mp.name
+        `SELECT pq.id, pq.channel, pq.status, pq.error_message, mp.bling_sku AS sku, mp.name, mp.bling_id
          FROM publish_queue pq
          INNER JOIN master_products mp ON mp.id = pq.product_id
          ORDER BY pq.created_at DESC
@@ -395,6 +427,163 @@ catalogRouter.get('/api/catalog/lookup', requireAuth, async (req: Request, res: 
     next(error);
   }
 });
+
+catalogRouter.get('/api/catalog/check-exists', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const term = String(req.query.term ?? '').trim();
+    if (!term) {
+      res.status(400).json({ error: 'term_required' });
+      return;
+    }
+    const found = await query<{ id: string; bling_id: string; bling_sku: string; name: string | null; ean: string | null }>(
+      `SELECT mp.id, mp.bling_id, mp.bling_sku, mp.name, pv.ean
+       FROM master_products mp
+       LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
+       WHERE mp.catalog_status = 'active'
+         AND (lower(mp.bling_sku) = lower($1) OR pv.ean = $1)
+       LIMIT 1`,
+      [term]
+    );
+    const row = found.rows[0];
+    res.status(200).json(
+      row
+        ? {
+            exists: true,
+            product: { id: row.id, blingId: row.bling_id, sku: row.bling_sku, name: row.name, ean: row.ean },
+          }
+        : { exists: false }
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.post(
+  '/api/catalog/products',
+  requireRole('operator', 'admin'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const parsed = z
+        .object({
+          sku: z.string().trim().min(1).max(80),
+          name: z.string().trim().min(1).max(300),
+          price: z.number().finite().nonnegative(),
+          stock: z.number().finite().nonnegative(),
+          imageUrl: z.string().trim().max(2000).optional(),
+        })
+        .safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'invalid_payload' });
+        return;
+      }
+      const existing = await query<{ bling_id: string }>(
+        `SELECT mp.bling_id
+         FROM master_products mp
+         LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
+         WHERE mp.catalog_status = 'active'
+           AND (lower(mp.bling_sku) = lower($1) OR pv.ean = $1)
+         LIMIT 1`,
+        [parsed.data.sku]
+      );
+      if (existing.rows[0]) {
+        res.status(409).json({
+          error: 'already_exists',
+          product: { blingId: existing.rows[0].bling_id },
+        });
+        return;
+      }
+      let erpId = '';
+      let stockWarning: string | null = null;
+      try {
+        const createdErp = await createErpConnector('bling').createProduct({
+          name: parsed.data.name,
+          sku: parsed.data.sku,
+          price: parsed.data.price,
+          stock: parsed.data.stock,
+        });
+        erpId = createdErp.erp_id;
+        stockWarning = createdErp.stockWarning;
+      } catch (error) {
+        if (error instanceof ErpRejectedError) {
+          res.status(422).json({ error: 'bling_rejected', message: `Erro no Bling: ${error.message}` });
+          return;
+        }
+        throw error;
+      }
+      if (!erpId || erpId.startsWith('local-')) {
+        res.status(422).json({ error: 'bling_rejected', message: 'Erro no Bling: o ERP não devolveu um ID oficial.' });
+        return;
+      }
+      const created = await query<{ id: string; bling_id: string }>(
+        `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+         VALUES ($1, $2, $3, 'P', 'S')
+         RETURNING id, bling_id`,
+        [erpId, parsed.data.sku, parsed.data.name]
+      );
+      const product = created.rows[0]!;
+      await query(
+        `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, stock)
+         VALUES ($1, $2, true, 'S', $3, $4)`,
+        [product.id, parsed.data.sku, parsed.data.price, parsed.data.stock]
+      );
+      if (parsed.data.imageUrl && /^https?:\/\//i.test(parsed.data.imageUrl)) {
+        await query(
+          `INSERT INTO product_images (
+             master_product_id, source_url, url_normalized, source_platform, is_cover_eligible, rights_status
+           ) VALUES ($1, $2, $2, 'bling', true, 'owned')`,
+          [product.id, parsed.data.imageUrl]
+        );
+      }
+      if (stockWarning) {
+        await query(
+          `INSERT INTO sync_logs (product_id, platform, direction, status, error_detail, idempotency_key)
+           VALUES ($1, 'bling', 'outbound', 'failed', $2, $3)`,
+          [product.id, STOCK_LAUNCH_WARNING, `bling-stock:${erpId}`]
+        );
+      }
+      res.status(201).json({
+        id: product.id,
+        blingId: product.bling_id,
+        sku: parsed.data.sku,
+        price: parsed.data.price,
+        stock: parsed.data.stock,
+        stockWarning,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+catalogRouter.get('/api/catalog/export', requireAuth, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const file = await buildCatalogWorkbook();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="catalogo.xlsx"');
+    res.status(200).send(file);
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.post(
+  '/api/catalog/import',
+  requireRole('operator', 'admin'),
+  express.raw({ type: () => true, limit: '8mb' }),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const file = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
+      if (file.length < 4) {
+        res.status(400).json({ error: 'invalid_file' });
+        return;
+      }
+      const report = await importCatalogWorkbook(file);
+      res.status(200).json(report);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 catalogRouter.get('/api/catalog/categories', requireAuth, async (_req: Request, res: Response, next: NextFunction) => {
   try {

@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { requireRole } from '../auth/middleware.js';
-import { createPublishJobs, isLivePublishingEnabled } from '../queues/publish-queue.js';
+import { enqueueCheckedJobs, isLivePublishingEnabled } from '../queues/publish-queue.js';
 import { query } from '../db/pool.js';
 
 export const publishQueueRouter = Router();
@@ -32,9 +32,11 @@ publishQueueRouter.post('/api/admin/publish-queue', admin, async (req: Request, 
       res.status(400).json({ error: 'invalid_body', message: 'Informe de 1 a 20 jobs com produto, canal e payload.' });
       return;
     }
-    const ids = await createPublishJobs(parsed.data.jobs);
+    const result = await enqueueCheckedJobs(
+      parsed.data.jobs.map((job) => ({ productId: job.productId, channel: job.channel }))
+    );
     const rows = [];
-    for (const id of ids) {
+    for (const id of result.queued) {
       const one = await query<{ id: string; status: string; error_message: string | null; channel: string }>(
         `SELECT id, status, error_message, channel FROM publish_queue WHERE id = $1`,
         [id]
@@ -44,6 +46,8 @@ publishQueueRouter.post('/api/admin/publish-queue', admin, async (req: Request, 
     res.status(202).json({
       livePublishing: isLivePublishingEnabled(),
       jobs: rows,
+      queued: result.queued,
+      skipped: result.skipped,
     });
   } catch (error) {
     next(error);

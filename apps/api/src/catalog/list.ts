@@ -36,6 +36,7 @@ export interface CatalogListItem {
   archived: boolean;
   published: boolean;
   rejected: boolean;
+  categoryName: string | null;
 }
 
 interface FlagRow {
@@ -86,87 +87,66 @@ export function matchesCatalogTab(
   return item.checklist.ready;
 }
 
-async function loadFlags(): Promise<FlagRow[]> {
-  const res = await query<Omit<FlagRow, 'has_cover' | 'cover_url' | 'published' | 'rejected' | 'duplicate_candidate' | 'ean_required'> & {
-    ean: string | null;
-  }>(
-    `SELECT
-       mp.id,
-       mp.bling_id,
-       mp.bling_sku,
-       mp.name,
-       mp.brand,
-       mp.bling_formato,
-       mp.ncm_status,
-       mp.ncm_fiscal_risk,
-       mp.hub_category_id,
-       mp.archived_at,
-       pv.price::text AS price,
-       pv.promotional_price::text AS promotional_price,
-       pv.stock::text AS stock,
-       pv.ean,
-       pv.ean_status
-     FROM master_products mp
-     LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
-     WHERE mp.catalog_status = 'active'`
-  );
+const ACTIVE = `mp.catalog_status = 'active'`;
+const NOT_ARCHIVED = `${ACTIVE} AND mp.archived_at IS NULL`;
+const BLANK_SKU = `(mp.bling_sku IS NULL OR mp.bling_sku = '')`;
+const NO_COVER = `mp.id NOT IN (SELECT master_product_id FROM product_images WHERE is_cover_eligible = true)`;
+const NO_CATEGORY = `mp.hub_category_id IS NULL`;
+const BAD_NCM = `(mp.ncm_status <> 'valid' OR mp.ncm_fiscal_risk = true)`;
+const BAD_PRICE = `mp.id NOT IN (
+  SELECT master_product_id FROM product_variants
+  WHERE is_default = true AND price IS NOT NULL AND price > 0
+)`;
+const NO_STOCK = `mp.id NOT IN (
+  SELECT master_product_id FROM product_variants
+  WHERE is_default = true AND stock IS NOT NULL
+)`;
+const MISSING_CHANNEL = `(
+  mp.hub_category_id IS NULL
+  OR mp.hub_category_id NOT IN (SELECT hub_category_id FROM channel_category_maps WHERE platform = 'mercadolivre')
+  OR mp.hub_category_id NOT IN (SELECT hub_category_id FROM channel_category_maps WHERE platform = 'nuvemshop')
+)`;
+const BAD_EAN = `mp.hub_category_id IN (
+  SELECT cm.hub_category_id
+  FROM channel_attribute_maps am
+  INNER JOIN channel_category_maps cm ON cm.id = am.channel_category_map_id
+  WHERE am.required = true
+    AND (am.channel_attribute_id IN ('GTIN', 'EAN', 'GTIN14') OR am.source_field = 'ean')
+) AND mp.id NOT IN (
+  SELECT master_product_id FROM product_variants
+  WHERE is_default = true AND ean_status = 'valid'
+)`;
+const DUPLICATE_EAN = `mp.id IN (
+  SELECT pv.master_product_id
+  FROM product_variants pv
+  INNER JOIN product_variants other
+    ON other.ean = pv.ean AND other.master_product_id <> pv.master_product_id
+  WHERE pv.ean IS NOT NULL AND pv.ean <> ''
+)`;
+const LINKED = `mp.id IN (SELECT master_product_id FROM platform_links WHERE sync_status = 'linked')`;
+const FAILED_PUSH = `mp.id IN (SELECT master_product_id FROM push_jobs WHERE status = 'failed')`;
+const INCOMPLETE = `(${BLANK_SKU} OR ${NO_COVER} OR ${NO_CATEGORY} OR ${BAD_NCM} OR ${BAD_PRICE} OR ${MISSING_CHANNEL} OR ${BAD_EAN} OR ${DUPLICATE_EAN})`;
 
-  const [covers, published, rejected, eanRows] = await Promise.all([
-    query<{ master_product_id: string; url_normalized: string }>(
-      `SELECT master_product_id, url_normalized
-       FROM product_images
-       WHERE is_cover_eligible = true`
-    ),
-    query<{ master_product_id: string }>(
-      `SELECT master_product_id FROM platform_links WHERE sync_status = 'linked'`
-    ),
-    query<{ master_product_id: string }>(
-      `SELECT master_product_id FROM push_jobs WHERE status = 'failed'`
-    ),
-    query<{ ean: string; master_product_id: string }>(
-      `SELECT ean, master_product_id
-       FROM product_variants
-       WHERE ean IS NOT NULL AND ean <> ''`
-    ),
-  ]);
+const GAP_SQL: Record<string, string> = {
+  sku: BLANK_SKU,
+  cover: NO_COVER,
+  hub_category: NO_CATEGORY,
+  channel_category: MISSING_CHANNEL,
+  attributes: MISSING_CHANNEL,
+  ean: BAD_EAN,
+  ncm: BAD_NCM,
+  price: BAD_PRICE,
+  duplicate: DUPLICATE_EAN,
+  stock: NO_STOCK,
+};
 
-  const coverByProduct = new Map<string, string>();
-  for (const row of covers.rows) {
-    if (!coverByProduct.has(row.master_product_id)) coverByProduct.set(row.master_product_id, row.url_normalized);
-  }
-  const publishedIds = new Set(published.rows.map((row) => row.master_product_id));
-  const rejectedIds = new Set(rejected.rows.map((row) => row.master_product_id));
-  const eanOwners = new Map<string, Set<string>>();
-  for (const row of eanRows.rows) {
-    const owners = eanOwners.get(row.ean) ?? new Set<string>();
-    owners.add(row.master_product_id);
-    eanOwners.set(row.ean, owners);
-  }
-
-  const requiredEanCategories = new Set(
-    (
-      await query<{ hub_category_id: string }>(
-        `SELECT cm.hub_category_id
-         FROM channel_attribute_maps am
-         INNER JOIN channel_category_maps cm ON cm.id = am.channel_category_map_id
-         WHERE am.required = true
-           AND (am.channel_attribute_id IN ('GTIN', 'EAN', 'GTIN14') OR am.source_field = 'ean')`
-      )
-    ).rows.map((row) => row.hub_category_id)
-  );
-
-  return res.rows.map((row) => {
-    const owners = row.ean ? eanOwners.get(row.ean) : undefined;
-    return {
-      ...row,
-      has_cover: coverByProduct.has(row.id),
-      cover_url: coverByProduct.get(row.id) ?? null,
-      published: publishedIds.has(row.id),
-      rejected: rejectedIds.has(row.id),
-      duplicate_candidate: Boolean(owners && owners.size > 1),
-      ean_required: Boolean(row.hub_category_id && requiredEanCategories.has(row.hub_category_id)),
-    };
-  });
+function tabSql(tab: CatalogTab): string {
+  if (tab === 'arquivados') return `${ACTIVE} AND mp.archived_at IS NOT NULL`;
+  if (tab === 'publicados') return `${NOT_ARCHIVED} AND ${LINKED}`;
+  if (tab === 'rejeitados') return `${NOT_ARCHIVED} AND ${FAILED_PUSH}`;
+  if (tab === 'completude') return `${NOT_ARCHIVED} AND ${INCOMPLETE}`;
+  if (tab === 'ready') return `${NOT_ARCHIVED} AND NOT ${INCOMPLETE}`;
+  return NOT_ARCHIVED;
 }
 
 function channelBadge(
@@ -181,6 +161,20 @@ function channelBadge(
   return { platform, state: 'pending' };
 }
 
+const GAP_CODES = [
+  'sku',
+  'cover',
+  'hub_category',
+  'channel_category',
+  'attributes',
+  'ean',
+  'ncm',
+  'price',
+  'duplicate',
+] as const;
+
+export type CatalogGapCode = (typeof GAP_CODES)[number] | 'stock';
+
 export async function listCatalog(input: {
   tab: CatalogTab;
   sku: string;
@@ -189,16 +183,116 @@ export async function listCatalog(input: {
   page: number;
   pageSize: number;
   blingId?: string;
+  gap?: string;
+  collectGapSamples?: boolean;
+  all?: boolean;
 }): Promise<{
   items: CatalogListItem[];
   total: number;
   page: number;
   pageSize: number;
   counts: Record<CatalogTab, number>;
-  gaps: { missingSku: number; missingCategory: number; missingCover: number };
+  gaps: {
+    missingSku: number;
+    missingCategory: number;
+    missingCover: number;
+    missingEan: number;
+    missingNcm: number;
+    missingPrice: number;
+    missingAttributes: number;
+    missingChannelCategory: number;
+    missingDuplicate: number;
+    missingStock: number;
+    byCode: Record<string, number>;
+  };
+  gapSamples: Record<string, CatalogListItem[]>;
 }> {
-  const flags = await loadFlags();
-  const maps = await query<{
+  const params: unknown[] = [];
+  const bind = (value: unknown) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+  const clauses = [tabSql(input.tab)];
+  if (input.blingId) clauses.push(`mp.bling_id = ${bind(input.blingId)}`);
+  const sku = input.sku.trim().toLowerCase();
+  const name = input.name.trim().toLowerCase();
+  const brand = input.brand.trim().toLowerCase();
+  if (sku) clauses.push(`lower(mp.bling_sku) LIKE ${bind(`%${sku}%`)}`);
+  if (name) clauses.push(`lower(COALESCE(mp.name, '')) LIKE ${bind(`%${name}%`)}`);
+  if (brand) clauses.push(`lower(COALESCE(mp.brand, '')) LIKE ${bind(`%${brand}%`)}`);
+  if (input.gap && GAP_SQL[input.gap]) clauses.push(GAP_SQL[input.gap]);
+  const where = clauses.join(' AND ');
+
+  const countRow = await query<{ count: number }>(
+    `SELECT count(*)::int AS count FROM master_products mp WHERE ${where}`,
+    params
+  );
+  const total = countRow.rows[0]?.count ?? 0;
+  const pageSize = input.all ? Math.max(total, 1) : Math.min(Math.max(input.pageSize, 1), 100);
+  const page = input.all ? 1 : Math.max(input.page, 1);
+  const offset = input.all ? 0 : (page - 1) * pageSize;
+  const limit = input.all ? Math.max(total, 1) : pageSize;
+
+  const pageRows = await query<Omit<FlagRow, 'has_cover' | 'cover_url' | 'published' | 'rejected' | 'duplicate_candidate' | 'ean_required'> & {
+    ean: string | null;
+  }>(
+    `SELECT
+       mp.id, mp.bling_id, mp.bling_sku, mp.name, mp.brand, mp.bling_formato,
+       mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id, mp.archived_at,
+       pv.price::text AS price, pv.promotional_price::text AS promotional_price,
+       pv.stock::text AS stock, pv.ean, pv.ean_status
+     FROM master_products mp
+     LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
+     WHERE ${where}
+     ORDER BY mp.updated_at DESC, mp.bling_sku ASC
+     LIMIT ${limit} OFFSET ${offset}`,
+    params
+  );
+
+  const ids = pageRows.rows.map((row) => row.id);
+  const placeholders = ids.map((_, index) => `$${index + 1}`).join(', ');
+  const empty = { rows: [] as never[] };
+  const [covers, published, rejected, eanRows, requiredEan, maps, links, categoryNames, counts, gapCounts] = await Promise.all([
+    ids.length
+      ? query<{ master_product_id: string; url_normalized: string }>(
+          `SELECT master_product_id, url_normalized FROM product_images
+           WHERE is_cover_eligible = true AND master_product_id IN (${placeholders})`,
+          ids
+        )
+      : empty,
+    ids.length
+      ? query<{ master_product_id: string }>(
+          `SELECT master_product_id FROM platform_links
+           WHERE sync_status = 'linked' AND master_product_id IN (${placeholders})`,
+          ids
+        )
+      : empty,
+    ids.length
+      ? query<{ master_product_id: string }>(
+          `SELECT master_product_id FROM push_jobs
+           WHERE status = 'failed' AND master_product_id IN (${placeholders})`,
+          ids
+        )
+      : empty,
+    ids.length
+      ? query<{ ean: string; owners: number }>(
+          `SELECT ean, count(DISTINCT master_product_id)::int AS owners
+           FROM product_variants
+           WHERE ean IS NOT NULL AND ean <> '' AND ean IN (
+             SELECT ean FROM product_variants WHERE master_product_id IN (${placeholders}) AND ean IS NOT NULL AND ean <> ''
+           )
+           GROUP BY ean`,
+          ids
+        )
+      : empty,
+    query<{ hub_category_id: string }>(
+      `SELECT cm.hub_category_id
+       FROM channel_attribute_maps am
+       INNER JOIN channel_category_maps cm ON cm.id = am.channel_category_map_id
+       WHERE am.required = true
+         AND (am.channel_attribute_id IN ('GTIN', 'EAN', 'GTIN14') OR am.source_field = 'ean')`
+    ),
+    query<{
         hub_category_id: string;
         platform: CatalogChannel;
         channel_attribute_id: string | null;
@@ -212,8 +306,41 @@ export async function listCatalog(input: {
                 am.channel_attribute_id, am.channel_attribute_name, am.required, am.mode, am.fixed_value, am.source_field
          FROM channel_category_maps cm
          LEFT JOIN channel_attribute_maps am ON am.channel_category_map_id = cm.id`
-      );
+      ),
+    ids.length
+      ? query<{ master_product_id: string; platform: CatalogChannel; sync_status: string }>(
+          `SELECT master_product_id, platform, sync_status FROM platform_links
+           WHERE master_product_id IN (${placeholders})`,
+          ids
+        )
+      : empty,
+    query<{ id: string; name: string }>(`SELECT id, name FROM hub_categories`),
+    Promise.all(
+      (['todos', 'publicados', 'completude', 'rejeitados', 'arquivados', 'ready'] as const).map(async (tab) => {
+        const row = await query<{ count: number }>(
+          `SELECT count(*)::int AS count FROM master_products mp WHERE ${tabSql(tab)}`
+        );
+        return [tab, row.rows[0]?.count ?? 0] as const;
+      })
+    ),
+    Promise.all(
+      Object.entries(GAP_SQL).map(async ([code, sql]) => {
+        const row = await query<{ count: number }>(
+          `SELECT count(*)::int AS count FROM master_products mp WHERE ${NOT_ARCHIVED} AND ${sql}`
+        );
+        return [code, row.rows[0]?.count ?? 0] as const;
+      })
+    ),
+  ]);
 
+  const coverByProduct = new Map<string, string>();
+  for (const row of covers.rows) {
+    if (!coverByProduct.has(row.master_product_id)) coverByProduct.set(row.master_product_id, row.url_normalized);
+  }
+  const publishedIds = new Set(published.rows.map((row) => row.master_product_id));
+  const rejectedIds = new Set(rejected.rows.map((row) => row.master_product_id));
+  const duplicateEans = new Set(eanRows.rows.filter((row) => row.owners > 1).map((row) => row.ean));
+  const requiredEanCategories = new Set(requiredEan.rows.map((row) => row.hub_category_id));
   const grouped = new Map<string, Map<CatalogChannel, AttributeMapInput[]>>();
   for (const row of maps.rows) {
     const platforms = grouped.get(row.hub_category_id) ?? new Map();
@@ -235,9 +362,6 @@ export async function listCatalog(input: {
     grouped.set(row.hub_category_id, platforms);
   }
 
-  const links = await query<{ master_product_id: string; platform: CatalogChannel; sync_status: string }>(
-    `SELECT master_product_id, platform, sync_status FROM platform_links`
-  );
   const linksByProduct = new Map<string, Array<{ platform: CatalogChannel; sync_status: string }>>();
   for (const link of links.rows) {
     const list = linksByProduct.get(link.master_product_id) ?? [];
@@ -245,7 +369,9 @@ export async function listCatalog(input: {
     linksByProduct.set(link.master_product_id, list);
   }
 
-  const itemsAll: CatalogListItem[] = flags.map((row) => {
+  const categoryNameById = new Map(categoryNames.rows.map((row) => [row.id, row.name]));
+
+  const items = pageRows.rows.map((row) => {
     const platforms = row.hub_category_id ? grouped.get(row.hub_category_id) : undefined;
     const mapped = platforms ? (Array.from(platforms.keys()) as CatalogChannel[]) : [];
     const green = platforms
@@ -254,19 +380,22 @@ export async function listCatalog(input: {
           .map(([platform]) => platform) as CatalogChannel[])
       : [];
     const price = num(row.price);
+    const hasCover = coverByProduct.has(row.id);
+    const isPublished = publishedIds.has(row.id);
+    const isRejected = rejectedIds.has(row.id);
     const checklist = evaluateCatalogChecklist({
       blingId: row.bling_id,
       sku: row.bling_sku,
-      hasCoverImage: row.has_cover,
+      hasCoverImage: hasCover,
       hubCategoryId: row.hub_category_id,
       mappedPlatforms: mapped,
       greenPlatforms: green,
       eanStatus: row.ean_status,
-      eanRequired: row.ean_required,
+      eanRequired: Boolean(row.hub_category_id && requiredEanCategories.has(row.hub_category_id)),
       ncmStatus: row.ncm_status,
       ncmFiscalRisk: row.ncm_fiscal_risk,
       price,
-      hasDuplicateCandidate: row.duplicate_candidate,
+      hasDuplicateCandidate: Boolean(row.ean && duplicateEans.has(row.ean)),
     });
     const productLinks = linksByProduct.get(row.id) ?? [];
     const promo = num(row.promotional_price);
@@ -281,60 +410,55 @@ export async function listCatalog(input: {
       stock: row.stock === null ? null : Math.floor(Number(row.stock)),
       price,
       promotionalPrice: promo !== null && promo > 0 ? promo : null,
-      coverUrl: row.cover_url,
+      coverUrl: coverByProduct.get(row.id) ?? null,
       channels: (['mercadolivre', 'nuvemshop'] as const).map((platform) =>
-        channelBadge(platform, productLinks, row.rejected)
+        channelBadge(platform, productLinks, isRejected)
       ),
       checklist,
       archived: row.archived_at !== null,
-      published: row.published,
-      rejected: row.rejected,
+      published: isPublished,
+      rejected: isRejected,
+      categoryName: row.hub_category_id ? categoryNameById.get(row.hub_category_id) ?? null : null,
     };
   });
 
-  const counts: Record<CatalogTab, number> = {
-    todos: 0,
-    publicados: 0,
-    completude: 0,
-    rejeitados: 0,
-    arquivados: 0,
-    ready: 0,
-  };
-  for (const item of itemsAll) {
-    (Object.keys(counts) as CatalogTab[]).forEach((tab) => {
-      if (matchesCatalogTab(item, tab)) counts[tab] += 1;
-    });
+  const countRecord = Object.fromEntries(counts) as Record<CatalogTab, number>;
+  const byCode = Object.fromEntries(gapCounts);
+  const gapSamples: Record<string, CatalogListItem[]> = {};
+  if (input.collectGapSamples) {
+    for (const code of Object.keys(GAP_SQL)) {
+      const samplePage = await listCatalog({
+        tab: 'todos',
+        sku: '',
+        name: '',
+        brand: '',
+        page: 1,
+        pageSize: 40,
+        gap: code,
+      });
+      if (samplePage.items.length > 0) gapSamples[code] = samplePage.items;
+    }
   }
-
-  const sku = input.sku.trim().toLowerCase();
-  const name = input.name.trim().toLowerCase();
-  const brand = input.brand.trim().toLowerCase();
-  const filtered = itemsAll.filter((item) => {
-    if (!matchesCatalogTab(item, input.tab)) return false;
-    if (input.blingId && item.blingId !== input.blingId) return false;
-    if (sku && !item.sku.toLowerCase().includes(sku)) return false;
-    if (name && !(item.name ?? '').toLowerCase().includes(name)) return false;
-    if (brand && !(item.brand ?? '').toLowerCase().includes(brand)) return false;
-    return true;
-  });
-
-  const pageSize = Math.min(Math.max(input.pageSize, 1), 100);
-  const page = Math.max(input.page, 1);
-  const start = (page - 1) * pageSize;
-  const active = itemsAll.filter((item) => !item.archived);
-  const missing = (code: string) =>
-    active.filter((item) => item.checklist.items.some((row) => row.code === code && !row.ok)).length;
   return {
-    items: filtered.slice(start, start + pageSize),
-    total: filtered.length,
+    items,
+    total,
     page,
-    pageSize,
-    counts,
+    pageSize: limit,
+    counts: countRecord,
     gaps: {
-      missingSku: missing('sku'),
-      missingCategory: missing('hub_category'),
-      missingCover: missing('cover'),
+      missingSku: byCode.sku ?? 0,
+      missingCategory: byCode.hub_category ?? 0,
+      missingCover: byCode.cover ?? 0,
+      missingEan: byCode.ean ?? 0,
+      missingNcm: byCode.ncm ?? 0,
+      missingPrice: byCode.price ?? 0,
+      missingAttributes: byCode.attributes ?? 0,
+      missingChannelCategory: byCode.channel_category ?? 0,
+      missingDuplicate: byCode.duplicate ?? 0,
+      missingStock: byCode.stock ?? 0,
+      byCode,
     },
+    gapSamples,
   };
 }
 

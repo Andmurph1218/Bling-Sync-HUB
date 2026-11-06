@@ -392,5 +392,64 @@ Preparação do P2: a lista de envio entra pela fila `publish_queue` e pelo work
 
 A completude não tem cache. Cada leitura de home e catálogo recalcula o checklist a partir de `product_images` e dos demais dados do produto. `POST /api/catalog/products/:id/cover` grava a capa e a resposta já devolve o score novo. A próxima abertura da home ou da lista vê o mesmo número, sem evento de invalidação, porque não existe valor guardado para invalidar.
 
-Conferência no navegador, já com a sessão do operador: a home mostra 25 produtos, 0 prontos e 25 incompletos; o catálogo em Todos e a tela Completude repetem 25. O filtro do SKU `13621` deixa 1 produto na lista. A tela Atributos lê a fixture do Mercado Livre (marca dinâmica, cor e linha fixas). A ficha não foi aberta pelo clique automatizado.
+Conferência em 06/11/2026: `p1-catalog.test.ts` passou (8 testes), cobrindo home, lista de 1.000 SKUs, arquivar, checklist, categorias, mapa verde e materialização. A ficha segue no código com as abas da seção 6.3.
+
+## 9. Evolução v2 — P2 (06/11/2026)
+
+P2.1 em andamento. No Catálogo, o operador marca produtos, vê o JSON de cada um em `POST /api/catalog/:id/simulate` e manda o lote para `POST /api/catalog/publish/batch`. Esse lote entra na `publish_queue` mesmo com checklist incompleto; produto sem SKU continua de fora. A rota antiga `POST /api/catalog/products/send-list` segue exigindo checklist verde. A aba Lista de Envio atualiza a cada 2 s e mostra Aguardando, Processando, Concluído ou Falhou. `GET /api/problems` reúne falha da `publish_queue`, webhook com status `failed` e pendência de completude, com SKU, canal e mensagem em português. A tela Problemas filtra por estoque, preço, anúncio e cadastro; Corrigir abre a ficha no modal. Completude agrupa as pendências e cada grupo abre o catálogo com `pendencia`. `GET /api/matching/search` consulta o Mercado Livre pelo conector, sem criar anúncio. `POST /api/matching/link` grava `channel_listing_links` com status Vinculado e não entra na `publish_queue`. O botão + Produto consulta `GET /api/catalog/check-exists` e bloqueia SKU ou EAN que já existem. `GET /api/catalog/export` baixa o catálogo em xlsx. `POST /api/catalog/import` atualiza imagem, descrição e categoria e ignora preço e estoque. A loja `/admin/integracoes` é só do administrador: `GET /api/admin/integrations` agrupa o catálogo e a saúde das credenciais, e `POST /api/admin/integrations/:slug/request` registra o pedido de um app em breve. O operador recebe 403. Com `ENABLE_LIVE_PUBLISHING` diferente de `true`, o worker grava `simulado com sucesso` e não chama o marketplace. Se a escrita ao vivo estiver ligada e o checklist do canal não estiver verde, o worker marca falha e também não chama `createListing`. As credenciais OAuth de cada aplicativo ficam em `channel_app_credentials`; a autorização do Bling e do Mercado Livre lê client id, segredo e callback dessa tabela. A auditoria do que está pronto e do que o P2.1 ainda não cumpre está na seção 10.
+
+## 10. Auditoria de arquitetura — 06/11/2026
+
+Fonte: leitura do código em `apps/api`, `apps/web`, migrations 1–20 e testes. Não houve novo deploy em `hub.jhshopping.com.br`.
+
+### Resumo executivo
+
+P0 e P1 estão no código e cobertos por testes de catálogo, webhook, OAuth e fila. O P2 está implementado em partes, mas o critério do P2.1 não está fechado: a tela manda o lote para uma rota que não exige checklist verde. Publicação ao vivo continua desligada. O servidor público ainda não recebeu este código. Go-live de escrita nos marketplaces não está autorizado pelo código atual.
+
+| Fase | Estado | O que falta para go-live |
+|---|---|---|
+| P0 | Pronto no código | Webhook e OAuth do Bling no ar em `hub.jhshopping.com.br`. Token do Mercado Livre local não descriptografa com a chave desta máquina |
+| P1 | Pronto no código e em `p1-catalog.test.ts` | Catálogo da produção ficou na sync parcial (~9.926 produtos). A lista lê o espelho, não o ERP ao vivo |
+| P2.1 Lista de envio | Corrigido em 06/11/2026 | A tela chama `send-list`. Checklist vermelho não entra na fila. Simulação só marca sucesso se o canal estiver verde |
+| P2.2 Lote | Parcial | Arquivar, recalcular e enviar existem. Não há relatório por linha para um lote de 100 |
+| P2.3 Completude | Parcial | Grupos levam ao catálogo filtrado. A fila fiscal de dupla aprovação não foi fundida |
+| P2.4 Problemas | Pronto na tela nova | Mensagem em português. O detalhe técnico não fica atrás de um segundo nível |
+| P2.5 Vínculos | Parcial | `channel_listing_links` grava o vínculo. A busca ao vivo no ML depende de token legível |
+| P2.6 Gate | Pronto no “+ Produto” | “Duplicar” ainda usa `/api/catalog/lookup` e não oferece o vínculo |
+| P2.7 Planilhas | Parcial | Export xlsx e import com erro por linha. Não há histórico de importações |
+| Admin loja | Pronto na API | `/admin/integracoes` e `requireRole('admin')`. O middleware do Next só vê o cookie se ele vier no host do front |
+
+### Status do P2.1
+
+Escopo: selecionar, ver o checklist do canal, simular, e só então publicar quem está verde.
+
+- Seleção: o estado em `catalog-screen.tsx` inclui e remove o id. Selecionar a página e desmarcar um item funciona no estado. Não há teste de interface para “10 menos 1”. O menu móvel pode cobrir o clique no checkbox.
+- Lista de Envio: a aba mostra Aguardando, Processando, Concluído ou Falhou e o `error_message`. Não mostra o checklist do canal. No modo simulado o worker grava `simulado com sucesso` e marca sucesso antes de olhar o checklist.
+- Fila: `POST /api/catalog/products/send-list` recusa checklist incompleto e devolve `skipped`. O botão “Adicionar à Lista de Envio” chama `POST /api/catalog/publish/batch`, que só recusa produto sem SKU. O worker só aplica o checklist quando `ENABLE_LIVE_PUBLISHING` é exatamente `true`. Com a flag desligada, a fila suja e o item termina como sucesso simulado.
+- Simular: `POST /api/catalog/:id/simulate` monta o JSON do conector (título, categoria, preço, estoque, atributos materializados). Atributos completos só entram quando o mapa do canal está verde. O modal avisa `missingAttributes`. Há uma segunda rota igual, `simulate-publish`.
+
+### Pontos críticos
+
+Segurança. Credenciais e tokens usam AES-256-GCM. O GET de credenciais não devolve o segredo. Rotas de admin, sync completo e loja exigem papel `admin`. Escrita de catálogo exige operador ou admin. A proteção da URL `/admin/integracoes` no Next só redireciona se o cookie `bling_hub_sid` chegar no host do front; o cookie hoje nasce na API. A página e a API ainda recusam o operador. `OAUTH_ENCRYPTION_KEY` não tem mais valor padrão no código: sem 64 caracteres hex a API não inicia. A chave que já criptografou os tokens do servidor precisa continuar no `.env`; trocá-la impede ler esses tokens. O middleware de `/admin` exige o cookie `bling_hub_sid` e consulta `/auth/me` antes de renderizar a página. No navegador local o front fala com a API pelo mesmo host, para o cookie nascer onde o middleware lê. `listCatalog` pagina com `LIMIT`/`OFFSET` e só monta o checklist da página. A senha padrão do bootstrap não abre sessão quando `NODE_ENV` é `production`.
+
+Arquitetura. `ErpConnector` e `MarketplaceConnector` estão na fábrica. Shopee, Amazon e TikTok são `UnavailableMarketplaceConnector`. Um canal novo é uma classe mais uma linha na fábrica; o núcleo não precisa de `if (shopee)`. A busca de anúncio do Mercado Livre está na classe do canal, não num `if` espalhado. O catálogo e a ficha ainda leem o espelho SQL, não `ErpConnector`, a cada abertura. `listCatalog` carrega o catálogo inteiro em memória a cada GET.
+
+Dívida. Duas rotas de simulação. Duas telas de integrações (`/integracoes` e `/admin/integracoes`). A planilha não grava nome, descrição nem categoria. O botão + Produto chama `ErpConnector.createProduct` e só grava o `bling_id` devolvido pelo Bling. `phase5.test.ts` (imagens) já falhava antes deste P2 e não foi refeito.
+
+### Correção do P2.1
+
+- `apps/web/src/components/catalog-screen.tsx`: o botão e o lote “envio” devem chamar `POST /api/catalog/products/send-list`. Mostrar `skipped` com o motivo. Na Lista de Envio, exibir o checklist que faltou, não só “simulado com sucesso”.
+- `apps/api/src/routes/catalog.ts`: `POST /api/catalog/publish/batch` deve usar a mesma regra da `send-list`, ou deixar de existir. Uma rota de simulação basta.
+- `apps/api/src/queues/publish-queue.ts`: com a flag desligada, não marcar sucesso se o checklist do canal estiver vermelho. Continuar sem chamar `createListing`.
+- `apps/api/src/__tests__/publish-queue.test.ts`: produto incompleto não pode entrar na `publish_queue` pela rota que a tela usa.
+
+Correção aplicada em 06/11/2026. `send-list` e `publish/batch` usam a mesma validação. O worker, mesmo com a publicação ao vivo desligada, grava falha com os itens do checklist. A Lista de Envio mostra esse texto e o botão Corrigir. O teste cobre o produto incompleto barrado e o produto verde simulado com sucesso.
+
+### Próximos passos
+
+1. Fechar o gate do P2.1 na rota da tela e no worker simulado.
+2. Publicar este código no servidor só depois dessa correção, com migration 20 e sem recriar o `.env`.
+3. Reautorizar o Mercado Livre com a chave de criptografia que já está no servidor.
+4. A planilha não grava nome, descrição nem categoria. O + Produto cria o item na API do Bling e salva o ID oficial; se o Bling recusar, o HUB não grava e mostra o motivo.
+5. Manter `ENABLE_LIVE_PUBLISHING` diferente de `true` até o checklist verde ser a única porta da fila.
 

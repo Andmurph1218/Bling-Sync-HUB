@@ -6,34 +6,27 @@ import { query } from '../db/pool.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
 import { sharedBlingRateLimiter } from '../connectors/bling-rate-limiter.js';
 import { getPublicBaseUrl as readPublicBaseUrl } from '../config/public-url.js';
+import { loadAppCredentials } from '../connectors/app-credentials.js';
 
 export const oauthRouter = Router();
 const tokenManager = new OAuthTokenManager();
 
-function getBlingCredentials(): { clientId: string; clientSecret: string } {
-  dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
-  dotenv.config({ path: path.resolve(process.cwd(), '../../.env'), override: true });
-  const clientId = (process.env.BLING_CLIENT_ID ?? '').trim();
-  const clientSecret = (process.env.BLING_CLIENT_SECRET ?? '').trim();
-  return { clientId, clientSecret };
+async function getBlingCredentials(): Promise<{ clientId: string; clientSecret: string } | null> {
+  const stored = await loadAppCredentials('bling');
+  if (!stored?.clientId || !stored.clientSecret) return null;
+  return { clientId: stored.clientId, clientSecret: stored.clientSecret };
 }
 
-function getNuvemshopCredentials(): { clientId: string; clientSecret: string } {
-  dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
-  dotenv.config({ path: path.resolve(process.cwd(), '../../.env'), override: true });
-  const clientId = (process.env.NS_CLIENT_ID ?? '').trim();
-  const clientSecret = (process.env.NS_CLIENT_SECRET ?? '').trim();
-  return { clientId, clientSecret };
+async function getNuvemshopCredentials(): Promise<{ clientId: string; clientSecret: string } | null> {
+  const stored = await loadAppCredentials('nuvemshop');
+  if (!stored?.clientId || !stored.clientSecret) return null;
+  return { clientId: stored.clientId, clientSecret: stored.clientSecret };
 }
 
-function getMlCredentials(): { clientId: string; clientSecret: string; redirectUri: string } {
-  dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
-  dotenv.config({ path: path.resolve(process.cwd(), '../../.env'), override: true });
-  const clientId = (process.env.ML_CLIENT_ID ?? '').trim();
-  const clientSecret = (process.env.ML_CLIENT_SECRET ?? '').trim();
-  const base = getPublicBaseUrl() ?? 'http://localhost:3001';
-  const redirectUri = (process.env.ML_REDIRECT_URI ?? '').trim() || `${base}/oauth/mercadolivre/callback`;
-  return { clientId, clientSecret, redirectUri };
+async function getMlCredentials(): Promise<{ clientId: string; clientSecret: string; redirectUri: string } | null> {
+  const stored = await loadAppCredentials('mercadolivre');
+  if (!stored?.clientId || !stored.clientSecret) return null;
+  return { clientId: stored.clientId, clientSecret: stored.clientSecret, redirectUri: stored.redirectUri };
 }
 
 export async function refreshMlTokenViaHttp(
@@ -43,10 +36,11 @@ export async function refreshMlTokenViaHttp(
   refreshToken: string | null;
   expiresInSeconds: number;
 }> {
-  const { clientId, clientSecret } = getMlCredentials();
-  if (!clientId || !clientSecret) {
-    throw new Error('ML_CLIENT_ID e ML_CLIENT_SECRET não configurados no .env');
+  const credentials = await getMlCredentials();
+  if (!credentials) {
+    throw new Error('Credenciais do Mercado Livre não cadastradas em Integrações.');
   }
+  const { clientId, clientSecret } = credentials;
 
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
@@ -152,10 +146,11 @@ export async function refreshBlingTokenViaHttp(
   refreshToken: string | null;
   expiresInSeconds: number;
 }> {
-  const { clientId, clientSecret } = getBlingCredentials();
-  if (!clientId || !clientSecret) {
-    throw new Error('BLING_CLIENT_ID e BLING_CLIENT_SECRET não configurados no .env');
+  const credentials = await getBlingCredentials();
+  if (!credentials) {
+    throw new Error('Credenciais do Bling não cadastradas em Integrações.');
   }
+  const { clientId, clientSecret } = credentials;
 
   const basicAuth = Buffer.from(`${clientId}:${clientSecret}`, 'utf8').toString('base64');
   const body = new URLSearchParams({
@@ -311,23 +306,26 @@ export async function discoverBlingWarehousesAndStores(): Promise<{
 /**
  * 1. Inicia o fluxo OAuth 2.0 redirecionando o navegador para o Bling.
  */
-oauthRouter.get('/oauth/bling/authorize', (_req: Request, res: Response) => {
-  const { clientId } = getBlingCredentials();
-  if (!clientId) {
-    res.status(400).json({
-      error: 'missing_bling_client_id',
-      message:
-        'Preencha BLING_CLIENT_ID e BLING_CLIENT_SECRET no arquivo .env antes de iniciar a autorização OAuth.',
-    });
-    return;
+oauthRouter.get('/oauth/bling/authorize', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const credentials = await getBlingCredentials();
+    if (!credentials) {
+      res.status(400).json({
+        error: 'missing_bling_client_id',
+        message: 'Cadastre o Client ID e o Client Secret do Bling em Integrações.',
+      });
+      return;
+    }
+    const { clientId } = credentials;
+    const state = crypto.randomBytes(16).toString('hex');
+    const redirectUri = (await loadAppCredentials('bling'))?.redirectUri;
+    const authorizeUrl = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${encodeURIComponent(
+      clientId
+    )}&state=${state}${redirectUri ? `&redirect_uri=${encodeURIComponent(redirectUri)}` : ''}`;
+    res.redirect(authorizeUrl);
+  } catch (error) {
+    next(error);
   }
-
-  const state = crypto.randomBytes(16).toString('hex');
-  const authorizeUrl = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${encodeURIComponent(
-    clientId
-  )}&state=${state}`;
-
-  res.redirect(authorizeUrl);
 });
 
 /**
@@ -345,14 +343,15 @@ oauthRouter.get(
         return;
       }
 
-      const { clientId, clientSecret } = getBlingCredentials();
-      if (!clientId || !clientSecret) {
+      const credentials = await getBlingCredentials();
+      if (!credentials) {
         res.status(400).json({
           error: 'missing_bling_credentials',
-          message: 'Configure BLING_CLIENT_ID e BLING_CLIENT_SECRET no .env',
+          message: 'Cadastre o Client ID e o Client Secret do Bling em Integrações.',
         });
         return;
       }
+      const { clientId, clientSecret } = credentials;
 
       const basicAuth = Buffer.from(`${clientId}:${clientSecret}`, 'utf8').toString(
         'base64'
@@ -416,21 +415,24 @@ oauthRouter.get(
 /**
  * Inicia o fluxo OAuth 2.0 do Mercado Livre redirecionando o navegador para o auth.mercadolivre.com.br.
  */
-oauthRouter.get('/oauth/mercadolivre/authorize', (_req: Request, res: Response) => {
-  const { clientId, redirectUri } = getMlCredentials();
-  if (!clientId) {
-    res.status(400).json({
-      error: 'missing_ml_client_id',
-      message: 'Preencha ML_CLIENT_ID e ML_CLIENT_SECRET no .env antes de iniciar a autorização OAuth.',
-    });
-    return;
+oauthRouter.get('/oauth/mercadolivre/authorize', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const credentials = await getMlCredentials();
+    if (!credentials) {
+      res.status(400).json({
+        error: 'missing_ml_client_id',
+        message: 'Cadastre o Client ID e o Client Secret do Mercado Livre em Integrações.',
+      });
+      return;
+    }
+    const { clientId, redirectUri } = credentials;
+    const authorizeUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${encodeURIComponent(
+      clientId
+    )}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+    res.redirect(authorizeUrl);
+  } catch (error) {
+    next(error);
   }
-
-  const authorizeUrl = `https://auth.mercadolivre.com.br/authorization?response_type=code&client_id=${encodeURIComponent(
-    clientId
-  )}&redirect_uri=${encodeURIComponent(redirectUri)}`;
-
-  res.redirect(authorizeUrl);
 });
 
 /**
@@ -449,14 +451,15 @@ oauthRouter.get(
         return;
       }
 
-      const { clientId, clientSecret, redirectUri } = getMlCredentials();
-      if (!clientId || !clientSecret) {
+      const credentials = await getMlCredentials();
+      if (!credentials) {
         res.status(400).json({
           error: 'missing_ml_credentials',
-          message: 'Configure ML_CLIENT_ID e ML_CLIENT_SECRET no .env',
+          message: 'Cadastre o Client ID e o Client Secret do Mercado Livre em Integrações.',
         });
         return;
       }
+      const { clientId, clientSecret, redirectUri } = credentials;
 
       const body = new URLSearchParams({
         grant_type: 'authorization_code',
@@ -533,14 +536,15 @@ oauthRouter.get(
         return;
       }
 
-      const { clientId, clientSecret } = getNuvemshopCredentials();
-      if (!clientId || !clientSecret) {
+      const credentials = await getNuvemshopCredentials();
+      if (!credentials) {
         res.status(400).json({
           error: 'missing_nuvemshop_credentials',
-          message: 'Configure NS_CLIENT_ID e NS_CLIENT_SECRET no .env',
+          message: 'Cadastre o Client ID e o Client Secret da Nuvemshop em Integrações.',
         });
         return;
       }
+      const { clientId, clientSecret } = credentials;
 
       const tokenRes = await fetch('https://www.nuvemshop.com.br/apps/authorize/token', {
         method: 'POST',

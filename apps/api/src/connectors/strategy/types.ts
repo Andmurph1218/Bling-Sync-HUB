@@ -51,6 +51,21 @@ export interface ErpStockBalance {
   raw: unknown;
 }
 
+/** Dados mínimos para abrir o cadastro no ERP. Nome, preço e estoque nascem lá. */
+export interface CreateProductDTO {
+  name: string;
+  sku: string;
+  price: number;
+  stock: number;
+}
+
+export class ErpRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ErpRejectedError';
+  }
+}
+
 /** Contrato do ERP soberano. Bling é a implementação atual; outro ERP entra como nova classe. */
 export interface ErpConnector {
   readonly id: string;
@@ -61,6 +76,7 @@ export interface ErpConnector {
   pullCatalogProduct(externalId: string): Promise<unknown | null>;
   pullStockBalances?(externalIds: string[]): Promise<ErpStockBalance[]>;
   listChildIds?(parentId: string): Promise<string[]>;
+  createProduct(productData: CreateProductDTO): Promise<{ erp_id: string; stockWarning: string | null }>;
 }
 
 export interface ListingDraft {
@@ -95,10 +111,23 @@ export interface WebhookReceipt {
   reason: string;
 }
 
+export interface RemoteListing {
+  id: string;
+  title: string;
+  price: number | null;
+  status: string;
+}
+
+export interface ListingSearchInput {
+  sku: string;
+  ean: string | null;
+}
+
 /** Contrato do marketplace. A publicação do P2 chama estes métodos, não a classe HTTP do canal. */
 export interface MarketplaceConnector {
   readonly id: string;
   getCategoryAttributes(channelCategoryId: string): Promise<Array<{ id: string; name: string; required: boolean }>>;
+  searchListings(input: ListingSearchInput): Promise<RemoteListing[]>;
   createListing(draft: ListingDraft): Promise<ListingResult>;
   updateStock(update: StockUpdate): Promise<StockUpdateResult>;
   receiveWebhook(event: IncomingWebhook): Promise<WebhookReceipt>;

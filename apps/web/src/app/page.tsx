@@ -41,6 +41,7 @@ export default function HomePage() {
   const [showTechDetails, setShowTechDetails] = useState<boolean>(false);
   const [catalogHome, setCatalogHome] = useState<CatalogHome | null>(null);
   const [catalogHomeError, setCatalogHomeError] = useState<string | null>(null);
+  const [forbidden, setForbidden] = useState(false);
 
   const loadState = async () => {
     setLoading(true);
@@ -73,12 +74,18 @@ export default function HomePage() {
 
   useEffect(() => {
     void loadState();
+    setForbidden(new URLSearchParams(window.location.search).get('erro') === '403');
   }, []);
 
   if (!state) {
     return (
       <main className="mx-auto max-w-6xl px-6 py-8">
         <h1 className="text-2xl font-bold tracking-tight text-white">Início</h1>
+        {forbidden && (
+          <p role="alert" className="mt-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
+            Acesso negado (403). A loja de integrações é exclusiva do administrador.
+          </p>
+        )}
         <p className="mt-4 text-sm text-zinc-300" role="status">
           {loading ? 'Lendo o catálogo...' : loadError}
         </p>
@@ -99,6 +106,11 @@ export default function HomePage() {
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
+      {forbidden && (
+        <p role="alert" className="mb-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
+          Acesso negado (403). A loja de integrações é exclusiva do administrador.
+        </p>
+      )}
       {/* Cabeçalho + Hierarquia 1: Estado Operacional */}
       <header className="flex flex-col justify-between gap-4 border-b border-zinc-800 pb-6 lg:flex-row lg:items-center">
         <div>
@@ -204,9 +216,9 @@ export default function HomePage() {
               <p className="mt-1">Última sync ok: {catalogHome.lastSyncOk ? new Date(catalogHome.lastSyncOk).toLocaleString('pt-BR') : 'nenhuma'} · última com erro: {catalogHome.lastSyncError ? new Date(catalogHome.lastSyncError).toLocaleString('pt-BR') : 'nenhuma'}</p>
               <p className="mt-1">Canais com token: {catalogHome.channels.length}. Renovação automática só quando o canal devolveu credencial de renovação.</p>
               <div className="mt-2 flex flex-wrap gap-3">
-                <Link href="/catalogo" className="underline">{catalogHome.gaps.missingSku} sem SKU</Link>
-                <Link href="/completude" className="underline">{catalogHome.gaps.missingCategory} sem categoria</Link>
-                <Link href="/completude" className="underline">{catalogHome.gaps.missingCover} sem imagem</Link>
+                <Link href="/catalogo?status=completude&pendencia=sku" className="underline">{catalogHome.gaps.missingSku} sem SKU</Link>
+                <Link href="/catalogo?status=completude&pendencia=hub_category" className="underline">{catalogHome.gaps.missingCategory} sem categoria</Link>
+                <Link href="/catalogo?status=completude&pendencia=cover" className="underline">{catalogHome.gaps.missingCover} sem imagem</Link>
               </div>
             </div>
           </>

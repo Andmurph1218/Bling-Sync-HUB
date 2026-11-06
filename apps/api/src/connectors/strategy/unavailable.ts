@@ -3,7 +3,9 @@ import {
   IncomingWebhook,
   ListingDraft,
   ListingResult,
+  ListingSearchInput,
   MarketplaceConnector,
+  RemoteListing,
   StockUpdate,
   StockUpdateResult,
   WebhookReceipt,
@@ -14,6 +16,10 @@ export class UnavailableMarketplaceConnector implements MarketplaceConnector {
   constructor(readonly id: string) {}
 
   async getCategoryAttributes(): Promise<never> {
+    throw new ConnectorNotInstalledError(this.id);
+  }
+
+  async searchListings(_input: ListingSearchInput): Promise<RemoteListing[]> {
     throw new ConnectorNotInstalledError(this.id);
   }
 

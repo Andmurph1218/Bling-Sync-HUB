@@ -15,6 +15,8 @@ export interface ChecklistInput {
   ncmFiscalRisk: boolean;
   price: number | null;
   hasDuplicateCandidate: boolean;
+  /** Quando informado, o semáforo vale só para estes canais. */
+  channels?: CatalogChannel[];
 }
 
 export interface ChecklistItem {
@@ -34,11 +36,12 @@ export interface ChecklistResult {
 
 const ACTIVE_CHANNELS: CatalogChannel[] = ['mercadolivre', 'nuvemshop'];
 
-function hasAll(platforms: CatalogChannel[]): boolean {
-  return ACTIVE_CHANNELS.every((platform) => platforms.includes(platform));
+function hasAll(platforms: CatalogChannel[], required: CatalogChannel[]): boolean {
+  return required.every((platform) => platforms.includes(platform));
 }
 
 export function evaluateCatalogChecklist(input: ChecklistInput): ChecklistResult {
+  const required = input.channels?.length ? input.channels : ACTIVE_CHANNELS;
   const ficha = `/catalogo/${encodeURIComponent(input.blingId)}`;
   const items: ChecklistItem[] = [
     {
@@ -66,19 +69,19 @@ export function evaluateCatalogChecklist(input: ChecklistInput): ChecklistResult
     },
     {
       code: 'channel_category',
-      ok: hasAll(input.greenPlatforms),
+      ok: hasAll(input.greenPlatforms, required),
       blocks: true,
-      title: hasAll(input.greenPlatforms)
+      title: hasAll(input.greenPlatforms, required)
         ? 'Categoria do canal mapeada'
         : 'Categoria do canal ainda não está verde',
       fixHref: '/atributos',
     },
     {
       code: 'attributes',
-      ok: hasAll(input.mappedPlatforms) && hasAll(input.greenPlatforms),
+      ok: hasAll(input.mappedPlatforms, required) && hasAll(input.greenPlatforms, required),
       blocks: true,
       title:
-        hasAll(input.mappedPlatforms) && hasAll(input.greenPlatforms)
+        hasAll(input.mappedPlatforms, required) && hasAll(input.greenPlatforms, required)
           ? 'Atributos obrigatórios resolvidos'
           : 'Atributos obrigatórios do canal ainda não resolvidos',
       fixHref: '/atributos',

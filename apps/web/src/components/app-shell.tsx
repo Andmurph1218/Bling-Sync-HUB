@@ -19,6 +19,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ShieldCheck,
+  AlertTriangle,
   Radio,
   LogOut,
   Loader2,
@@ -76,6 +77,7 @@ function toSessionUser(raw: {
 interface RoleContextValue {
   currentUser: SessionUser;
   hasRole: (...roles: UserRole[]) => boolean;
+  acknowledgePasswordChange: () => void;
 }
 
 const ANONYMOUS: SessionUser = {
@@ -92,6 +94,7 @@ const ANONYMOUS: SessionUser = {
 const RoleContext = createContext<RoleContextValue>({
   currentUser: ANONYMOUS,
   hasRole: () => false,
+  acknowledgePasswordChange: () => undefined,
 });
 
 export function useCurrentRole() {
@@ -115,6 +118,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/', label: 'Início', shortLabel: 'Início', icon: LayoutDashboard, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
   { href: '/catalogo', label: 'Catálogo', shortLabel: 'Catálogo', icon: Boxes, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
   { href: '/completude', label: 'Completude', shortLabel: 'Completude', icon: ClipboardList, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { href: '/problemas', label: 'Problemas', shortLabel: 'Problemas', icon: AlertTriangle, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
   { href: '/atributos', label: 'Atributos', shortLabel: 'Atributos', icon: Tags, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
   { href: '/fiscal/ean', label: 'Código de barras', shortLabel: 'EAN', icon: Barcode, allowedRoles: ['admin', 'fiscal_approver'], isSubItem: true },
   { href: '/fiscal/ncm', label: 'Classificação fiscal', shortLabel: 'NCM', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'], isSubItem: true },
@@ -123,6 +127,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/vinculos', label: 'Vínculos', shortLabel: 'Vínculos', icon: GitCompare, allowedRoles: ['admin', 'operator'] },
   { href: '/canais', label: 'Canais', shortLabel: 'Canais', icon: Sliders, allowedRoles: ['admin', 'operator'] },
   { href: '/integracoes', label: 'Integrações', shortLabel: 'Integrações', icon: Store, allowedRoles: ['admin', 'operator'] },
+  { href: '/admin/integracoes', label: 'Loja de apps', shortLabel: 'Loja', icon: Store, allowedRoles: ['admin'] },
   { href: '/auditoria', label: 'Auditoria', shortLabel: 'Auditoria', icon: History, allowedRoles: ['admin', 'fiscal_approver'] },
 ];
 
@@ -179,6 +184,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [isLoginPage, pathname, router]);
 
+  const acknowledgePasswordChange = () => {
+    setUser((current) => (current ? { ...current, mustChangePassword: false } : current));
+  };
+
+  useEffect(() => {
+    if (checking || !user) return;
+    if (user.mustChangePassword && pathname !== '/conta/senha') {
+      router.replace('/conta/senha');
+      return;
+    }
+    if (!user.mustChangePassword && pathname === '/conta/senha') {
+      router.replace('/');
+    }
+  }, [checking, pathname, router, user]);
+
   const handleLogout = async () => {
     try {
       await apiFetch('/auth/logout', { method: 'POST' });
@@ -190,10 +210,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (isLoginPage) {
     return <div className="min-h-screen bg-zinc-950 text-zinc-100">{children}</div>;
-  }
-
-  if (user?.mustChangePassword && pathname !== '/conta/senha') {
-    router.replace('/conta/senha');
   }
 
   if (checking || !user || (user.mustChangePassword && pathname !== '/conta/senha')) {
@@ -233,7 +249,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     state === 'online' ? 'bg-emerald-500' : state === 'unknown' ? 'bg-zinc-500' : state === 'expired' ? 'bg-amber-500' : 'bg-rose-500';
 
   return (
-    <RoleContext.Provider value={{ currentUser: user, hasRole }}>
+    <RoleContext.Provider value={{ currentUser: user, hasRole, acknowledgePasswordChange }}>
       <div className="flex min-h-screen bg-zinc-950 text-zinc-100">
         <aside
           className={`hidden md:flex flex-col border-r border-zinc-800/80 bg-zinc-900/60 transition-all duration-200 ${

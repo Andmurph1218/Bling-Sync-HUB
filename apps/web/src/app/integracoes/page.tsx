@@ -61,6 +61,59 @@ export default function IntegracoesPage() {
   const [search, setSearch] = useState('');
   const { hasRole } = useCurrentRole();
   const isAdmin = hasRole('admin');
+  const [credentialsFor, setCredentialsFor] = useState<IntegrationAppCard | null>(null);
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [webhookSecret, setWebhookSecret] = useState('');
+  const [callbackUrl, setCallbackUrl] = useState('');
+  const [credentialNotice, setCredentialNotice] = useState<string | null>(null);
+  const [hasSavedSecret, setHasSavedSecret] = useState(false);
+
+  const openCredentials = async (app: IntegrationAppCard) => {
+    setCredentialsFor(app);
+    setCredentialNotice(null);
+    setClientSecret('');
+    setWebhookSecret('');
+    try {
+      const saved = await apiFetch<{
+        clientId: string;
+        callbackUrl: string;
+        hasClientSecret: boolean;
+      }>(`/api/admin/integrations/${app.id}/credentials`);
+      setClientId(saved.clientId);
+      setCallbackUrl(saved.callbackUrl);
+      setHasSavedSecret(saved.hasClientSecret);
+    } catch {
+      setClientId('');
+      setCallbackUrl('');
+      setHasSavedSecret(false);
+      setCredentialNotice('Não foi possível ler as credenciais.');
+    }
+  };
+
+  const saveCredentials = async () => {
+    if (!credentialsFor) return;
+    try {
+      const saved = await apiFetch<{ callbackUrl: string; hasClientSecret: boolean }>(
+        `/api/admin/integrations/${credentialsFor.id}/credentials`,
+        {
+          method: 'PUT',
+          json: {
+            clientId,
+            ...(clientSecret.trim() ? { clientSecret: clientSecret.trim() } : {}),
+            ...(webhookSecret.trim() ? { webhookSecret: webhookSecret.trim() } : {}),
+          },
+        }
+      );
+      setCallbackUrl(saved.callbackUrl);
+      setHasSavedSecret(saved.hasClientSecret);
+      setClientSecret('');
+      setWebhookSecret('');
+      setCredentialNotice('Credenciais salvas. O segredo não volta para a tela.');
+    } catch {
+      setCredentialNotice(hasSavedSecret ? 'Não foi possível atualizar.' : 'Informe o Client Secret na primeira gravação.');
+    }
+  };
 
   useEffect(() => {
     void (async () => {
@@ -189,16 +242,18 @@ export default function IntegracoesPage() {
                       {app.status === 'attention' && <AlertTriangle className="h-4 w-4" />}
                       {app.statusLabel}
                     </span>
-                    {isAdmin && app.status === 'attention' && app.authorizePath && (
-                      <a href={`${API_BASE_URL}${app.authorizePath}`} className="font-semibold text-amber-700">
-                        Reautorizar
-                      </a>
-                    )}
-                    {app.status === 'installed' && (
-                      <Link href="/canais" className="font-semibold text-emerald-700">
-                        Configurar
-                      </Link>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {isAdmin && app.status === 'attention' && app.authorizePath && (
+                        <a href={`${API_BASE_URL}${app.authorizePath}`} className="font-semibold text-amber-700">
+                          Reautorizar
+                        </a>
+                      )}
+                      {isAdmin && (
+                        <button type="button" className="font-semibold text-zinc-700" onClick={() => void openCredentials(app)}>
+                          Credenciais
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </article>
               ))}
@@ -206,6 +261,44 @@ export default function IntegracoesPage() {
           </div>
         )}
       </div>
+      {credentialsFor && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
+          <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl">
+            <h2 className="text-lg font-semibold text-zinc-900">Credenciais — {credentialsFor.name}</h2>
+            <p className="mt-1 text-sm text-zinc-500">O segredo fica criptografado no banco. Cole no painel do aplicativo a URL de callback abaixo.</p>
+            <label className="mt-4 block text-sm text-zinc-700">
+              Client ID
+              <input value={clientId} onChange={(event) => setClientId(event.target.value)} className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" />
+            </label>
+            <label className="mt-3 block text-sm text-zinc-700">
+              Client Secret {hasSavedSecret ? '(em branco mantém o atual)' : ''}
+              <input type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" autoComplete="off" />
+            </label>
+            <label className="mt-3 block text-sm text-zinc-700">
+              Segredo do webhook
+              <input type="password" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" autoComplete="off" />
+            </label>
+            <label className="mt-3 block text-sm text-zinc-700">
+              URL de callback
+              <div className="mt-1 flex gap-2">
+                <input readOnly value={callbackUrl} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 font-mono text-xs" />
+                <button
+                  type="button"
+                  className="shrink-0 rounded-lg border border-zinc-300 px-3 text-sm font-semibold"
+                  onClick={() => void navigator.clipboard.writeText(callbackUrl)}
+                >
+                  Copiar
+                </button>
+              </div>
+            </label>
+            {credentialNotice && <p className="mt-3 text-sm text-zinc-600" role="status">{credentialNotice}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" className="rounded-lg px-3 py-2 text-sm text-zinc-600" onClick={() => setCredentialsFor(null)}>Fechar</button>
+              <button type="button" className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white" onClick={() => void saveCredentials()}>Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

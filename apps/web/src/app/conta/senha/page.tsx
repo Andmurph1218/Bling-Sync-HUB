@@ -4,9 +4,11 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { KeyRound, Loader2, AlertTriangle } from 'lucide-react';
 import { apiFetch, ApiError } from '../../../utils/api-client';
+import { useCurrentRole } from '../../../components/app-shell';
 
 export default function ChangePasswordPage() {
   const router = useRouter();
+  const { acknowledgePasswordChange } = useCurrentRole();
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -26,8 +28,8 @@ export default function ChangePasswordPage() {
         method: 'POST',
         json: { currentPassword, newPassword },
       });
+      acknowledgePasswordChange();
       router.replace('/');
-      router.refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Não foi possível trocar a senha.');
     } finally {

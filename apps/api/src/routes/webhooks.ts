@@ -1,31 +1,24 @@
-import path from 'node:path';
-import dotenv from 'dotenv';
 import express, { Router, Request, Response, NextFunction } from 'express';
 import {
   ingestWebhookController,
   processWebhookEventById,
   WebhookSource,
 } from '../engines/wig.js';
+import { loadAppCredentials } from '../connectors/app-credentials.js';
 import { logger } from '../lib/logger.js';
 
 export const webhooksRouter = Router();
 
-function getWebhookSecretForSource(source: WebhookSource): string {
-  if (!process.env.VITEST) {
-    dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
-    dotenv.config({ path: path.resolve(process.cwd(), '../../.env'), override: true });
+async function getWebhookSecretForSource(source: WebhookSource): Promise<string> {
+  const stored = await loadAppCredentials(source).catch(() => null);
+  if (stored?.webhookSecret) return stored.webhookSecret;
+  if (source === 'bling' && stored?.clientSecret) return stored.clientSecret;
+  if (process.env.VITEST) {
+    if (source === 'bling') return 'bling_dev_webhook_secret';
+    if (source === 'mercadolivre') return 'ml_dev_webhook_secret';
+    return 'ns_dev_webhook_secret';
   }
-  if (source === 'bling') {
-    return (
-      process.env.BLING_WEBHOOK_SECRET ||
-      process.env.BLING_CLIENT_SECRET ||
-      'bling_dev_webhook_secret'
-    );
-  }
-  if (source === 'mercadolivre') {
-    return process.env.ML_WEBHOOK_SECRET || 'ml_dev_webhook_secret';
-  }
-  return process.env.NS_WEBHOOK_SECRET || 'ns_dev_webhook_secret';
+  return '';
 }
 
 function extractSignatureHeader(req: Request, source: WebhookSource): string | undefined {
@@ -68,7 +61,7 @@ webhooksRouter.post(
           );
 
       const signatureHeader = extractSignatureHeader(req, sourceParam);
-      const secret = getWebhookSecretForSource(sourceParam);
+      const secret = await getWebhookSecretForSource(sourceParam);
 
       const outcome = await ingestWebhookController({
         source: sourceParam,

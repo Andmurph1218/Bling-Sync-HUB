@@ -10,6 +10,9 @@ import { oauthRouter } from './routes/oauth.js';
 import { integrationsRouter } from './routes/integrations.js';
 import { adminSyncRouter } from './routes/admin-sync.js';
 import { publishQueueRouter } from './routes/publish-queue.js';
+import { appCredentialsRouter } from './routes/app-credentials.js';
+import { matchingRouter } from './routes/matching.js';
+import { integrationCatalogRouter } from './routes/integration-catalog.js';
 import { logger } from './lib/logger.js';
 
 export function createApp(): Express {
@@ -37,6 +40,9 @@ export function createApp(): Express {
   app.use(integrationsRouter);
   app.use(adminSyncRouter);
   app.use(publishQueueRouter);
+  app.use(appCredentialsRouter);
+  app.use(matchingRouter);
+  app.use(integrationCatalogRouter);
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     const message = err instanceof Error ? err.message : 'Erro interno do servidor';

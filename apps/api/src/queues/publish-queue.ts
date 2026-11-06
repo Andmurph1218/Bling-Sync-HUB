@@ -5,9 +5,15 @@ import { ListingDraft } from '../connectors/strategy/types.js';
 import { createMarketplaceConnector } from '../connectors/strategy/factory.js';
 import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
+import { buildPublishPreview, checklistForChannel, PublishChannel } from '../catalog/publish-preview.js';
 
 export const PUBLISH_QUEUE_NAME = 'publish-marketplace';
 export const DRY_RUN_LOG = 'simulado com sucesso';
+export const CHECKLIST_BLOCKED_MESSAGE = 'Checklist não implementado para este canal. Publicação bloqueada.';
+
+export function checklistChannel(channel: string): channel is PublishChannel {
+  return channel === 'mercadolivre' || channel === 'nuvemshop';
+}
 
 export interface PublishJobInput {
   productId: string;
@@ -76,12 +82,22 @@ export async function processPublishQueueItem(
 
   await mark(id, 'processing', null);
   try {
-    const connector = createMarketplaceConnector(row.channel);
+    if (!checklistChannel(row.channel)) {
+      await mark(id, 'failed', CHECKLIST_BLOCKED_MESSAGE);
+      return;
+    }
+    const checklist = await checklistForChannel(row.product_id, row.channel);
+    if (!checklist?.ready) {
+      const pending = checklist?.items.filter((item) => !item.ok).map((item) => item.title).join('; ');
+      await mark(id, 'failed', pending || 'Checklist incompleto no canal.');
+      return;
+    }
     const live = hooks?.live ?? isLivePublishingEnabled();
     if (!live) {
       await mark(id, 'success', DRY_RUN_LOG);
       return;
     }
+    const connector = createMarketplaceConnector(row.channel);
     const draft = row.payload_json;
     if (hooks?.publish) {
       await hooks.publish(connector.id, draft);
@@ -100,9 +116,71 @@ export async function processPublishQueueItem(
   }
 }
 
+export async function enqueueReadyProducts(ids: string[], channel: PublishChannel) {
+  const queued: string[] = [];
+  const skipped: Array<{ id: string; sku: string; reason: string }> = [];
+  for (const id of ids) {
+    const checklist = await checklistForChannel(id, channel);
+    if (!checklist) {
+      skipped.push({ id, sku: '', reason: 'Produto não encontrado.' });
+      continue;
+    }
+    if (!checklist.ready) {
+      const pending = checklist.items.filter((item) => !item.ok).map((item) => item.title);
+      skipped.push({ id, sku: checklist.sku, reason: pending.join('; ') || 'Checklist incompleto.' });
+      continue;
+    }
+    const preview = await buildPublishPreview(id, channel);
+    if (!preview || !preview.payload.seller_custom_field) {
+      skipped.push({ id, sku: checklist.sku, reason: 'Sem SKU — não sincroniza' });
+      continue;
+    }
+    const [jobId] = await createPublishJobs([
+      {
+        productId: id,
+        channel,
+        payload: {
+          sku: preview.payload.seller_custom_field,
+          price: preview.payload.price,
+          stock: preview.payload.available_quantity,
+          attributes: preview.payload.attributes,
+        },
+      },
+    ]);
+    if (jobId) queued.push(jobId);
+  }
+  return { queued, skipped };
+}
+
+export async function enqueueCheckedJobs(
+  jobs: Array<{ productId: string; channel: PublishJobInput['channel'] }>
+) {
+  const queued: string[] = [];
+  const skipped: Array<{ id: string; sku: string; reason: string }> = [];
+  const grouped = new Map<PublishChannel, string[]>();
+  for (const job of jobs) {
+    if (!checklistChannel(job.channel)) {
+      skipped.push({ id: job.productId, sku: '', reason: CHECKLIST_BLOCKED_MESSAGE });
+      continue;
+    }
+    const ids = grouped.get(job.channel) ?? [];
+    ids.push(job.productId);
+    grouped.set(job.channel, ids);
+  }
+  for (const [channel, ids] of grouped) {
+    const result = await enqueueReadyProducts(ids, channel);
+    queued.push(...result.queued);
+    skipped.push(...result.skipped);
+  }
+  return { queued, skipped };
+}
+
 export async function createPublishJobs(items: PublishJobInput[]): Promise<string[]> {
   const ids: string[] = [];
   for (const item of items) {
+    if (!checklistChannel(item.channel)) continue;
+    const checklist = await checklistForChannel(item.productId, item.channel);
+    if (!checklist?.ready) continue;
     const inserted = await query<{ id: string }>(
       `INSERT INTO publish_queue (product_id, channel, status, payload_json)
        VALUES ($1, $2, 'pending', $3)

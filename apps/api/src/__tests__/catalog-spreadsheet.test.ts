@@ -1,0 +1,221 @@
+import crypto from 'node:crypto';
+import request from 'supertest';
+import ExcelJS from 'exceljs';
+import { newDb, DataType } from 'pg-mem';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { createApp } from '../app.js';
+import { createUser } from '../auth/service.js';
+import { blingRejectionMessage, setBlingProductWriterForTests, STOCK_LAUNCH_WARNING } from '../connectors/strategy/bling-erp.js';
+import { ErpRejectedError } from '../connectors/strategy/types.js';
+import { DbPoolLike, query, setPool } from '../db/pool.js';
+import { runAllMigrationsUp } from '../db/migrator.js';
+import { setRedis } from '../lib/redis.js';
+
+describe('catálogo — anti-duplicação e planilha', () => {
+  const app = createApp();
+  let poolInstance: DbPoolLike;
+  let cookie = '';
+
+  afterEach(() => {
+    setBlingProductWriterForTests(null);
+  });
+
+  beforeAll(async () => {
+    const mem = newDb();
+    mem.public.registerFunction({
+      name: 'gen_random_uuid',
+      returns: DataType.uuid,
+      impure: true,
+      implementation: () => crypto.randomUUID(),
+    });
+    mem.public.registerFunction({
+      name: 'trim',
+      args: [DataType.text],
+      returns: DataType.text,
+      implementation: (value: string) => (value ? value.trim() : ''),
+    });
+    mem.public.registerFunction({
+      name: 'length',
+      args: [DataType.text],
+      returns: DataType.integer,
+      implementation: (value: string) => (value ? value.length : 0),
+    });
+    mem.public.registerFunction({
+      name: 'lower',
+      args: [DataType.text],
+      returns: DataType.text,
+      implementation: (value: string) => (value ? value.toLowerCase() : ''),
+    });
+    const pgAdapter = mem.adapters.createPg();
+    poolInstance = new pgAdapter.Pool() as unknown as DbPoolLike;
+    setPool(poolInstance);
+    setRedis({ ping: async () => 'PONG', quit: async () => 'OK' });
+    await runAllMigrationsUp({ stripPartitionClauseForMemDb: true });
+    await createUser({
+      email: 'op.planilha@blingsync.local',
+      name: 'Operador Planilha',
+      password: 'SenhaPessoal!2026',
+      roles: ['operator'],
+      mustChangePassword: false,
+    });
+    const login = await request(app).post('/auth/login').send({
+      email: 'op.planilha@blingsync.local',
+      password: 'SenhaPessoal!2026',
+    });
+    const setCookie = login.headers['set-cookie'];
+    cookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie) ?? '';
+  });
+
+  afterAll(async () => {
+    if (poolInstance) await poolInstance.end();
+    setPool(null);
+  });
+
+  it('bloqueia SKU existente, exporta o catálogo e importa só enriquecimento', async () => {
+    const created = await query<{ id: string }>(
+      `INSERT INTO master_products (bling_id, bling_sku, name, description, bling_tipo, bling_formato)
+       VALUES ('plan-1', 'SKU-PLAN', 'Luminária', 'Descrição antiga', 'P', 'S')
+       RETURNING id`
+    );
+    const productId = created.rows[0]!.id;
+    await query(
+      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, price, stock, ean)
+       VALUES ($1, 'SKU-PLAN', true, 19.9, 4, '7891000000001')`,
+      [productId]
+    );
+
+    const exists = await request(app).get('/api/catalog/check-exists?term=7891000000001').set('Cookie', cookie);
+    expect(exists.status).toBe(200);
+    expect(exists.body.exists).toBe(true);
+    expect(exists.body.product.sku).toBe('SKU-PLAN');
+
+    const blocked = await request(app)
+      .post('/api/catalog/products')
+      .set('Cookie', cookie)
+      .send({ sku: 'SKU-PLAN', name: 'Outro', price: 1, stock: 9 });
+    expect(blocked.status).toBe(409);
+
+    const missing = await request(app).get('/api/catalog/check-exists?term=NAO-EXISTE').set('Cookie', cookie);
+    expect(missing.body.exists).toBe(false);
+
+    const exported = await request(app)
+      .get('/api/catalog/export')
+      .set('Cookie', cookie)
+      .buffer(true)
+      .parse((res, callback) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => callback(null, Buffer.concat(chunks)));
+      });
+    expect(exported.status).toBe(200);
+    const exportedBook = new ExcelJS.Workbook();
+    await exportedBook.xlsx.load(exported.body);
+    expect(exportedBook.worksheets[0]?.getRow(1).getCell(1).text).toBe('SKU');
+    const values = exportedBook.worksheets[0]?.getSheetValues().flat().map((value) => String(value ?? ''));
+    expect(values).toContain('SKU-PLAN');
+
+    const book = new ExcelJS.Workbook();
+    const sheet = book.addWorksheet('Catalogo');
+    sheet.addRow(['SKU', 'Descrição', 'URL da Imagem', 'Categoria', 'Preço', 'Estoque']);
+    sheet.addRow(['NAO-EXISTE', 'Texto', 'https://example.com/x.jpg', 'Iluminação', 1, 9]);
+    sheet.addRow(['SKU-PLAN', 'Descrição nova', 'https://example.com/capa.jpg', 'Iluminação', 1, 0]);
+    const file = Buffer.from(await book.xlsx.writeBuffer());
+
+    const imported = await request(app)
+      .post('/api/catalog/import')
+      .set('Cookie', cookie)
+      .set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .send(file);
+    expect(imported.status).toBe(200);
+    expect(imported.body.lines.map((line: { message: string }) => line.message)).toEqual([
+      'Linha 2: SKU não encontrado.',
+      'Linha 3: Sucesso. Preço e estoque ignorados. Aviso: Descrição e Categoria são gerenciadas pelo Bling e foram ignoradas.',
+    ]);
+
+    const saved = await query<{ description: string; price: string; stock: string; hub_category_id: string }>(
+      `SELECT mp.description, pv.price::text AS price, pv.stock::text AS stock, mp.hub_category_id
+       FROM master_products mp
+       INNER JOIN product_variants pv ON pv.master_product_id = mp.id
+       WHERE mp.id = $1`,
+      [productId]
+    );
+    expect(saved.rows[0]?.description).toBe('Descrição antiga');
+    expect(Number(saved.rows[0]?.price)).toBe(19.9);
+    expect(Number(saved.rows[0]?.stock)).toBe(4);
+    expect(saved.rows[0]?.hub_category_id).toBeNull();
+    const image = await query<{ url_normalized: string }>(
+      `SELECT url_normalized FROM product_images WHERE master_product_id = $1`,
+      [productId]
+    );
+    expect(image.rows[0]?.url_normalized).toBe('https://example.com/capa.jpg');
+  });
+
+  it('grava o id oficial do Bling e não salva quando o ERP recusa', async () => {
+    expect(
+      blingRejectionMessage(
+        { error: { fields: [{ msg: 'O NCM é obrigatório para esta operação' }] } },
+        400
+      )
+    ).toBe('O NCM é obrigatório para esta operação');
+
+    setBlingProductWriterForTests({
+      create: async () => {
+        throw new ErpRejectedError('O NCM é obrigatório para esta operação');
+      },
+    });
+    const rejected = await request(app)
+      .post('/api/catalog/products')
+      .set('Cookie', cookie)
+      .send({ sku: 'NOVO-BLING', name: 'Luminária nova', price: 12.5, stock: 3 });
+    expect(rejected.status).toBe(422);
+    expect(rejected.body.message).toBe('Erro no Bling: O NCM é obrigatório para esta operação');
+    const absent = await query(`SELECT id FROM master_products WHERE bling_sku = 'NOVO-BLING'`);
+    expect(absent.rowCount).toBe(0);
+
+    let received: unknown = null;
+    setBlingProductWriterForTests({
+      create: async (input) => {
+        received = input;
+        return { erp_id: '99887766', stockWarning: null };
+      },
+    });
+    const created = await request(app)
+      .post('/api/catalog/products')
+      .set('Cookie', cookie)
+      .send({ sku: 'NOVO-BLING', name: 'Luminária nova', price: 12.5, stock: 3, description: 'não entra' });
+    expect(created.status).toBe(201);
+    expect(created.body.blingId).toBe('99887766');
+    expect(String(created.body.blingId).startsWith('local-')).toBe(false);
+    expect(received).toEqual({ name: 'Luminária nova', sku: 'NOVO-BLING', price: 12.5, stock: 3 });
+
+    const saved = await query<{ bling_id: string; description: string | null; price: string; stock: string }>(
+      `SELECT mp.bling_id, mp.description, pv.price::text AS price, pv.stock::text AS stock
+       FROM master_products mp
+       INNER JOIN product_variants pv ON pv.master_product_id = mp.id
+       WHERE mp.bling_sku = 'NOVO-BLING'`
+    );
+    expect(saved.rows[0]?.bling_id).toBe('99887766');
+    expect(saved.rows[0]?.description).toBeNull();
+    expect(Number(saved.rows[0]?.price)).toBe(12.5);
+    expect(Number(saved.rows[0]?.stock)).toBe(3);
+
+    setBlingProductWriterForTests({
+      create: async () => ({ erp_id: '99887767', stockWarning: STOCK_LAUNCH_WARNING }),
+    });
+    const partial = await request(app)
+      .post('/api/catalog/products')
+      .set('Cookie', cookie)
+      .send({ sku: 'NOVO-ESTOQUE', name: 'Sem saldo', price: 8, stock: 2 });
+    expect(partial.status).toBe(201);
+    expect(partial.body.blingId).toBe('99887767');
+    expect(partial.body.stockWarning).toBe(STOCK_LAUNCH_WARNING);
+    const logged = await query<{ error_detail: string }>(
+      `SELECT error_detail FROM sync_logs WHERE idempotency_key = 'bling-stock:99887767'`
+    );
+    expect(logged.rows[0]?.error_detail).toBe(STOCK_LAUNCH_WARNING);
+    const kept = await query<{ bling_id: string }>(
+      `SELECT bling_id FROM master_products WHERE bling_sku = 'NOVO-ESTOQUE'`
+    );
+    expect(kept.rows[0]?.bling_id).toBe('99887767');
+  });
+});

@@ -123,6 +123,12 @@ describe('P1 — catálogo no banco', () => {
       returns: DataType.integer,
       implementation: (val: string) => (val ? val.length : 0),
     });
+    mem.public.registerFunction({
+      name: 'lower',
+      args: [DataType.text],
+      returns: DataType.text,
+      implementation: (val: string) => (val ? val.toLowerCase() : ''),
+    });
     const pgAdapter = mem.adapters.createPg();
     poolInstance = new pgAdapter.Pool() as unknown as DbPoolLike;
     setPool(poolInstance);
@@ -199,6 +205,12 @@ describe('P1 — catálogo no banco', () => {
     });
     expect(Date.now() - started).toBeLessThan(1000);
     expect(filtered.items.map((item) => item.sku)).toEqual(['SKU-0999']);
+    const firstPage = await listCatalog({ tab: 'todos', sku: '', name: '', brand: '', page: 1, pageSize: 50 });
+    const secondPage = await listCatalog({ tab: 'todos', sku: '', name: '', brand: '', page: 2, pageSize: 50 });
+    expect(firstPage.items).toHaveLength(50);
+    expect(firstPage.total).toBeGreaterThanOrEqual(1000);
+    expect(secondPage.items).toHaveLength(50);
+    expect(secondPage.items[0]?.id).not.toBe(firstPage.items[0]?.id);
     const home = await request(app).get('/api/catalog/home').set('Cookie', cookie);
     const list = await request(app).get('/api/catalog/products?status=todos&pageSize=1').set('Cookie', cookie);
     expect(home.body.cards.products.value).toBe(list.body.counts.todos);

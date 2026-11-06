@@ -7,6 +7,19 @@ if (!process.env.VITEST) {
   dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
 }
 
+/**
+ * Produção e desenvolvimento exigem a variável. O fallback público foi removido
+ * para não criptografar token com uma chave conhecida. Só o Vitest recebe uma chave de teste.
+ */
+export function resolveOAuthEncryptionKey(value: string | undefined, vitest: boolean): string {
+  const provided = value?.trim() ?? '';
+  if (/^[0-9a-fA-F]{64}$/.test(provided)) return provided;
+  if (vitest) return 'f'.repeat(64);
+  throw new Error(
+    'OAUTH_ENCRYPTION_KEY ausente ou inválida. Defina 64 caracteres hex (32 bytes) antes de iniciar a API.'
+  );
+}
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3001),
@@ -24,8 +37,7 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
   OAUTH_ENCRYPTION_KEY: z
     .string()
-    .regex(/^[0-9a-fA-F]{64}$/, 'OAUTH_ENCRYPTION_KEY deve conter 64 caracteres hex (32 bytes)')
-    .default('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'),
+    .regex(/^[0-9a-fA-F]{64}$/, 'OAUTH_ENCRYPTION_KEY deve conter 64 caracteres hex (32 bytes)'),
   ENABLE_LIVE_PUBLISHING: z
     .string()
     .optional()
@@ -34,4 +46,7 @@ const envSchema = z.object({
 
 export type EnvConfig = z.infer<typeof envSchema>;
 
-export const env: EnvConfig = envSchema.parse(process.env);
+export const env: EnvConfig = envSchema.parse({
+  ...process.env,
+  OAUTH_ENCRYPTION_KEY: resolveOAuthEncryptionKey(process.env.OAUTH_ENCRYPTION_KEY, process.env.VITEST === 'true'),
+});
