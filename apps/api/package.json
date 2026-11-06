@@ -8,8 +8,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "bootstrap": "tsx src/scripts/bootstrap.ts",
-    "migrate:up": "tsx ../../node_modules/node-pg-migrate/bin/node-pg-migrate.js up -m src/db/migrations",
-    "migrate:down": "tsx ../../node_modules/node-pg-migrate/bin/node-pg-migrate.js down -m src/db/migrations"
+    "migrate:up": "tsx ../../node_modules/node-pg-migrate/bin/node-pg-migrate.js up -m src/db/migrations --no-check-order",
+    "migrate:down": "tsx ../../node_modules/node-pg-migrate/bin/node-pg-migrate.js down -m src/db/migrations --no-check-order"
   },
   "dependencies": {
     "bullmq": "5.12.12",

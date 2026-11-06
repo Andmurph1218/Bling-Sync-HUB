@@ -463,7 +463,7 @@ A atualização usa `deploy/update-hub.sh`. Ela copia o código, roda `npm ci` c
 
 `npm ci` e `npm install` no servidor são o install completo. `typescript` e `tsx` estão em devDependencies porque o build e a migration rodam na própria Droplet. Não usar `--omit=dev`, `--production` nem `NODE_ENV=production` no shell do install. O `NODE_ENV=production` do `.env` vale só para o processo do systemd.
 
-Na noite de 06/11 as migrations 17 a 20 já estavam aplicadas: fila de publicação, credenciais dos canais, vínculos de anúncio e catálogo de integrações. O health da API respondeu com Postgres e Redis ok, e o login do painel abriu.
+Na noite de 06/11 as migrations 17 a 20 já estavam aplicadas: fila de publicação, credenciais dos canais, vínculos de anúncio e catálogo de integrações. A tabela `pgmigrations` nasceu no bootstrap do HUB, com `id` uuid. Quando várias linhas compartilham o mesmo `run_on`, o `node-pg-migrate` ordena pelo uuid e acusa fora de ordem mesmo com o schema já aplicado. Por isso `migrate:up` e `migrate:down` passam `--no-check-order`. O health da API respondeu com Postgres e Redis ok, e o login do painel abriu.
 
 Os quatro usuários do bootstrap existem, ativos, e ainda exigem troca em `/conta/senha`. A senha de cada um está em `/root/bling-initial-passwords.txt` na Droplet. A senha padrão do repositório não abre sessão em produção.
 
