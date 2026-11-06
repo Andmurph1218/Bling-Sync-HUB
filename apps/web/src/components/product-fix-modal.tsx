@@ -83,15 +83,15 @@ export function ProductFixModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="fix-title">
-      <div className="max-h-[85vh] w-full max-w-xl overflow-auto rounded-xl border border-zinc-700 bg-zinc-950 p-5">
-        <h2 id="fix-title" className="text-sm font-bold text-white">Corrigir produto</h2>
+      <div className="max-h-[85vh] w-full max-w-xl overflow-auto rounded-xl border border-border-color bg-bg-base p-5">
+        <h2 id="fix-title" className="text-sm font-bold text-text-primary">Corrigir produto</h2>
         <p className="mt-1 text-xs text-amber-200">{reason}</p>
         {error && <p className="mt-3 text-sm text-rose-200" role="alert">{error}</p>}
-        {!sheet && !error && <p className="mt-4 text-sm text-zinc-300">Abrindo a ficha...</p>}
+        {!sheet && !error && <p className="mt-4 text-sm text-text-muted">Abrindo a ficha...</p>}
         {sheet && (
-          <div className="mt-4 space-y-4 text-xs text-zinc-200">
+          <div className="mt-4 space-y-4 text-xs text-text-primary">
             <div>
-              <p className="text-sm font-semibold text-white">{sheet.item.name ?? 'Sem nome'}</p>
+              <p className="text-sm font-semibold text-text-primary">{sheet.item.name ?? 'Sem nome'}</p>
               <p className="mt-1 font-mono text-emerald-300">SKU {sheet.item.sku || 'Sem SKU'}</p>
             </div>
             <p>
@@ -101,7 +101,7 @@ export function ProductFixModal({
             <label className="block">
               Categoria do catálogo
               <select
-                className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-white"
+                className="mt-1 w-full rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-text-primary"
                 value={sheet.category?.id ?? ''}
                 onChange={(event) => void saveCategory(event.target.value).catch(() => setError('Não foi possível salvar a categoria.'))}
               >
@@ -117,10 +117,10 @@ export function ProductFixModal({
                 <input
                   value={coverUrl}
                   onChange={(event) => setCoverUrl(event.target.value)}
-                  className="mt-1 w-72 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-white"
+                  className="mt-1 w-72 rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-text-primary"
                 />
               </label>
-              <button type="button" className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white" onClick={() => void saveCover().catch(() => setError('Não foi possível salvar a capa.'))}>
+              <button type="button" className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-text-primary" onClick={() => void saveCover().catch(() => setError('Não foi possível salvar a capa.'))}>
                 Salvar capa
               </button>
             </div>
@@ -134,7 +134,7 @@ export function ProductFixModal({
             {notice && <p className="text-emerald-300" role="status">{notice}</p>}
           </div>
         )}
-        <button type="button" className="mt-4 rounded-lg border border-zinc-600 px-3 py-1.5 text-xs text-zinc-100" onClick={onClose}>
+        <button type="button" className="mt-4 rounded-lg border border-border-color px-3 py-1.5 text-xs text-text-primary" onClick={onClose}>
           Fechar
         </button>
       </div>

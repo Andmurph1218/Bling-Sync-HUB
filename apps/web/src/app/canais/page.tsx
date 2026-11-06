@@ -63,10 +63,10 @@ const HEALTH_DOT: Record<ChannelRow['health'], string> = {
 };
 
 const MARK: Record<string, string> = {
-  mercadolivre: 'bg-amber-400 text-zinc-950',
-  nuvemshop: 'bg-sky-600 text-white',
-  shopee: 'bg-orange-500 text-white',
-  tiktok: 'bg-zinc-900 text-white',
+  mercadolivre: 'bg-amber-400 text-bg-base',
+  nuvemshop: 'bg-sky-600 text-text-primary',
+  shopee: 'bg-orange-500 text-text-primary',
+  tiktok: 'bg-bg-surface text-text-primary',
 };
 
 const ROLE_LABEL: Record<string, string> = {
@@ -134,14 +134,14 @@ export default function CanaisConfiguracoesPage() {
   const visible = filtered.slice(0, pageSize);
 
   return (
-    <main className="min-h-full bg-[#f4f5f7] px-6 py-8 text-zinc-900">
+    <main className="min-h-full bg-bg-base px-6 py-8 text-text-primary">
       <div className="mx-auto max-w-6xl">
         <header className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold text-zinc-900">Canais de venda</h1>
-            <p className="mt-1 text-sm text-zinc-500">Gerencie os canais de venda da sua operação</p>
+            <h1 className="text-2xl font-semibold text-text-primary">Canais de venda</h1>
+            <p className="mt-1 text-sm text-text-muted">Gerencie os canais de venda da sua operação</p>
           </div>
-          <Link href="/integracoes" className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white">
+          <Link href="/integracoes" className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-text-primary">
             <Plus className="h-4 w-4" />
             Adicionar canal
           </Link>
@@ -154,36 +154,36 @@ export default function CanaisConfiguracoesPage() {
         {loadError && (
           <div role="alert" className="mt-6 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{loadError}</div>
         )}
-        {!data && !loadError && <p className="mt-6 text-sm text-zinc-500" role="status">Carregando canais...</p>}
+        {!data && !loadError && <p className="mt-6 text-sm text-text-muted" role="status">Carregando canais...</p>}
 
         {data && (
           <>
-            <section className="mt-4 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between gap-3 border-b border-zinc-100 px-4 py-3">
+            <section className="mt-4 overflow-hidden rounded-xl border border-border-color bg-bg-surface shadow-sm">
+              <div className="flex items-center justify-between gap-3 border-b border-border-color px-4 py-3">
                 <label className="relative w-full max-w-sm">
                   <span className="sr-only">Pesquisar canais</span>
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
                   <input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                     placeholder="Pesquisar..."
-                    className="w-full rounded-lg border border-zinc-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-emerald-500"
+                    className="w-full rounded-lg border border-border-color py-2 pl-9 pr-3 text-sm outline-none focus:border-emerald-500"
                   />
                 </label>
-                <p className="shrink-0 text-sm text-zinc-500">{filtered.length} registros</p>
+                <p className="shrink-0 text-sm text-text-muted">{filtered.length} registros</p>
               </div>
-              <p className="border-b border-zinc-100 bg-zinc-50 px-4 py-2 text-xs text-zinc-400">Canal de venda</p>
+              <p className="border-b border-border-color bg-bg-surface px-4 py-2 text-xs text-text-muted">Canal de venda</p>
               <ul>
-                {visible.length === 0 && <li className="px-4 py-6 text-sm text-zinc-500">Nenhum canal encontrado.</li>}
+                {visible.length === 0 && <li className="px-4 py-6 text-sm text-text-muted">Nenhum canal encontrado.</li>}
                 {visible.map((channel) => (
-                  <li key={channel.id} className="flex items-center gap-4 border-b border-zinc-100 px-4 py-4 last:border-b-0">
+                  <li key={channel.id} className="flex items-center gap-4 border-b border-border-color px-4 py-4 last:border-b-0">
                     <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${HEALTH_DOT[channel.health]}`} title={channel.healthLabel} />
-                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ${MARK[channel.id] ?? 'bg-zinc-200 text-zinc-800'}`}>
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ${MARK[channel.id] ?? 'bg-bg-surface text-text-primary'}`}>
                       {channel.name.slice(0, 2).toUpperCase()}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-zinc-900">{channel.name}</p>
-                      <p className="text-xs text-zinc-500">
+                      <p className="font-semibold text-text-primary">{channel.name}</p>
+                      <p className="text-xs text-text-muted">
                         Provedor: {channel.name}
                         {channel.storeName ? ` · ${channel.storeName}` : ''}
                       </p>
@@ -198,19 +198,19 @@ export default function CanaisConfiguracoesPage() {
                           aria-label={`Ações de ${channel.name}`}
                           aria-expanded={openMenu === channel.id}
                           onClick={() => setOpenMenu(openMenu === channel.id ? null : channel.id)}
-                          className="rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100"
+                          className="rounded-md p-1.5 text-text-muted hover:bg-bg-base"
                         >
                           <MoreVertical className="h-4 w-4" />
                         </button>
                         {openMenu === channel.id && (
-                          <div role="menu" className="absolute right-0 z-10 mt-1 w-52 rounded-lg border border-zinc-200 bg-white py-1 text-left text-xs shadow-lg">
-                            <button type="button" role="menuitem" className="block w-full px-3 py-2 text-left text-zinc-700 hover:bg-zinc-50" onClick={() => void runAction(channel.id, 'logs')}>
+                          <div role="menu" className="absolute right-0 z-10 mt-1 w-52 rounded-lg border border-border-color bg-bg-surface py-1 text-left text-xs shadow-lg">
+                            <button type="button" role="menuitem" className="block w-full px-3 py-2 text-left text-text-muted hover:bg-bg-surface" onClick={() => void runAction(channel.id, 'logs')}>
                               Logs de Webhook
                             </button>
-                            <button type="button" role="menuitem" className="block w-full px-3 py-2 text-left text-zinc-700 hover:bg-zinc-50" onClick={() => void runAction(channel.id, 'test')}>
+                            <button type="button" role="menuitem" className="block w-full px-3 py-2 text-left text-text-muted hover:bg-bg-surface" onClick={() => void runAction(channel.id, 'test')}>
                               Testar Conexão
                             </button>
-                            <button type="button" role="menuitem" className="block w-full px-3 py-2 text-left text-zinc-700 hover:bg-zinc-50" onClick={() => void runAction(channel.id, 'settings')}>
+                            <button type="button" role="menuitem" className="block w-full px-3 py-2 text-left text-text-muted hover:bg-bg-surface" onClick={() => void runAction(channel.id, 'settings')}>
                               Configurações da Conta
                             </button>
                           </div>
@@ -220,13 +220,13 @@ export default function CanaisConfiguracoesPage() {
                   </li>
                 ))}
               </ul>
-              <div className="flex justify-end border-t border-zinc-100 px-4 py-3">
-                <label className="text-xs text-zinc-500">
+              <div className="flex justify-end border-t border-border-color px-4 py-3">
+                <label className="text-xs text-text-muted">
                   <span className="sr-only">Registros por página</span>
                   <select
                     value={pageSize}
                     onChange={(event) => setPageSize(Number(event.target.value))}
-                    className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-sm text-zinc-700"
+                    className="rounded-md border border-border-color bg-bg-surface px-2 py-1 text-sm text-text-muted"
                   >
                     <option value={15}>15</option>
                     <option value={50}>50</option>
@@ -236,8 +236,8 @@ export default function CanaisConfiguracoesPage() {
             </section>
 
             {panel && (
-              <section className="mt-4 rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-700 shadow-sm">
-                <h2 className="font-semibold text-zinc-900">
+              <section className="mt-4 rounded-xl border border-border-color bg-bg-surface p-4 text-sm text-text-muted shadow-sm">
+                <h2 className="font-semibold text-text-primary">
                   {panel.kind === 'logs' ? 'Logs de Webhook' : panel.kind === 'test' ? 'Teste de conexão' : 'Configurações da conta'}
                 </h2>
                 {actionError && <p className="mt-2 text-rose-700">{actionError}</p>}
@@ -271,7 +271,7 @@ export default function CanaisConfiguracoesPage() {
                     )}
                     <p>{settings.catalogMode.badge}</p>
                     {settings.authorizePath && (
-                      <a href={`${API_BASE_URL}${settings.authorizePath}`} className="mt-2 inline-flex rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white">
+                      <a href={`${API_BASE_URL}${settings.authorizePath}`} className="mt-2 inline-flex rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-semibold text-text-primary">
                         Reautorizar
                       </a>
                     )}
@@ -280,18 +280,18 @@ export default function CanaisConfiguracoesPage() {
               </section>
             )}
 
-            <section className="mt-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <section className="mt-8 rounded-xl border border-border-color bg-bg-surface p-6 shadow-sm">
               <div className="flex items-center gap-2">
                 <Warehouse className="h-5 w-5 text-sky-600" />
-                <h2 className="text-base font-semibold text-zinc-900">Depósitos do Bling e regra de soma de estoque</h2>
+                <h2 className="text-base font-semibold text-text-primary">Depósitos do Bling e regra de soma de estoque</h2>
               </div>
-              <p className="mt-1 text-xs text-zinc-500">
+              <p className="mt-1 text-xs text-text-muted">
                 O estoque publicado soma apenas o saldo virtual dos depósitos seller marcados para entrar na soma. Depósitos espelho do Full nunca entram.
               </p>
               <div className="mt-4 overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <caption className="sr-only">Depósitos do Bling</caption>
-                  <thead className="border-b border-zinc-100 text-[11px] uppercase text-zinc-400">
+                  <thead className="border-b border-border-color text-[11px] uppercase text-text-muted">
                     <tr>
                       <th scope="col" className="py-2.5 pr-4">ID no Bling</th>
                       <th scope="col" className="py-2.5 px-4">Nome</th>
@@ -299,13 +299,13 @@ export default function CanaisConfiguracoesPage() {
                       <th scope="col" className="py-2.5 pl-4">Entra na soma publicada?</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-100">
+                  <tbody className="divide-y divide-border-color">
                     {data.warehouses.map((warehouse) => (
                       <tr key={warehouse.bling_warehouse_id}>
                         <td className="py-3 pr-4 font-mono font-semibold text-emerald-700">{warehouse.bling_warehouse_id}</td>
-                        <td className="py-3 px-4 font-semibold text-zinc-900">{warehouse.name}</td>
-                        <td className="py-3 px-4 text-zinc-600">{ROLE_LABEL[warehouse.role] ?? warehouse.role}</td>
-                        <td className={`py-3 pl-4 font-semibold ${warehouse.include_in_push ? 'text-emerald-700' : 'text-zinc-400'}`}>
+                        <td className="py-3 px-4 font-semibold text-text-primary">{warehouse.name}</td>
+                        <td className="py-3 px-4 text-text-muted">{ROLE_LABEL[warehouse.role] ?? warehouse.role}</td>
+                        <td className={`py-3 pl-4 font-semibold ${warehouse.include_in_push ? 'text-emerald-700' : 'text-text-muted'}`}>
                           {warehouse.include_in_push ? 'Sim' : 'Não'}
                         </td>
                       </tr>

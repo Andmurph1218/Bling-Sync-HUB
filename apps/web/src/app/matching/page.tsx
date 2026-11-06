@@ -244,17 +244,17 @@ export default function MatchingPage() {
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
-      <header className="flex flex-col justify-between gap-4 border-b border-zinc-800 pb-6 sm:flex-row sm:items-center">
+      <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-6 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-white">
+          <h1 className="text-2xl font-bold text-text-primary">
             Vínculos
           </h1>
-          <p className="mt-1 text-sm text-zinc-400">
+          <p className="mt-1 text-sm text-text-muted">
             Clique em qualquer linha para abrir a comparação lado a lado. Recusas gravam par permanente em{' '}
             <TechTooltip term="match_rejections" />.
           </p>
           {unlinkedTotal !== null && (
-            <p className="mt-2 text-sm text-zinc-200" role="status">Sem vínculo: {unlinkedTotal}</p>
+            <p className="mt-2 text-sm text-text-primary" role="status">Sem vínculo: {unlinkedTotal}</p>
           )}
         </div>
         <div className="flex items-center gap-2 text-xs">
@@ -269,13 +269,13 @@ export default function MatchingPage() {
 
       {/* Barra de Ações em Massa (Bulk Actions) */}
       {selectedIds.length > 0 && (
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-500/40 bg-zinc-900/95 px-5 py-3 shadow-lg">
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-emerald-500/40 bg-bg-surface/95 px-5 py-3 shadow-lg">
           <div className="flex items-center gap-2.5 text-xs">
             <Layers className="h-4 w-4 text-emerald-400" />
-            <span className="font-semibold text-white">
+            <span className="font-semibold text-text-primary">
               {selectedIds.length} item(ns) selecionado(s)
             </span>
-            <span className="text-zinc-400">
+            <span className="text-text-muted">
               · Aplique uma decisão em lote na fila de vínculos
             </span>
           </div>
@@ -283,7 +283,7 @@ export default function MatchingPage() {
             <button
               type="button"
               onClick={handleBulkConfirm}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-500"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-text-primary transition hover:bg-emerald-500"
             >
               <Check className="h-3.5 w-3.5" />
               Confirmar Selecionados
@@ -306,7 +306,7 @@ export default function MatchingPage() {
         </div>
       )}
       {loading && rows.length === 0 && (
-        <p className="mt-6 text-sm text-zinc-400" role="status">Carregando fila de correspondências...</p>
+        <p className="mt-6 text-sm text-text-muted" role="status">Carregando fila de correspondências...</p>
       )}
       {!loading && !loadError && rows.length === 0 && (
         <div className="mt-6 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-200">
@@ -316,10 +316,10 @@ export default function MatchingPage() {
       )}
 
       {/* DataTable Explicável */}
-      <section className="mt-6 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/50">
+      <section className="mt-6 overflow-hidden rounded-xl border border-border-color bg-bg-surface/50">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-zinc-800 bg-zinc-900/90 text-xs uppercase tracking-wider text-zinc-400">
+            <thead className="border-b border-border-color bg-bg-surface/90 text-xs uppercase tracking-wider text-text-muted">
               <tr>
                 <th className="w-10 px-4 py-3.5">
                   <input
@@ -327,7 +327,7 @@ export default function MatchingPage() {
                     checked={allSelected}
                     onChange={toggleSelectAll}
                     aria-label="Selecionar todos da fila"
-                    className="h-4 w-4 cursor-pointer rounded border-zinc-700 bg-zinc-900 accent-emerald-500"
+                    className="h-4 w-4 cursor-pointer rounded border-border-color bg-bg-surface accent-emerald-500"
                   />
                 </th>
                 <th className="px-4 py-3.5">Produto Bling (SKU / Nome)</th>
@@ -340,7 +340,7 @@ export default function MatchingPage() {
                 <th className="px-4 py-3.5 text-right">Ações</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800/80">
+            <tbody className="divide-y divide-border-color/80">
               {rows.map((row) => {
                 const isQuarantine = row.status === 'Quarentena';
                 const isSelected = selectedIds.includes(row.id);
@@ -359,7 +359,7 @@ export default function MatchingPage() {
                         ? 'bg-rose-950/20 hover:bg-rose-950/35'
                         : isSelected
                         ? 'bg-emerald-950/20 hover:bg-emerald-950/30'
-                        : 'hover:bg-zinc-900/90'
+                        : 'hover:bg-bg-surface/90'
                     }`}
                   >
                     {/* Checkbox */}
@@ -373,7 +373,7 @@ export default function MatchingPage() {
                         checked={isSelected}
                         onChange={() => toggleSelectRow(row.id)}
                         aria-label={`Selecionar ${row.blingSku}`}
-                        className="h-4 w-4 cursor-pointer rounded border-zinc-700 bg-zinc-900 accent-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="h-4 w-4 cursor-pointer rounded border-border-color bg-bg-surface accent-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
                       />
                     </td>
 
@@ -389,12 +389,12 @@ export default function MatchingPage() {
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}
                           title="Abrir cadastro do produto no Bling"
-                          className="inline-flex items-center text-zinc-400 hover:text-emerald-300"
+                          className="inline-flex items-center text-text-muted hover:text-emerald-300"
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
                         </a>
                       </div>
-                      <div className="mt-0.5 text-xs text-zinc-200">
+                      <div className="mt-0.5 text-xs text-text-primary">
                         {row.blingName}
                       </div>
                     </td>
@@ -402,7 +402,7 @@ export default function MatchingPage() {
                     {/* Anúncio no Canal + Deep Link */}
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-xs font-medium text-white">
+                        <span className="font-mono text-xs font-medium text-text-primary">
                           {row.channelId}
                         </span>
                         <a
@@ -411,12 +411,12 @@ export default function MatchingPage() {
                           rel="noreferrer"
                           onClick={(e) => e.stopPropagation()}
                           title={`Abrir anúncio em ${row.platform}`}
-                          className="inline-flex items-center text-zinc-400 hover:text-sky-300"
+                          className="inline-flex items-center text-text-muted hover:text-sky-300"
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
                         </a>
                       </div>
-                      <span className="mt-0.5 inline-block rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300">
+                      <span className="mt-0.5 inline-block rounded border border-border-color bg-bg-surface px-2 py-0.5 text-[11px] text-text-muted">
                         {row.platform}
                       </span>
                     </td>
@@ -512,7 +512,7 @@ export default function MatchingPage() {
                             type="button"
                             onClick={() => setActiveDrawerItemId(row.id)}
                             title="Comparar lado a lado"
-                            className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs font-medium text-zinc-200 transition hover:bg-zinc-700"
+                            className="inline-flex items-center gap-1 rounded-md border border-border-color bg-bg-surface px-2.5 py-1.5 text-xs font-medium text-text-primary transition hover:bg-bg-base"
                           >
                             <Eye className="h-3.5 w-3.5" />
                             Comparar

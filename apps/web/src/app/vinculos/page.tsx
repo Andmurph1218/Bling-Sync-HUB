@@ -87,8 +87,8 @@ export default function VinculosPage() {
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-8">
-      <h1 className="text-2xl font-bold text-white">Vínculos</h1>
-      <p className="mt-2 text-sm text-zinc-400">
+      <h1 className="text-2xl font-bold text-text-primary">Vínculos</h1>
+      <p className="mt-2 text-sm text-text-muted">
         Se o anúncio já existe no Mercado Livre, o HUB só registra o vínculo.
       </p>
       <form onSubmit={(event) => void search(event)} className="mx-auto mt-6 flex max-w-xl gap-2">
@@ -98,9 +98,9 @@ export default function VinculosPage() {
           value={sku}
           onChange={(event) => setSku(event.target.value)}
           placeholder="Digite o SKU"
-          className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white"
+          className="flex-1 rounded-lg border border-border-color bg-bg-base px-3 py-2 text-sm text-text-primary"
         />
-        <button type="submit" className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white" disabled={loading}>
+        <button type="submit" className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-text-primary" disabled={loading}>
           {loading ? 'Buscando...' : 'Buscar'}
         </button>
       </form>
@@ -109,12 +109,12 @@ export default function VinculosPage() {
       {result?.warning && <p className="mt-4 text-sm text-amber-200">{result.warning}</p>}
       {result && (
         <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Produto no HUB</h2>
-            {!result.hub && <p className="mt-3 text-sm text-zinc-300">Nenhum produto do Bling com esse SKU.</p>}
+          <section className="rounded-xl border border-border-color bg-bg-surface/60 p-4">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-text-muted">Produto no HUB</h2>
+            {!result.hub && <p className="mt-3 text-sm text-text-muted">Nenhum produto do Bling com esse SKU.</p>}
             {result.hub && (
-              <div className="mt-3 space-y-1 text-sm text-zinc-200">
-                <p className="font-semibold text-white">{result.hub.name}</p>
+              <div className="mt-3 space-y-1 text-sm text-text-primary">
+                <p className="font-semibold text-text-primary">{result.hub.name}</p>
                 <p className="font-mono text-emerald-300">SKU {result.hub.sku}</p>
                 <p>EAN {result.hub.ean || 'ausente'}</p>
                 <p>{money(result.hub.price)} · Estoque {result.hub.stock ?? 'não lido'}</p>
@@ -122,12 +122,12 @@ export default function VinculosPage() {
               </div>
             )}
           </section>
-          <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Anúncio no Mercado Livre</h2>
-            {!result.listing && <p className="mt-3 text-sm text-zinc-300">Nenhum anúncio encontrado para esse SKU ou EAN.</p>}
+          <section className="rounded-xl border border-border-color bg-bg-surface/60 p-4">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-text-muted">Anúncio no Mercado Livre</h2>
+            {!result.listing && <p className="mt-3 text-sm text-text-muted">Nenhum anúncio encontrado para esse SKU ou EAN.</p>}
             {result.listing && (
-              <div className="mt-3 space-y-1 text-sm text-zinc-200">
-                <p className="font-semibold text-white">{result.listing.title}</p>
+              <div className="mt-3 space-y-1 text-sm text-text-primary">
+                <p className="font-semibold text-text-primary">{result.listing.title}</p>
                 <p className="font-mono text-sky-300">{result.listing.id}</p>
                 <p>{money(result.listing.price)}</p>
                 <p>Status: {result.listing.status}</p>
@@ -139,7 +139,7 @@ export default function VinculosPage() {
       {result?.hub && result.listing && result.hub.status !== 'Vinculado' && (
         <button
           type="button"
-          className="mt-4 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          className="mt-4 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-text-primary disabled:opacity-60"
           disabled={linking}
           onClick={() => void link()}
         >

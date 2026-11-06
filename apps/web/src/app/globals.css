@@ -1,3 +1,65 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --bg-base: 241 247 205;
+  --bg-surface: 255 252 242;
+  --border-color: 138 158 96;
+  --text-muted: 55 66 40;
+  --text-primary: 22 28 16;
+  color-scheme: light;
+}
+
+.dark {
+  --bg-base: 49 44 32;
+  --bg-surface: 73 77 75;
+  --border-color: 124 112 82;
+  --text-muted: 179 161 118;
+  --text-primary: 226 203 146;
+  color-scheme: dark;
+}
+
+body {
+  background-color: rgb(var(--bg-base));
+  color: rgb(var(--text-primary));
+}
+
+html:not(.dark) body {
+  background-image: linear-gradient(180deg, #f8fce6 0%, #e4f0bc 100%);
+  background-attachment: fixed;
+}
+
+html:not(.dark) :where(
+  .bg-bg-surface,
+  .bg-bg-surface\/40,
+  .bg-bg-surface\/50,
+  .bg-bg-surface\/60,
+  .bg-bg-surface\/70,
+  .bg-bg-surface\/80,
+  .bg-bg-surface\/90,
+  .bg-bg-surface\/95
+) {
+  background-image: linear-gradient(165deg, #fffdf6 0%, #f3f8d4 52%, #dceeb6 100%);
+  box-shadow: 0 10px 24px rgb(36 48 18 / 0.08), inset 0 1px 0 rgb(255 255 255 / 0.9);
+}
+
+html:not(.dark) .text-emerald-300,
+html:not(.dark) .text-emerald-400 {
+  color: rgb(6 78 59);
+}
+
+html:not(.dark) .text-rose-100,
+html:not(.dark) .text-rose-200 {
+  color: rgb(136 19 55);
+}
+
+html:not(.dark) .text-amber-200,
+html:not(.dark) .text-amber-300 {
+  color: rgb(120 53 15);
+}
+
+html:not(.dark) .text-sky-200,
+html:not(.dark) .text-sky-300 {
+  color: rgb(3 105 161);
+}

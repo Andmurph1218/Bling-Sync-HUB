@@ -117,13 +117,13 @@ export function MatchDetailsDrawer({
         role="dialog"
         aria-modal="true"
         aria-label="Como o vínculo foi sugerido"
-        className="relative z-10 flex h-full w-full max-w-2xl flex-col border-l border-zinc-800 bg-zinc-950 text-zinc-100 shadow-2xl"
+        className="relative z-10 flex h-full w-full max-w-2xl flex-col border-l border-border-color bg-bg-base text-text-primary shadow-2xl"
       >
         {/* Cabeçalho do Sheet */}
-        <header className="flex items-start justify-between gap-4 border-b border-zinc-800 px-6 py-5">
+        <header className="flex items-start justify-between gap-4 border-b border-border-color px-6 py-5">
           <div>
             <div className="flex flex-wrap items-center gap-2.5">
-              <h2 className="text-lg font-bold text-white">
+              <h2 className="text-lg font-bold text-text-primary">
                 Como o vínculo foi sugerido
               </h2>
               <span
@@ -145,15 +145,15 @@ export function MatchDetailsDrawer({
                 </span>
               )}
             </div>
-            <p className="mt-1 text-xs text-zinc-400">
+            <p className="mt-1 text-xs text-text-muted">
               Compare os campos entre o Bling (soberano) e o anúncio em{' '}
-              <strong className="text-zinc-200">{item.platform}</strong> antes de decidir.
+              <strong className="text-text-primary">{item.platform}</strong> antes de decidir.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-zinc-800 bg-zinc-900 p-1.5 text-zinc-400 hover:border-zinc-700 hover:text-white"
+            className="rounded-lg border border-border-color bg-bg-surface p-1.5 text-text-muted hover:border-border-color hover:text-text-primary"
             aria-label="Fechar painel"
           >
             <X className="h-4 w-4" />
@@ -179,7 +179,7 @@ export function MatchDetailsDrawer({
 
           {/* Sinais Detectados pelo PIRE */}
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-text-muted">
               Por que o Hub sugeriu este par?
             </h3>
             <div className="mt-2 flex flex-wrap gap-2">
@@ -223,7 +223,7 @@ export function MatchDetailsDrawer({
                   <span className="block text-[10px] font-semibold uppercase tracking-wider text-emerald-400">
                     Coluna 1 · Fonte Soberana
                   </span>
-                  <span className="text-sm font-bold text-white">
+                  <span className="text-sm font-bold text-text-primary">
                     Bling ERP v3 (#{item.blingId})
                   </span>
                 </div>
@@ -231,19 +231,19 @@ export function MatchDetailsDrawer({
                   href={blingUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-zinc-900/80 px-2 py-1 text-[11px] font-medium text-emerald-300 hover:bg-zinc-900"
+                  className="inline-flex items-center gap-1 rounded border border-emerald-500/30 bg-bg-surface/80 px-2 py-1 text-[11px] font-medium text-emerald-300 hover:bg-bg-surface"
                 >
                   <span>Abrir</span>
                   <ExternalLink className="h-3 w-3" />
                 </a>
               </div>
 
-              <div className="flex items-center justify-between rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2.5">
+              <div className="flex items-center justify-between rounded-lg border border-border-color bg-bg-surface px-3.5 py-2.5">
                 <div>
-                  <span className="block text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                  <span className="block text-[10px] font-semibold uppercase tracking-wider text-text-muted">
                     Coluna 2 · Marketplace ({item.platform})
                   </span>
-                  <span className="text-sm font-bold text-white">
+                  <span className="text-sm font-bold text-text-primary">
                     Anúncio {item.channelId}
                   </span>
                 </div>
@@ -251,7 +251,7 @@ export function MatchDetailsDrawer({
                   href={channelUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px] font-medium text-zinc-200 hover:bg-zinc-700"
+                  className="inline-flex items-center gap-1 rounded border border-border-color bg-bg-surface px-2 py-1 text-[11px] font-medium text-text-primary hover:bg-bg-base"
                 >
                   <span>Abrir</span>
                   <ExternalLink className="h-3 w-3" />
@@ -266,13 +266,13 @@ export function MatchDetailsDrawer({
                   className={`rounded-lg border p-3 ${
                     titleDiff
                       ? 'border-amber-500/30 bg-amber-500/10'
-                      : 'border-zinc-800 bg-zinc-900/60'
+                      : 'border-border-color bg-bg-surface/60'
                   }`}
                 >
-                  <span className="block text-[10px] font-semibold uppercase text-zinc-400">
+                  <span className="block text-[10px] font-semibold uppercase text-text-muted">
                     Título (Bling)
                   </span>
-                  <p className="mt-1 text-xs font-medium text-white">
+                  <p className="mt-1 text-xs font-medium text-text-primary">
                     {item.blingName}
                   </p>
                 </div>
@@ -280,11 +280,11 @@ export function MatchDetailsDrawer({
                   className={`rounded-lg border p-3 ${
                     titleDiff
                       ? 'border-amber-500/30 bg-amber-500/10'
-                      : 'border-zinc-800 bg-zinc-900/60'
+                      : 'border-border-color bg-bg-surface/60'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-semibold uppercase text-zinc-400">
+                    <span className="text-[10px] font-semibold uppercase text-text-muted">
                       Título ({item.platform})
                     </span>
                     {titleDiff && (
@@ -293,7 +293,7 @@ export function MatchDetailsDrawer({
                       </span>
                     )}
                   </div>
-                  <p className="mt-1 text-xs font-medium text-white">
+                  <p className="mt-1 text-xs font-medium text-text-primary">
                     {item.channelTitle}
                   </p>
                 </div>
@@ -305,10 +305,10 @@ export function MatchDetailsDrawer({
                   className={`rounded-lg border p-3 ${
                     skuDiff
                       ? 'border-rose-500/30 bg-rose-500/10'
-                      : 'border-zinc-800 bg-zinc-900/60'
+                      : 'border-border-color bg-bg-surface/60'
                   }`}
                 >
-                  <span className="block text-[10px] font-semibold uppercase text-zinc-400">
+                  <span className="block text-[10px] font-semibold uppercase text-text-muted">
                     SKU (Bling)
                   </span>
                   <p className="mt-1 font-mono text-xs font-semibold text-emerald-400">
@@ -319,11 +319,11 @@ export function MatchDetailsDrawer({
                   className={`rounded-lg border p-3 ${
                     skuDiff
                       ? 'border-rose-500/30 bg-rose-500/10'
-                      : 'border-zinc-800 bg-zinc-900/60'
+                      : 'border-border-color bg-bg-surface/60'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-semibold uppercase text-zinc-400">
+                    <span className="text-[10px] font-semibold uppercase text-text-muted">
                       SKU Enviado ({item.platform})
                     </span>
                     {skuDiff && (
@@ -332,7 +332,7 @@ export function MatchDetailsDrawer({
                       </span>
                     )}
                   </div>
-                  <p className="mt-1 font-mono text-xs font-semibold text-white">
+                  <p className="mt-1 font-mono text-xs font-semibold text-text-primary">
                     {item.channelSku}
                   </p>
                 </div>
@@ -344,13 +344,13 @@ export function MatchDetailsDrawer({
                   className={`rounded-lg border p-3 ${
                     eanDiff
                       ? 'border-rose-500/30 bg-rose-500/10'
-                      : 'border-zinc-800 bg-zinc-900/60'
+                      : 'border-border-color bg-bg-surface/60'
                   }`}
                 >
-                  <span className="block text-[10px] font-semibold uppercase text-zinc-400">
+                  <span className="block text-[10px] font-semibold uppercase text-text-muted">
                     EAN / GTIN (Bling)
                   </span>
-                  <p className="mt-1 font-mono text-xs text-zinc-200">
+                  <p className="mt-1 font-mono text-xs text-text-primary">
                     {item.blingEan}
                   </p>
                 </div>
@@ -358,11 +358,11 @@ export function MatchDetailsDrawer({
                   className={`rounded-lg border p-3 ${
                     eanDiff
                       ? 'border-rose-500/30 bg-rose-500/10'
-                      : 'border-zinc-800 bg-zinc-900/60'
+                      : 'border-border-color bg-bg-surface/60'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-semibold uppercase text-zinc-400">
+                    <span className="text-[10px] font-semibold uppercase text-text-muted">
                       EAN / GTIN ({item.platform})
                     </span>
                     {eanDiff && (
@@ -371,7 +371,7 @@ export function MatchDetailsDrawer({
                       </span>
                     )}
                   </div>
-                  <p className="mt-1 font-mono text-xs text-zinc-200">
+                  <p className="mt-1 font-mono text-xs text-text-primary">
                     {item.channelEan}
                   </p>
                 </div>
@@ -383,13 +383,13 @@ export function MatchDetailsDrawer({
                   className={`rounded-lg border p-3 ${
                     priceDiff
                       ? 'border-amber-500/30 bg-amber-500/10'
-                      : 'border-zinc-800 bg-zinc-900/60'
+                      : 'border-border-color bg-bg-surface/60'
                   }`}
                 >
-                  <span className="block text-[10px] font-semibold uppercase text-zinc-400">
+                  <span className="block text-[10px] font-semibold uppercase text-text-muted">
                     Preço Loja (Bling)
                   </span>
-                  <p className="mt-1 font-mono text-xs font-semibold text-white">
+                  <p className="mt-1 font-mono text-xs font-semibold text-text-primary">
                     {item.blingPrice}
                   </p>
                 </div>
@@ -397,11 +397,11 @@ export function MatchDetailsDrawer({
                   className={`rounded-lg border p-3 ${
                     priceDiff
                       ? 'border-amber-500/30 bg-amber-500/10'
-                      : 'border-zinc-800 bg-zinc-900/60'
+                      : 'border-border-color bg-bg-surface/60'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-semibold uppercase text-zinc-400">
+                    <span className="text-[10px] font-semibold uppercase text-text-muted">
                       Preço ({item.platform})
                     </span>
                     {priceDiff && (
@@ -410,7 +410,7 @@ export function MatchDetailsDrawer({
                       </span>
                     )}
                   </div>
-                  <p className="mt-1 font-mono text-xs font-semibold text-white">
+                  <p className="mt-1 font-mono text-xs font-semibold text-text-primary">
                     {item.channelPrice}
                   </p>
                 </div>
@@ -422,10 +422,10 @@ export function MatchDetailsDrawer({
                   className={`rounded-lg border p-3 ${
                     statusDiff
                       ? 'border-amber-500/30 bg-amber-500/10'
-                      : 'border-zinc-800 bg-zinc-900/60'
+                      : 'border-border-color bg-bg-surface/60'
                   }`}
                 >
-                  <span className="block text-[10px] font-semibold uppercase text-zinc-400">
+                  <span className="block text-[10px] font-semibold uppercase text-text-muted">
                     Status (Bling)
                   </span>
                   <p className="mt-1 text-xs font-medium text-emerald-400">
@@ -436,13 +436,13 @@ export function MatchDetailsDrawer({
                   className={`rounded-lg border p-3 ${
                     statusDiff
                       ? 'border-amber-500/30 bg-amber-500/10'
-                      : 'border-zinc-800 bg-zinc-900/60'
+                      : 'border-border-color bg-bg-surface/60'
                   }`}
                 >
-                  <span className="block text-[10px] font-semibold uppercase text-zinc-400">
+                  <span className="block text-[10px] font-semibold uppercase text-text-muted">
                     Status ({item.platform})
                   </span>
-                  <p className="mt-1 text-xs font-medium text-zinc-200">
+                  <p className="mt-1 text-xs font-medium text-text-primary">
                     {item.channelStatus}
                   </p>
                 </div>
@@ -452,9 +452,9 @@ export function MatchDetailsDrawer({
         </div>
 
         {/* Rodapé com Ações e Popover de Rejeição */}
-        <footer className="relative border-t border-zinc-800 bg-zinc-900/80 px-6 py-4">
+        <footer className="relative border-t border-border-color bg-bg-surface/80 px-6 py-4">
           {rejectPopoverOpen && (
-            <div className="mb-4 rounded-xl border border-rose-500/40 bg-zinc-950 p-4 shadow-xl">
+            <div className="mb-4 rounded-xl border border-rose-500/40 bg-bg-base p-4 shadow-xl">
               <p className="text-xs font-semibold text-rose-300">
                 Informe o motivo da rejeição permanente (<TechTooltip term="match_rejections" />):
               </p>
@@ -462,7 +462,7 @@ export function MatchDetailsDrawer({
                 {REJECTION_REASONS.map((reason) => (
                   <label
                     key={reason}
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs text-text-muted hover:bg-bg-surface"
                   >
                     <input
                       type="radio"
@@ -479,14 +479,14 @@ export function MatchDetailsDrawer({
                 <button
                   type="button"
                   onClick={() => setRejectPopoverOpen(false)}
-                  className="rounded-md border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+                  className="rounded-md border border-border-color px-3 py-1 text-xs text-text-muted hover:bg-bg-surface"
                 >
                   Cancelar
                 </button>
                 <button
                   type="button"
                   onClick={handleConfirmReject}
-                  className="inline-flex items-center gap-1 rounded-md bg-rose-600 px-3 py-1 text-xs font-semibold text-white hover:bg-rose-500"
+                  className="inline-flex items-center gap-1 rounded-md bg-rose-600 px-3 py-1 text-xs font-semibold text-text-primary hover:bg-rose-500"
                 >
                   <Ban className="h-3.5 w-3.5" />
                   Gravar em match_rejections
@@ -511,7 +511,7 @@ export function MatchDetailsDrawer({
               disabled={!canDecide}
               title={canDecide ? undefined : 'Sem candidato no Bling para vincular'}
               onClick={handleConfirmClick}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-semibold text-text-primary shadow-sm transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Check className="h-4 w-4" />
               Confirmar Vínculo

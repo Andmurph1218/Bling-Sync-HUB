@@ -193,7 +193,7 @@ function FichaUnicaProdutoPage({
   if (loadState !== 'ok' || !detail) {
     return (
       <main className="mx-auto max-w-6xl px-6 py-8">
-        <Link href="/catalogo" className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-400 hover:text-white">
+        <Link href="/catalogo" className="inline-flex items-center gap-1.5 text-xs font-medium text-text-muted hover:text-text-primary">
           <ArrowLeft className="h-3.5 w-3.5" />
           Voltar para o Catálogo de Produtos
         </Link>
@@ -201,7 +201,7 @@ function FichaUnicaProdutoPage({
           role={loadState === 'loading' ? 'status' : 'alert'}
           className={`mt-6 rounded-xl border p-6 text-sm ${
             loadState === 'loading'
-              ? 'border-zinc-800 bg-zinc-900/60 text-zinc-300'
+              ? 'border-border-color bg-bg-surface/60 text-text-muted'
               : 'border-rose-500/40 bg-rose-500/10 text-rose-200'
           }`}
         >
@@ -222,7 +222,7 @@ function FichaUnicaProdutoPage({
       <div className="mb-4">
         <Link
           href="/catalogo"
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-400 hover:text-white"
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-text-muted hover:text-text-primary"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           Voltar para o Catálogo de Produtos
@@ -230,7 +230,7 @@ function FichaUnicaProdutoPage({
       </div>
 
       {/* Cabeçalho da Ficha Única */}
-      <header className="flex flex-col justify-between gap-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-6 lg:flex-row lg:items-center">
+      <header className="flex flex-col justify-between gap-4 rounded-xl border border-border-color bg-bg-surface/60 p-6 lg:flex-row lg:items-center">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 font-mono text-xs font-semibold text-emerald-300">
@@ -239,7 +239,7 @@ function FichaUnicaProdutoPage({
             {isBlankSku(prod?.bling_sku) ? (
               <EmptySkuNotice />
             ) : (
-              <span className="rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-0.5 font-mono text-xs text-zinc-200">
+              <span className="rounded-md border border-border-color bg-bg-surface px-2.5 py-0.5 font-mono text-xs text-text-primary">
                 SKU: {prod?.bling_sku}
               </span>
             )}
@@ -250,10 +250,10 @@ function FichaUnicaProdutoPage({
                 : 'Fonte Soberana: Bling ERP v3'}
             </span>
           </div>
-          <h1 className="mt-2 text-xl font-bold text-white">
+          <h1 className="mt-2 text-xl font-bold text-text-primary">
             {prod.name ?? `Produto Bling #${prod.bling_id}`}
           </h1>
-          <p className="mt-1 text-xs text-zinc-400">
+          <p className="mt-1 text-xs text-text-muted">
             Ficha Única comparando Bling, Mercado Livre e Nuvemshop. Explica por que cada valor foi escolhido antes de qualquer escrita.
           </p>
         </div>
@@ -263,7 +263,7 @@ function FichaUnicaProdutoPage({
             href={buildBlingProductUrl(prod?.bling_id ?? blingId)}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3.5 py-2 text-xs font-medium text-zinc-200 hover:bg-zinc-700"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border-color bg-bg-surface px-3.5 py-2 text-xs font-medium text-text-primary hover:bg-bg-base"
           >
             <span>Abrir no Bling</span>
             <ExternalLink className="h-3.5 w-3.5" />
@@ -279,7 +279,7 @@ function FichaUnicaProdutoPage({
           ) : (
             <Link
               href="/publicacoes"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-text-primary hover:bg-emerald-500"
             >
               <Send className="h-3.5 w-3.5" />
               <span>Simular sincronização</span>
@@ -289,7 +289,7 @@ function FichaUnicaProdutoPage({
       </header>
 
       {/* Navegação das 7 Abas */}
-      <div className="mt-6 flex flex-wrap gap-1.5 border-b border-zinc-800 pb-3">
+      <div className="mt-6 flex flex-wrap gap-1.5 border-b border-border-color pb-3">
         {TABS.map((tab) => (
           <button
             key={tab.id}
@@ -298,7 +298,7 @@ function FichaUnicaProdutoPage({
             className={`rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
               activeTab === tab.id
                 ? 'border border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
-                : 'border border-transparent bg-zinc-900/60 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                : 'border border-transparent bg-bg-surface/60 text-text-muted hover:bg-bg-surface hover:text-text-primary'
             }`}
           >
             {tab.label}
@@ -311,14 +311,14 @@ function FichaUnicaProdutoPage({
         {activeTab === 'geral' && (
           <div className="space-y-6">
             <div className="grid gap-4 sm:grid-cols-3">
-              <div className="rounded-xl border border-emerald-500/30 bg-zinc-900/60 p-5">
+              <div className="rounded-xl border border-emerald-500/30 bg-bg-surface/60 p-5">
                 <span className="text-xs font-semibold uppercase text-emerald-400">
                   Bling ERP v3 (Soberano)
                 </span>
-                <p className="mt-2 text-2xl font-bold text-white">
+                <p className="mt-2 text-2xl font-bold text-text-primary">
                   Nota {mainReadiness?.score_bling ?? '—'} / 100
                 </p>
-                <p className="mt-1 text-xs text-zinc-400">
+                <p className="mt-1 text-xs text-text-muted">
                   Estoque seller publicado:{' '}
                   <strong>
                     {mainVar?.stock !== null && mainVar?.stock !== undefined
@@ -330,28 +330,28 @@ function FichaUnicaProdutoPage({
                 </p>
               </div>
 
-              <div className="rounded-xl border border-amber-500/30 bg-zinc-900/60 p-5">
+              <div className="rounded-xl border border-amber-500/30 bg-bg-surface/60 p-5">
                 <span className="text-xs font-semibold uppercase text-amber-400">
                   Mercado Livre (JHS SHOPPING)
                 </span>
                 <p className="mt-2 text-2xl font-bold text-amber-300">
                   Nota {mainReadiness?.score_ml ?? '—'} / 100
                 </p>
-                <p className="mt-1 text-xs text-zinc-400">
+                <p className="mt-1 text-xs text-text-muted">
                   {mainReadiness?.publishable_ml
                     ? 'Apto para publicar conteúdo no Mercado Livre.'
                     : 'Pendente de categoria verificada ou expansão de descrição técnica.'}
                 </p>
               </div>
 
-              <div className="rounded-xl border border-amber-500/30 bg-zinc-900/60 p-5">
+              <div className="rounded-xl border border-amber-500/30 bg-bg-surface/60 p-5">
                 <span className="text-xs font-semibold uppercase text-amber-400">
                   Nuvemshop (Loja 6667412)
                 </span>
                 <p className="mt-2 text-2xl font-bold text-amber-300">
                   Nota {mainReadiness?.score_ns ?? '—'} / 100
                 </p>
-                <p className="mt-1 text-xs text-zinc-400">
+                <p className="mt-1 text-xs text-text-muted">
                   {mainReadiness?.publishable_ns
                     ? 'Apto para publicar conteúdo na Nuvemshop.'
                     : 'Pendente de enriquecimento de SEO (keywords, meta_description e seo_slug).'}
@@ -360,8 +360,8 @@ function FichaUnicaProdutoPage({
             </div>
 
             {mainReadiness?.blockers && mainReadiness.blockers.length > 0 && (
-              <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
-                <h2 className="text-sm font-bold text-white">
+              <div className="rounded-xl border border-border-color bg-bg-surface/50 p-5">
+                <h2 className="text-sm font-bold text-text-primary">
                   Requisitos Pendentes Explicados para o Operador
                 </h2>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -370,10 +370,10 @@ function FichaUnicaProdutoPage({
                     return (
                       <div
                         key={b}
-                        className="rounded-lg border border-zinc-800 bg-zinc-950 p-3.5 text-xs"
+                        className="rounded-lg border border-border-color bg-bg-base p-3.5 text-xs"
                       >
                         <p className="font-semibold text-amber-300">{tr.title}</p>
-                        <p className="mt-1 text-zinc-300">
+                        <p className="mt-1 text-text-muted">
                           <strong>Próximo passo:</strong> {tr.nextStep}
                         </p>
                       </div>
@@ -386,20 +386,20 @@ function FichaUnicaProdutoPage({
         )}
 
         {activeTab === 'geral' && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
-            <div className="flex items-center gap-2 text-sm font-bold text-white">
+          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6">
+            <div className="flex items-center gap-2 text-sm font-bold text-text-primary">
               <Database className="h-4 w-4 text-emerald-400" />
               <h2>Campos Protegidos (Grupo A — Soberania Absoluta do Bling)</h2>
             </div>
-            <p className="mt-1 text-xs text-zinc-400">
+            <p className="mt-1 text-xs text-text-muted">
               Estes valores jamais são sobrescritos por dados vindos do Mercado Livre ou da Nuvemshop.
             </p>
 
-            <p className="mt-1 text-xs text-zinc-400">
-              Nome do ERP, somente leitura: <strong className="text-zinc-100">{prod.name ?? 'Sem nome'}</strong>
+            <p className="mt-1 text-xs text-text-muted">
+              Nome do ERP, somente leitura: <strong className="text-text-primary">{prod.name ?? 'Sem nome'}</strong>
               {' '}· Marca: {prod.brand || sheet?.item.brand || 'Sem marca'}
             </p>
-            <label className="mt-3 block text-xs text-zinc-300">
+            <label className="mt-3 block text-xs text-text-muted">
               Categoria do catálogo
               <select
                 value={sheet?.category?.id ?? ''}
@@ -413,7 +413,7 @@ function FichaUnicaProdutoPage({
                     setSheet((current) => current ? { ...current, category: selected } : current);
                   });
                 }}
-                className="mt-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-white"
+                className="mt-1 rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
               >
                 <option value="">Sem categoria</option>
                 {categories.map((category) => (
@@ -434,56 +434,56 @@ function FichaUnicaProdutoPage({
               </ul>
             )}
             <div className="mt-4 grid gap-3 sm:grid-cols-4">
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-                <span className="text-[11px] uppercase text-zinc-400">Preço de Cadastro</span>
-                <p className="mt-1 font-mono text-base font-bold text-white">
+              <div className="rounded-lg border border-border-color bg-bg-base p-4">
+                <span className="text-[11px] uppercase text-text-muted">Preço de Cadastro</span>
+                <p className="mt-1 font-mono text-base font-bold text-text-primary">
                   {mainVar?.price ? `R$ ${mainVar.price}` : 'Sem preço'}
                 </p>
                 <span className="text-[11px] text-emerald-400">Origem: Bling v3</span>
               </div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-                <span className="text-[11px] uppercase text-zinc-400">Preço de Custo</span>
-                <p className="mt-1 font-mono text-base font-bold text-white">
+              <div className="rounded-lg border border-border-color bg-bg-base p-4">
+                <span className="text-[11px] uppercase text-text-muted">Preço de Custo</span>
+                <p className="mt-1 font-mono text-base font-bold text-text-primary">
                   {mainVar?.cost_price ? `R$ ${mainVar.cost_price}` : 'Custo ausente'}
                 </p>
-                <span className="text-[11px] text-zinc-400">Nunca presumido como zero</span>
+                <span className="text-[11px] text-text-muted">Nunca presumido como zero</span>
               </div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-                <span className="text-[11px] uppercase text-zinc-400">Estoque Publicável (Seller)</span>
+              <div className="rounded-lg border border-border-color bg-bg-base p-4">
+                <span className="text-[11px] uppercase text-text-muted">Estoque Publicável (Seller)</span>
                 <p className="mt-1 font-mono text-base font-bold text-emerald-400">
                   {mainVar?.stock !== null && mainVar?.stock !== undefined
                     ? Math.floor(Number(mainVar.stock))
                       : 'Aguardando leitura'}{' '}
                   un.
                 </p>
-                <span className="text-[11px] text-zinc-400">Soma apenas depósitos seller</span>
+                <span className="text-[11px] text-text-muted">Soma apenas depósitos seller</span>
               </div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-                <span className="text-[11px] uppercase text-zinc-400">Marca / Formato</span>
-                <p className="mt-1 text-sm font-bold text-white">
+              <div className="rounded-lg border border-border-color bg-bg-base p-4">
+                <span className="text-[11px] uppercase text-text-muted">Marca / Formato</span>
+                <p className="mt-1 text-sm font-bold text-text-primary">
                   {prod?.brand || 'Sem marca'} · Formato {prod?.bling_formato ?? 'S'}
                 </p>
-                <span className="text-[11px] text-zinc-400">Unidade: {prod?.unit ?? 'UN'}</span>
+                <span className="text-[11px] text-text-muted">Unidade: {prod?.unit ?? 'UN'}</span>
               </div>
             </div>
           </div>
         )}
 
         {activeTab === 'imagens' && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
-            <div className="flex items-center gap-2 text-sm font-bold text-white">
+          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6">
+            <div className="flex items-center gap-2 text-sm font-bold text-text-primary">
               <FileText className="h-4 w-4 text-sky-400" />
               <h2>Comparação de Conteúdo por Fonte (Bling vs Marketplaces)</h2>
             </div>
-            <p className="mt-1 text-xs text-zinc-400">
-              Nome e descrição do Bling permanecem intocáveis; títulos e descrições específicos por canal ficam em <code className="text-zinc-300">channel_content_overrides</code>.
+            <p className="mt-1 text-xs text-text-muted">
+              Nome e descrição do Bling permanecem intocáveis; títulos e descrições específicos por canal ficam em <code className="text-text-muted">channel_content_overrides</code>.
             </p>
 
             <div className="mt-4 overflow-x-auto">
               {(sheet?.images.length ?? 0) === 0 && (
-                <p className="mb-3 text-xs text-zinc-400">Nenhuma imagem elegível no banco.</p>
+                <p className="mb-3 text-xs text-text-muted">Nenhuma imagem elegível no banco.</p>
               )}
-              <ul className="mb-4 space-y-1 text-xs text-zinc-300">
+              <ul className="mb-4 space-y-1 text-xs text-text-muted">
                 {sheet?.images.map((image) => (
                   <li key={image.url_normalized}>
                     {image.is_cover_eligible ? 'Capa' : 'Imagem'} · ML {image.position_ml ?? '—'} · NS {image.position_ns ?? '—'} · {image.rights_status}
@@ -513,45 +513,45 @@ function FichaUnicaProdutoPage({
                   });
                 }}
               >
-                <label className="text-[11px] text-zinc-400">
+                <label className="text-[11px] text-text-muted">
                   URL da capa
-                  <input name="url" className="mt-1 block w-72 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white" />
+                  <input name="url" className="mt-1 block w-72 rounded border border-border-color bg-bg-base px-2 py-1 text-xs text-text-primary" />
                 </label>
-                <button type="submit" className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">
+                <button type="submit" className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-text-primary">
                   Salvar capa
                 </button>
               </form>
               <table className="w-full text-left text-xs">
-                <thead className="border-b border-zinc-800 text-[11px] uppercase text-zinc-400">
+                <thead className="border-b border-border-color text-[11px] uppercase text-text-muted">
                   <tr>
                     <th className="py-2.5 pr-4">Campo</th>
                     <th className="py-2.5 px-4">Valor no Bling ERP</th>
                     <th className="py-2.5 pl-4">Regra Aplicada pelo HUB</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-zinc-800">
+                <tbody className="divide-y divide-border-color">
                   <tr>
-                    <td className="py-3 pr-4 font-semibold text-white">Título Mestre</td>
-                    <td className="py-3 px-4 text-zinc-200">{prod?.name}</td>
+                    <td className="py-3 pr-4 font-semibold text-text-primary">Título Mestre</td>
+                    <td className="py-3 px-4 text-text-primary">{prod?.name}</td>
                     <td className="py-3 pl-4 text-emerald-400 font-medium">
                       KEEP — Protegido (nunca recebe texto de marketplace)
                     </td>
                   </tr>
                   <tr>
-                    <td className="py-3 pr-4 font-semibold text-white">Peso Líquido / Bruto</td>
-                    <td className="py-3 px-4 font-mono text-zinc-200">
+                    <td className="py-3 pr-4 font-semibold text-text-primary">Peso Líquido / Bruto</td>
+                    <td className="py-3 px-4 font-mono text-text-primary">
                       {mainVar?.net_weight ?? '—'} kg / {mainVar?.gross_weight ?? '—'} kg
                     </td>
-                    <td className="py-3 pl-4 text-zinc-300">
+                    <td className="py-3 pl-4 text-text-muted">
                       Peso — só enriquece se o Bling estiver vazio ou com valor sentinela
                     </td>
                   </tr>
                   <tr>
-                    <td className="py-3 pr-4 font-semibold text-white">Dimensões (L × A × P)</td>
-                    <td className="py-3 px-4 font-mono text-zinc-200">
+                    <td className="py-3 pr-4 font-semibold text-text-primary">Dimensões (L × A × P)</td>
+                    <td className="py-3 px-4 font-mono text-text-primary">
                       {mainVar?.width ?? '—'} × {mainVar?.height ?? '—'} × {mainVar?.depth ?? '—'} cm
                     </td>
-                    <td className="py-3 pl-4 text-zinc-300">
+                    <td className="py-3 pl-4 text-text-muted">
                       Enviadas no passo isolado <code>measures</code> na Nuvemshop (sem preço/estoque)
                     </td>
                   </tr>
@@ -562,8 +562,8 @@ function FichaUnicaProdutoPage({
         )}
 
         {activeTab === 'variacoes' && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
-            <div className="flex items-center gap-2 text-sm font-bold text-white">
+          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6">
+            <div className="flex items-center gap-2 text-sm font-bold text-text-primary">
               <Layers className="h-4 w-4 text-emerald-400" />
               <h2>Variações e Saldos por Depósito (`variant_stock_balances`)</h2>
             </div>
@@ -571,12 +571,12 @@ function FichaUnicaProdutoPage({
               {(detail?.stockBalances ?? []).map((bal) => (
                 <div
                   key={`${bal.variant_id}-${bal.bling_warehouse_id}`}
-                  className="rounded-lg border border-zinc-800 bg-zinc-950 p-3.5"
+                  className="rounded-lg border border-border-color bg-bg-base p-3.5"
                 >
                   <span className="font-mono font-bold text-emerald-400">
                     Depósito #{bal.bling_warehouse_id}
                   </span>
-                  <p className="mt-1 text-zinc-200">
+                  <p className="mt-1 text-text-primary">
                     Saldo Físico: <strong>{Math.floor(Number(bal.saldo_fisico))}</strong> · Saldo Virtual:{' '}
                     <strong>{Math.floor(Number(bal.saldo_virtual))}</strong>
                   </p>
@@ -587,9 +587,9 @@ function FichaUnicaProdutoPage({
         )}
 
         {activeTab === 'atributos' && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 text-sm text-zinc-200">
-            <h2 className="font-bold text-white">Atributos usados no mapeamento</h2>
-            <p className="mt-2 text-xs text-zinc-400">
+          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6 text-sm text-text-primary">
+            <h2 className="font-bold text-text-primary">Atributos usados no mapeamento</h2>
+            <p className="mt-2 text-xs text-text-muted">
               Marca: {prod.brand || 'sem marca'}. Os mapas por categoria ficam em Atributos.
             </p>
             <Link href="/atributos" className="mt-3 inline-block text-xs font-semibold text-emerald-300 underline">
@@ -599,57 +599,57 @@ function FichaUnicaProdutoPage({
         )}
 
         {activeTab === 'fiscal' && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 space-y-4">
-            <div className="flex items-center gap-2 text-sm font-bold text-white">
+          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6 space-y-4">
+            <div className="flex items-center gap-2 text-sm font-bold text-text-primary">
               <Lock className="h-4 w-4 text-amber-400" />
               <h2>Conformidade Fiscal (EAN, NCM, CEST e Origem)</h2>
             </div>
             <div className="grid gap-3 sm:grid-cols-4 text-xs">
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3.5">
-                <span className="text-zinc-400">EAN / GTIN</span>
+              <div className="rounded-lg border border-border-color bg-bg-base p-3.5">
+                <span className="text-text-muted">EAN / GTIN</span>
                 <p className="mt-1 font-mono font-bold text-emerald-400">
                   {mainVar?.ean || 'Ausente'}
                 </p>
-                <span className="text-[11px] text-zinc-400">
+                <span className="text-[11px] text-text-muted">
                   Situação: {mainVar?.ean_status ?? 'sem variante'}
                 </span>
               </div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3.5">
-                <span className="text-zinc-400">NCM (master_products)</span>
-                <p className="mt-1 font-mono font-bold text-white">
+              <div className="rounded-lg border border-border-color bg-bg-base p-3.5">
+                <span className="text-text-muted">NCM (master_products)</span>
+                <p className="mt-1 font-mono font-bold text-text-primary">
                   {prod?.ncm || 'Ausente'}
                 </p>
                 <span className="text-[11px] text-emerald-400">
                   Situação: {prod.ncm_status}
                 </span>
               </div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3.5">
-                <span className="text-zinc-400">CEST (Espelho Bling)</span>
-                <p className="mt-1 font-mono font-bold text-zinc-200">
+              <div className="rounded-lg border border-border-color bg-bg-base p-3.5">
+                <span className="text-text-muted">CEST (Espelho Bling)</span>
+                <p className="mt-1 font-mono font-bold text-text-primary">
                   {prod?.cest || 'Não informado'}
                 </p>
-                <span className="text-[11px] text-zinc-500">Informativo (não bloqueia push)</span>
+                <span className="text-[11px] text-text-muted">Informativo (não bloqueia push)</span>
               </div>
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3.5">
-                <span className="text-zinc-400">Origem Fiscal</span>
-                <p className="mt-1 font-bold text-zinc-200">
+              <div className="rounded-lg border border-border-color bg-bg-base p-3.5">
+                <span className="text-text-muted">Origem Fiscal</span>
+                <p className="mt-1 font-bold text-text-primary">
                   {prod.tax_origin === null ? 'Não informada' : prod.tax_origin === 0 ? '0 — Nacional' : `${prod.tax_origin} — ver tabela de origem`}
                 </p>
-                <span className="text-[11px] text-zinc-500">Emitido na NF-e pelo Bling</span>
+                <span className="text-[11px] text-text-muted">Emitido na NF-e pelo Bling</span>
               </div>
             </div>
           </div>
         )}
 
         {activeTab === 'canais' && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
-            <h2 className="text-sm font-bold text-white">
+          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6">
+            <h2 className="text-sm font-bold text-text-primary">
               Estado de publicação por passo
             </h2>
-            <p className="mt-1 text-xs text-zinc-400">
-              Enquanto <code className="text-zinc-300">stock_price = bling_native</code>, passos de estoque e preço permanecem sob controle nativo do Bling.
+            <p className="mt-1 text-xs text-text-muted">
+              Enquanto <code className="text-text-muted">stock_price = bling_native</code>, passos de estoque e preço permanecem sob controle nativo do Bling.
             </p>
-            <ul className="mt-3 space-y-1 text-xs text-zinc-300">
+            <ul className="mt-3 space-y-1 text-xs text-text-muted">
               {(sheet?.storePrices.length ?? 0) === 0 && <li>Nenhum preço de loja lido para a variante padrão.</li>}
               {sheet?.storePrices.map((price) => (
                 <li key={price.platform}>
@@ -658,18 +658,18 @@ function FichaUnicaProdutoPage({
               ))}
             </ul>
             {pushAttempts.length === 0 ? (
-              <div className="mt-4 flex items-center gap-3 text-xs text-zinc-300">
+              <div className="mt-4 flex items-center gap-3 text-xs text-text-muted">
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />
                 <span>Nenhuma tentativa de publicação registrada para este produto (modo shadow).</span>
               </div>
             ) : (
               <ul className="mt-4 space-y-2 text-xs">
                 {pushAttempts.map((a) => (
-                  <li key={a.id} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+                  <li key={a.id} className="rounded-lg border border-border-color bg-bg-base p-3">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold text-white">{a.channel} · {a.operationType}</span>
-                      <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-zinc-200">{a.state}</span>
-                      <span className="text-zinc-500">{new Date(a.createdAt).toLocaleString('pt-BR')}</span>
+                      <span className="font-semibold text-text-primary">{a.channel} · {a.operationType}</span>
+                      <span className="rounded-full border border-border-color px-2 py-0.5 text-text-primary">{a.state}</span>
+                      <span className="text-text-muted">{new Date(a.createdAt).toLocaleString('pt-BR')}</span>
                     </div>
                     {a.completedSteps.length > 0 && (
                       <p className="mt-1 text-emerald-300">Passos confirmados: {a.completedSteps.join(' → ')}</p>
@@ -687,32 +687,32 @@ function FichaUnicaProdutoPage({
         )}
 
         {activeTab === 'canais' && detail.qualityHistory.length > 0 && (
-          <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6">
-            <div className="flex items-center gap-2 text-sm font-bold text-white">
-              <History className="h-4 w-4 text-zinc-300" />
+          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6">
+            <div className="flex items-center gap-2 text-sm font-bold text-text-primary">
+              <History className="h-4 w-4 text-text-muted" />
               <h2>Histórico Auditado de Alterações</h2>
             </div>
-            <div className="mt-3 space-y-2 text-xs text-zinc-300">
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+            <div className="mt-3 space-y-2 text-xs text-text-muted">
+              <div className="rounded-lg border border-border-color bg-bg-base p-3">
                 <strong>
                   {prod.last_bling_sync
                     ? new Date(prod.last_bling_sync).toLocaleString('pt-BR')
                     : 'Sem leitura registrada'}
                 </strong>{' '}
-                · Última leitura do cadastro no Bling v3 · Origem: <code className="text-zinc-200">system</code>
+                · Última leitura do cadastro no Bling v3 · Origem: <code className="text-text-primary">system</code>
               </div>
               {detail.qualityHistory.length === 0 ? (
-                <p className="text-zinc-500">Nenhuma alteração de conteúdo proposta ou aplicada pelo motor de qualidade.</p>
+                <p className="text-text-muted">Nenhuma alteração de conteúdo proposta ou aplicada pelo motor de qualidade.</p>
               ) : (
                 detail.qualityHistory.map((h, idx) => (
-                  <div key={`${h.field_name}-${idx}`} className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
+                  <div key={`${h.field_name}-${idx}`} className="rounded-lg border border-border-color bg-bg-base p-3">
                     <strong>{new Date(h.created_at).toLocaleString('pt-BR')}</strong> · Campo <code>{h.field_name}</code> · Decisão{' '}
                     <strong>{h.decision}</strong> ({h.mode === 'shadow' ? 'simulação, não aplicada' : h.applied ? 'aplicada' : 'não aplicada'})
                     <div className="mt-1 grid gap-1 sm:grid-cols-2">
-                      <span className="text-zinc-400">Anterior: {h.old_value ?? '(vazio)'}</span>
+                      <span className="text-text-muted">Anterior: {h.old_value ?? '(vazio)'}</span>
                       <span className="text-emerald-300">Proposto: {h.new_value ?? '(vazio)'}</span>
                     </div>
-                    <span className="text-zinc-500">Origem: {h.source}</span>
+                    <span className="text-text-muted">Origem: {h.source}</span>
                   </div>
                 ))
               )}
@@ -726,7 +726,7 @@ function FichaUnicaProdutoPage({
 
 export default function Page(props: { params: { id: string } }) {
   return (
-    <React.Suspense fallback={<main className="px-6 py-8 text-sm text-zinc-300">Carregando ficha...</main>}>
+    <React.Suspense fallback={<main className="px-6 py-8 text-sm text-text-muted">Carregando ficha...</main>}>
       <FichaUnicaProdutoPage {...props} />
     </React.Suspense>
   );

@@ -8,5 +8,5 @@ export default function PendenciasRedirectPage() {
   useEffect(() => {
     router.replace('/problemas');
   }, [router]);
-  return <main className="px-6 py-8 text-sm text-zinc-300">As pendências agora ficam em Problemas.</main>;
+  return <main className="px-6 py-8 text-sm text-text-muted">As pendências agora ficam em Problemas.</main>;
 }

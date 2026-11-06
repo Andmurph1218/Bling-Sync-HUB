@@ -57,13 +57,13 @@ export default function ProblemasPage() {
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
-      <h1 className="text-2xl font-bold text-white">Problemas</h1>
-      <p className="mt-2 text-sm text-zinc-400">
+      <h1 className="text-2xl font-bold text-text-primary">Problemas</h1>
+      <p className="mt-2 text-sm text-text-muted">
         Falhas de envio, erros de webhook e pendências de cadastro no mesmo lugar.
       </p>
       {error && <p className="mt-4 text-sm text-rose-200" role="alert">{error}</p>}
       <div className="mt-6 grid gap-4 lg:grid-cols-[240px_1fr]">
-        <aside className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+        <aside className="rounded-xl border border-border-color bg-bg-surface/60 p-3">
           <ul className="space-y-1">
             {FILTERS.map((item) => (
               <li key={item.type}>
@@ -71,7 +71,7 @@ export default function ProblemasPage() {
                   type="button"
                   onClick={() => setFilter(item.type)}
                   className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs ${
-                    filter === item.type ? 'bg-sky-500/15 text-sky-100' : 'text-zinc-300 hover:bg-zinc-800'
+                    filter === item.type ? 'bg-sky-500/15 text-sky-100' : 'text-text-muted hover:bg-bg-surface'
                   }`}
                 >
                   <span>{item.label}</span>
@@ -83,20 +83,20 @@ export default function ProblemasPage() {
         </aside>
         <section>
           {visible.length === 0 && !error && (
-            <p className="rounded-xl border border-zinc-800 px-4 py-6 text-sm text-zinc-400">Nenhum problema neste filtro.</p>
+            <p className="rounded-xl border border-border-color px-4 py-6 text-sm text-text-muted">Nenhum problema neste filtro.</p>
           )}
           <ul className="space-y-2">
             {visible.map((item) => (
-              <li key={item.id} className="grid items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-xs text-zinc-200 sm:grid-cols-[1.4fr_0.8fr_1.6fr_auto]">
+              <li key={item.id} className="grid items-center gap-3 rounded-xl border border-border-color bg-bg-surface/60 px-4 py-3 text-xs text-text-primary sm:grid-cols-[1.4fr_0.8fr_1.6fr_auto]">
                 <div>
-                  <p className="font-semibold text-white">{item.name}</p>
+                  <p className="font-semibold text-text-primary">{item.name}</p>
                   <p className="font-mono text-emerald-300">SKU {item.sku}</p>
                 </div>
                 <p>{item.channel}</p>
                 <p>{item.message}</p>
                 <button
                   type="button"
-                  className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white disabled:opacity-40"
+                  className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-text-primary disabled:opacity-40"
                   disabled={!item.blingId}
                   onClick={() => setFixing(item)}
                 >

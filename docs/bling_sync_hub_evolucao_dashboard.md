@@ -1,7 +1,7 @@
 # Bling Sync HUB — Evolução v2: Catálogo, Atributos e UX Operacional
 
-Data: **5 de novembro de 2026**  
-Estado atual da implantação: [status-implantacao.md](status-implantacao.md)  
+Data do plano: **5 de novembro de 2026**  
+Estado no ar em 06/11/2026: [status-implantacao.md](status-implantacao.md), seção 11. O painel tem tema claro e escuro, e a lista de envio avisa pendência em toast em vez do banner verde.  
 Spec normativa (regras de soberania e motores): [plano-mestre.md](plano-mestre.md)  
 Brief de intenção: [Hub sync v2.md](Hub%20sync%20v2.md) *(diretrizes, não regras fixas)*  
 Referências de produto: [demo Plugg.to](https://youtu.be/239wfkYZD2Q) · [demo Moovin HUB](https://www.youtube.com/watch?v=Yx0fuxKGQE0)  

@@ -52,7 +52,7 @@ function LoginForm() {
     <main className="flex min-h-screen items-center justify-center px-6">
       <form
         onSubmit={(e) => void handleSubmit(e)}
-        className="w-full max-w-sm space-y-5 rounded-xl border border-zinc-800 bg-zinc-900/70 p-7 shadow-xl"
+        className="w-full max-w-sm space-y-5 rounded-xl border border-border-color bg-bg-surface/70 p-7 shadow-xl"
         aria-labelledby="login-title"
       >
         <div className="flex items-center gap-3">
@@ -60,8 +60,8 @@ function LoginForm() {
             <ShieldCheck className="h-5 w-5" />
           </div>
           <div>
-            <h1 id="login-title" className="text-lg font-bold text-white">Bling Sync HUB</h1>
-            <p className="text-xs text-zinc-400">Acesso ao Centro de Controle Operacional</p>
+            <h1 id="login-title" className="text-lg font-bold text-text-primary">Bling Sync HUB</h1>
+            <p className="text-xs text-text-muted">Acesso ao Centro de Controle Operacional</p>
           </div>
         </div>
 
@@ -73,7 +73,7 @@ function LoginForm() {
         )}
 
         <div className="space-y-1.5">
-          <label htmlFor="email" className="text-xs font-medium text-zinc-300">E-mail</label>
+          <label htmlFor="email" className="text-xs font-medium text-text-muted">E-mail</label>
           <input
             id="email"
             type="email"
@@ -81,12 +81,12 @@ function LoginForm() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            className="w-full rounded-lg border border-border-color bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-emerald-500 focus:outline-none"
           />
         </div>
 
         <div className="space-y-1.5">
-          <label htmlFor="password" className="text-xs font-medium text-zinc-300">Senha</label>
+          <label htmlFor="password" className="text-xs font-medium text-text-muted">Senha</label>
           <input
             id="password"
             type="password"
@@ -94,20 +94,20 @@ function LoginForm() {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            className="w-full rounded-lg border border-border-color bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-emerald-500 focus:outline-none"
           />
         </div>
 
         <button
           type="submit"
           disabled={submitting}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-emerald-500 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
         >
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
           <span>{submitting ? 'Entrando...' : 'Entrar'}</span>
         </button>
 
-        <p className="text-[11px] leading-relaxed text-zinc-500">
+        <p className="text-[11px] leading-relaxed text-text-muted">
           Sessão protegida por cookie HttpOnly. Os papéis (Operador, Revisor Fiscal, Administrador) definem as áreas visíveis e as ações permitidas.
         </p>
       </form>

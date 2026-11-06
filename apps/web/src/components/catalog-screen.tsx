@@ -3,9 +3,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Archive, Copy, Pencil, Plus, Search, Warehouse } from 'lucide-react';
+import { AlertTriangle, Archive, Copy, PackageOpen, Pencil, Plus, Search, Warehouse } from 'lucide-react';
 import { ApiError, apiFetch, API_BASE_URL } from '../utils/api-client';
 import { EmptySkuNotice, isBlankSku } from './empty-sku-notice';
+import { Toaster, ToastMessage } from './toaster';
 
 type CatalogTab = 'todos' | 'publicados' | 'completude' | 'rejeitados' | 'arquivados' | 'ready';
 type TopView = 'produtos' | 'envio' | 'importacoes' | 'exportacoes';
@@ -89,7 +90,7 @@ function HighlightedJson({ value }: { value: unknown }) {
   const text = JSON.stringify(value, null, 2);
   const tokens = text.split(/("(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?|\btrue\b|\bfalse\b|\bnull\b)/g);
   return (
-    <pre className="mt-3 overflow-auto rounded-lg bg-zinc-900 p-3 font-mono text-[11px] leading-relaxed text-zinc-300">
+    <pre className="mt-3 overflow-auto rounded-lg bg-bg-surface p-3 font-mono text-[11px] leading-relaxed text-text-muted">
       {tokens.map((token, index) => {
         if (!token) return null;
         if (token.startsWith('"')) {
@@ -166,6 +167,30 @@ function money(value: number | null): string {
   return value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+const SHORT_REASON: Record<string, string> = {
+  'Falta imagem de capa elegível': 'Falta imagem',
+  'Sem categoria': 'Sem categoria',
+  'Categoria do canal ainda não está verde': 'Sem categoria no canal',
+  'Atributos obrigatórios do canal ainda não resolvidos': 'Atributos pendentes',
+  'Código de barras ausente ou inválido para este canal': 'EAN ausente ou inválido',
+  'NCM ausente ou inválido': 'NCM ausente ou inválido',
+  'NCM em conflito entre variações': 'NCM em conflito',
+  'Preço ausente ou zero': 'Sem preço',
+  'Sem SKU — não sincroniza': 'Sem SKU',
+  'Possível duplicata por SKU ou EAN — vincule em vez de criar': 'Possível duplicata',
+  'Produto não encontrado.': 'Produto não encontrado',
+  'Checklist incompleto.': 'Cadastro incompleto',
+};
+
+function checklistReasons(reason: string): string[] {
+  const parts = reason
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => SHORT_REASON[part] ?? part);
+  return parts.length > 0 ? parts : ['Cadastro incompleto'];
+}
+
 function toneClass(tone: CatalogItem['checklist']['tone']): string {
   if (tone === 'green') return 'text-emerald-300';
   if (tone === 'amber') return 'text-amber-300';
@@ -175,8 +200,8 @@ function toneClass(tone: CatalogItem['checklist']['tone']): string {
 function channelClass(state: string): string {
   if (state === 'published') return 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200';
   if (state === 'rejected') return 'border-rose-500/40 bg-rose-500/15 text-rose-200';
-  if (state === 'pending') return 'border-zinc-600 bg-zinc-800 text-zinc-300';
-  return 'border-zinc-800 bg-transparent text-zinc-600';
+  if (state === 'pending') return 'border-border-color bg-bg-surface text-text-muted';
+  return 'border-border-color bg-transparent text-text-muted';
 }
 
 export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
@@ -198,6 +223,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkAction, setBulkAction] = useState('arquivar');
   const [notice, setNotice] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [openVariants, setOpenVariants] = useState<Record<string, VariantRow[] | 'loading'>>({});
   const [lookupOpen, setLookupOpen] = useState(false);
   const [lookupSku, setLookupSku] = useState('');
@@ -310,24 +336,51 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
     setSendItems(payload.items);
   };
 
+  const pushToast = useCallback((toast: Omit<ToastMessage, 'id'>) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setToasts((prev) => [...prev, { ...toast, id }]);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  }, []);
+
   const addToSendList = async (ids: string[]) => {
     if (ids.length === 0) {
       setNotice('Selecione ao menos um produto.');
       return;
     }
-    const result = await apiFetch<{ queued: string[]; skipped: Array<{ sku: string; reason: string }> }>(
+    const result = await apiFetch<{ queued: string[]; skipped: Array<{ id: string; sku: string; reason: string }> }>(
       '/api/catalog/products/send-list',
       { method: 'POST', json: { ids, channel: 'mercadolivre' } }
     );
+    const catalogItems = data?.items ?? [];
+    setNotice(null);
     setSelected([]);
-    setView('envio');
-    const blocked = result.skipped.map((item) => `${item.sku || 'sem SKU'}: ${item.reason}`).join(' ');
-    setNotice(
-      `${result.queued.length} produto(s) na lista de envio. Nenhuma requisição foi feita ao Mercado Livre.${
-        blocked ? ` Fora da lista: ${blocked}` : ''
-      }`
-    );
-    await loadSendList();
+    for (const item of result.skipped) {
+      const local = catalogItems.find((product) => product.id === item.id);
+      const skuLabel = local && !isBlankSku(local.sku) ? local.sku : !isBlankSku(item.sku) ? item.sku : 'sem SKU';
+      const nameLabel = local?.name?.trim() || 'Sem nome';
+      pushToast({
+        variant: 'warning',
+        title: `Produto ${skuLabel} - ${nameLabel} não foi adicionado`,
+        reasons: checklistReasons(item.reason),
+        action: local
+          ? { label: 'Corrigir Cadastro', href: `/catalogo/${local.blingId}?aba=geral` }
+          : undefined,
+      });
+    }
+    if (result.queued.length > 0) {
+      pushToast({
+        variant: 'success',
+        title:
+          result.queued.length === 1
+            ? 'Produto adicionado à lista de envio'
+            : `${result.queued.length} produtos adicionados à lista de envio`,
+      });
+      if (result.skipped.length === 0) setView('envio');
+      await loadSendList();
+    }
   };
 
   const recalculateSelected = async (ids: string[]) => {
@@ -372,8 +425,8 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
     <main className="mx-auto max-w-[1400px] px-6 py-8">
       <header className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">{lockedTab ? 'Completude' : 'Catálogo'}</h1>
-          <p className="mt-1 text-sm text-zinc-400">
+          <h1 className="text-2xl font-bold text-text-primary">{lockedTab ? 'Completude' : 'Catálogo'}</h1>
+          <p className="mt-1 text-sm text-text-muted">
             Um produto do ERP, um SKU no HUB. Arquivar não apaga o cadastro no Bling.
           </p>
         </div>
@@ -389,7 +442,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
               setStockNotice(null);
               setCreatedBlingId(null);
             }}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-500"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-text-primary hover:bg-emerald-500"
           >
             <Plus className="h-3.5 w-3.5" />
             Produto
@@ -411,7 +464,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                 URL.revokeObjectURL(url);
               });
             }}
-            className="rounded-lg border border-zinc-600 px-3 py-2 text-xs font-semibold text-zinc-100"
+            className="rounded-lg border border-border-color px-3 py-2 text-xs font-semibold text-text-primary"
           >
             Exportar
           </button>
@@ -426,34 +479,34 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[240px_1fr]">
         <aside className="space-y-4">
-          <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Filtros</h2>
-            <label className="mt-3 block text-[11px] text-zinc-400">
+          <section className="rounded-xl border border-border-color bg-bg-surface/60 p-4">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-text-muted">Filtros</h2>
+            <label className="mt-3 block text-[11px] text-text-muted">
               SKU
               <input
                 value={sku}
                 onChange={(event) => setSku(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-white"
+                className="mt-1 w-full rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
               />
             </label>
-            <label className="mt-2 block text-[11px] text-zinc-400">
+            <label className="mt-2 block text-[11px] text-text-muted">
               Nome
               <input
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-white"
+                className="mt-1 w-full rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
               />
             </label>
-            <button type="button" onClick={() => setShowMore((prev) => !prev)} className="mt-2 text-[11px] text-zinc-300 underline">
+            <button type="button" onClick={() => setShowMore((prev) => !prev)} className="mt-2 text-[11px] text-text-muted underline">
               {showMore ? 'Ver menos' : 'Ver mais'}
             </button>
             {showMore && (
-              <label className="mt-2 block text-[11px] text-zinc-400">
+              <label className="mt-2 block text-[11px] text-text-muted">
                 Marca
                 <input
                   value={brand}
                   onChange={(event) => setBrand(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-white"
+                  className="mt-1 w-full rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
                 />
               </label>
             )}
@@ -464,7 +517,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                   setPage(1);
                   setApplied({ sku, name, brand });
                 }}
-                className="rounded-lg bg-zinc-100 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-900"
+                className="rounded-lg bg-text-primary px-2.5 py-1.5 text-[11px] font-semibold text-bg-base"
               >
                 Filtrar
               </button>
@@ -477,19 +530,19 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                   setApplied({ sku: '', name: '', brand: '' });
                   setPage(1);
                 }}
-                className="rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[11px] text-zinc-200"
+                className="rounded-lg border border-border-color px-2.5 py-1.5 text-[11px] text-text-primary"
               >
                 Limpar
               </button>
             </div>
           </section>
 
-          <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Ações em lote</h2>
+          <section className="rounded-xl border border-border-color bg-bg-surface/60 p-4">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-text-muted">Ações em lote</h2>
             <select
               value={bulkAction}
               onChange={(event) => setBulkAction(event.target.value)}
-              className="mt-3 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-white"
+              className="mt-3 w-full rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
             >
               <option value="arquivar">Arquivar</option>
               <option value="envio">Adicionar à Lista de Envio</option>
@@ -497,7 +550,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
             </select>
             <button
               type="button"
-              className="mt-2 w-full rounded-lg border border-zinc-700 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-100"
+              className="mt-2 w-full rounded-lg border border-border-color px-2.5 py-1.5 text-[11px] font-semibold text-text-primary"
               onClick={() => {
                 if (bulkAction === 'arquivar') {
                   void archiveIds(selected, true).catch(() => setNotice('Não foi possível arquivar a seleção.'));
@@ -514,9 +567,9 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
             </button>
           </section>
 
-          <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Importação</h2>
-            <p className="mt-2 text-[11px] text-zinc-400">
+          <section className="rounded-xl border border-border-color bg-bg-surface/60 p-4">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-text-muted">Importação</h2>
+            <p className="mt-2 text-[11px] text-text-muted">
               A planilha atualiza a imagem e campos de canal ainda vazios. Nome, descrição, categoria, preço e estoque ficam com o Bling.
             </p>
           </section>
@@ -542,7 +595,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                 className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
                   view === id
                     ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200'
-                    : 'border-zinc-700 text-zinc-300'
+                    : 'border-border-color text-text-muted'
                 }`}
               >
                 {label}
@@ -551,35 +604,68 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
           </div>
 
           {view === 'envio' && (
-            <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 text-sm text-zinc-300" role="status">
-              {sendItems.length === 0 && 'Nenhum produto na lista de envio. A publicação real continua desligada.'}
+            <div className="mt-4" role="status">
+              {sendItems.length === 0 && (
+                <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border-color bg-bg-surface/40 px-6 py-16 text-center">
+                  <PackageOpen className="h-10 w-10 text-text-muted" aria-hidden="true" />
+                  <p className="mt-3 max-w-sm text-sm text-text-muted">
+                    Sua fila está vazia. Selecione produtos no Catálogo para enviá-los aos marketplaces.
+                  </p>
+                </div>
+              )}
               {sendItems.length > 0 && (
                 <ul className="space-y-2">
-                  {sendItems.map((item) => (
-                    <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <span className="font-mono text-emerald-300">{item.sku}</span>
-                      <span>{item.name || 'Sem nome'}</span>
-                      <span>{item.channel === 'mercadolivre' ? 'Mercado Livre' : item.channel}</span>
-                      <span className={item.status === 'failed' ? 'font-semibold text-rose-200' : ''}>{QUEUE_STATUS[item.status] ?? item.status}</span>
-                      {item.status === 'failed' && item.error_message && (
-                        <span className="text-rose-200">{item.error_message}</span>
-                      )}
-                      {item.status !== 'failed' && item.error_message && (
-                        <span className="text-zinc-400">{item.error_message}</span>
-                      )}
-                      {item.status === 'failed' && item.bling_id && (
-                        <Link href={`/catalogo/${item.bling_id}`} className="rounded border border-zinc-600 px-2 py-1 font-semibold text-white">
-                          Corrigir
-                        </Link>
-                      )}
-                    </li>
-                  ))}
+                  {sendItems.map((item) => {
+                    const reasons = item.error_message ? checklistReasons(item.error_message) : [];
+                    const skuLabel = isBlankSku(item.sku) ? 'SKU não informado' : item.sku;
+                    if (item.status === 'failed') {
+                      return (
+                        <li key={item.id} className="rounded-xl border border-amber-300 bg-amber-100 px-4 py-3 text-amber-950">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div className="flex items-start gap-2">
+                              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                              <div>
+                                <p className="text-sm font-semibold">{item.name?.trim() || 'Sem nome'}</p>
+                                <p className="text-xs">SKU {skuLabel}</p>
+                                <p className="mt-1 text-[11px] text-amber-800">
+                                  {item.channel === 'mercadolivre' ? 'Mercado Livre' : item.channel} · {QUEUE_STATUS[item.status] ?? item.status}
+                                </p>
+                                {reasons.length > 0 && (
+                                  <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs">
+                                    {reasons.map((reason, index) => (
+                                      <li key={`${reason}-${index}`}>{reason}</li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            </div>
+                            {item.bling_id && (
+                              <Link
+                                href={`/catalogo/${item.bling_id}?aba=geral`}
+                                className="rounded-lg bg-amber-950 px-2.5 py-1.5 text-[11px] font-semibold text-amber-50"
+                              >
+                                Corrigir Pendências
+                              </Link>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    }
+                    return (
+                      <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border-color bg-bg-surface/50 px-4 py-3 text-xs text-text-muted">
+                        <span className="font-semibold text-text-primary">{item.name?.trim() || 'Sem nome'}</span>
+                        <span>SKU {skuLabel}</span>
+                        <span>{item.channel === 'mercadolivre' ? 'Mercado Livre' : item.channel}</span>
+                        <span>{QUEUE_STATUS[item.status] ?? item.status}</span>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
           )}
           {view === 'importacoes' && (
-            <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 text-sm text-zinc-300">
+            <div className="mt-4 rounded-xl border border-border-color bg-bg-surface/50 p-6 text-sm text-text-muted">
               <p>Envie uma planilha .xlsx. Só entram a URL da imagem e textos de canal ainda vazios. Nome, descrição e categoria do Bling são ignorados.</p>
               <input
                 type="file"
@@ -616,7 +702,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
             </div>
           )}
           {view === 'exportacoes' && (
-            <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 text-sm text-zinc-300" role="status">
+            <div className="mt-4 rounded-xl border border-border-color bg-bg-surface/50 p-6 text-sm text-text-muted" role="status">
               Use o botão Exportar no topo. O arquivo traz SKU, nome, categoria, completude, preço, estoque e canais vinculados.
             </div>
           )}
@@ -635,7 +721,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                     className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
                       tab === item.id
                         ? 'border-sky-500/40 bg-sky-500/15 text-sky-100'
-                        : 'border-zinc-800 text-zinc-300'
+                        : 'border-border-color text-text-muted'
                     }`}
                   >
                     {item.label} {counts ? counts[item.id] : '…'}
@@ -656,9 +742,9 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                 </p>
               )}
 
-              <div className="mt-4 overflow-hidden rounded-xl border border-zinc-800">
+              <div className="mt-4 overflow-hidden rounded-xl border border-border-color">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-zinc-900 text-[11px] uppercase tracking-wider text-zinc-400">
+                  <thead className="bg-bg-surface text-[11px] uppercase tracking-wider text-text-muted">
                     <tr>
                       <th className="px-3 py-3">
                         <input
@@ -686,10 +772,10 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                       <th className="px-3 py-3">Ações</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-800 bg-zinc-950/40">
+                  <tbody className="divide-y divide-border-color bg-bg-base/40">
                     {loading && (
                       <tr>
-                        <td colSpan={11} className="px-3 py-6 text-zinc-400">Lendo o catálogo...</td>
+                        <td colSpan={11} className="px-3 py-6 text-text-muted">Lendo o catálogo...</td>
                       </tr>
                     )}
                     {!loading && error && (
@@ -699,7 +785,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                     )}
                     {!loading && !error && data && data.items.length === 0 && (
                       <tr>
-                        <td colSpan={11} className="px-3 py-6 text-zinc-400">Nenhum produto nesta lista.</td>
+                        <td colSpan={11} className="px-3 py-6 text-text-muted">Nenhum produto nesta lista.</td>
                       </tr>
                     )}
                     {data?.items.map((item) => (
@@ -721,14 +807,14 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                             {item.coverUrl ? (
                               <img src={item.coverUrl} alt="" className="h-10 w-10 rounded object-cover" />
                             ) : (
-                              <span className="inline-flex h-10 w-10 items-center justify-center rounded bg-zinc-800 text-[10px] text-zinc-500">sem</span>
+                              <span className="inline-flex h-10 w-10 items-center justify-center rounded bg-bg-surface text-[10px] text-text-muted">sem</span>
                             )}
                             <button type="button" onClick={() => void toggleVariants(item)} className="mt-1 block text-[10px] text-sky-300">
                               Variações
                             </button>
                           </td>
-                          <td className="px-3 py-3 text-zinc-100">{item.name || 'Sem nome no ERP'}</td>
-                          <td className="px-3 py-3 text-zinc-300">{item.typeLabel}</td>
+                          <td className="px-3 py-3 text-text-primary">{item.name || 'Sem nome no ERP'}</td>
+                          <td className="px-3 py-3 text-text-muted">{item.typeLabel}</td>
                           <td className="px-3 py-3">
                             {isBlankSku(item.sku) ? <EmptySkuNotice /> : <span className="font-mono text-emerald-300">{item.sku}</span>}
                           </td>
@@ -755,20 +841,20 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                           </td>
                           <td className="px-3 py-3">
                             <div className="flex gap-1">
-                              <Link href={`/catalogo/${item.blingId}?aba=geral`} title="Editar" className="rounded border border-zinc-700 p-1 text-zinc-200">
+                              <Link href={`/catalogo/${item.blingId}?aba=geral`} title="Editar" className="rounded border border-border-color p-1 text-text-primary">
                                 <Pencil className="h-3.5 w-3.5" />
                               </Link>
-                              <button type="button" title="Duplicar não cria SKU no ERP" onClick={() => { setDraftFor(item); setDraftSku(''); setDraftResult(null); }} className="rounded border border-zinc-700 p-1 text-zinc-200">
+                              <button type="button" title="Duplicar não cria SKU no ERP" onClick={() => { setDraftFor(item); setDraftSku(''); setDraftResult(null); }} className="rounded border border-border-color p-1 text-text-primary">
                                 <Copy className="h-3.5 w-3.5" />
                               </button>
-                              <Link href={`/catalogo/${item.blingId}?aba=variacoes`} title="Depósitos lidos do ERP" className="rounded border border-zinc-700 p-1 text-zinc-200">
+                              <Link href={`/catalogo/${item.blingId}?aba=variacoes`} title="Depósitos lidos do ERP" className="rounded border border-border-color p-1 text-text-primary">
                                 <Warehouse className="h-3.5 w-3.5" />
                               </Link>
                               <button
                                 type="button"
                                 title={item.archived ? 'Desarquivar' : 'Arquivar'}
                                 onClick={() => void archiveIds([item.id], !item.archived).catch(() => setNotice('Não foi possível alterar o arquivamento.'))}
-                                className="rounded border border-zinc-700 p-1 text-zinc-200"
+                                className="rounded border border-border-color p-1 text-text-primary"
                               >
                                 <Archive className="h-3.5 w-3.5" />
                               </button>
@@ -784,7 +870,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                         </tr>
                         {openVariants[item.blingId] && (
                           <tr>
-                            <td colSpan={11} className="bg-zinc-900/70 px-6 py-3 text-[11px] text-zinc-300">
+                            <td colSpan={11} className="bg-bg-surface/70 px-6 py-3 text-[11px] text-text-muted">
                               {openVariants[item.blingId] === 'loading' && 'Lendo variações...'}
                               {Array.isArray(openVariants[item.blingId]) && (openVariants[item.blingId] as VariantRow[]).length === 0 && 'Nenhuma variação no banco.'}
                               {Array.isArray(openVariants[item.blingId]) &&
@@ -805,7 +891,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                 </table>
               </div>
               {data && (
-                <p className="mt-2 flex items-center gap-3 text-[11px] text-zinc-500">
+                <p className="mt-2 flex items-center gap-3 text-[11px] text-text-muted">
                   <span>{data.total} produto(s) neste filtro.</span>
                   <button type="button" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))} className="underline disabled:opacity-40">
                     Anterior
@@ -828,14 +914,14 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
 
       {simulation && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="simulate-title">
-          <div className="max-h-[80vh] w-full max-w-2xl overflow-auto rounded-xl border border-zinc-700 bg-zinc-950 p-5">
-            <h2 id="simulate-title" className="text-sm font-bold text-white">Simulação de envio — Mercado Livre</h2>
-            <p className="mt-1 text-xs text-zinc-400">Nada foi publicado no marketplace.</p>
-            {simulation.loading && <p className="mt-4 text-sm text-zinc-300">Montando o JSON...</p>}
+          <div className="max-h-[80vh] w-full max-w-2xl overflow-auto rounded-xl border border-border-color bg-bg-base p-5">
+            <h2 id="simulate-title" className="text-sm font-bold text-text-primary">Simulação de envio — Mercado Livre</h2>
+            <p className="mt-1 text-xs text-text-muted">Nada foi publicado no marketplace.</p>
+            {simulation.loading && <p className="mt-4 text-sm text-text-muted">Montando o JSON...</p>}
             {simulation.error && <p className="mt-4 text-sm text-rose-200" role="alert">{simulation.error}</p>}
             {simulation.entries.map((entry) => (
               <section key={entry.sku} className="mt-4">
-                <h3 className="text-xs font-semibold text-zinc-200">SKU {entry.sku}</h3>
+                <h3 className="text-xs font-semibold text-text-primary">SKU {entry.sku}</h3>
                 {!entry.attributesComplete && (
                   <p className="mt-1 text-xs text-amber-200">
                     Atributos incompletos{entry.missingAttributes.length ? `: ${entry.missingAttributes.join(', ')}` : ''}.
@@ -844,15 +930,17 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                 <HighlightedJson value={entry.payload} />
               </section>
             ))}
-            <button type="button" className="mt-4 rounded-lg border border-zinc-600 px-3 py-1.5 text-xs text-zinc-100" onClick={() => setSimulation(null)}>
+            <button type="button" className="mt-4 rounded-lg border border-border-color px-3 py-1.5 text-xs text-text-primary" onClick={() => setSimulation(null)}>
               Fechar
             </button>
           </div>
         </div>
       )}
 
+      <Toaster toasts={toasts} onDismiss={dismissToast} />
+
       {selected.length > 0 && view === 'produtos' && (
-        <div className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-full border border-zinc-700 bg-zinc-950 px-4 py-2 text-xs text-white shadow-2xl">
+        <div className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-full border border-border-color bg-bg-base px-4 py-2 text-xs text-text-primary shadow-2xl">
           <span>{selected.length} selecionado(s)</span>
           <button type="button" className="rounded-full border border-sky-500 px-3 py-1 font-semibold text-sky-200" onClick={() => void simulateIds(selected)}>
             Simular
@@ -860,10 +948,10 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
           <button type="button" className="rounded-full bg-emerald-600 px-3 py-1 font-semibold" onClick={() => void addToSendList(selected).catch(() => setNotice('Não foi possível adicionar à lista de envio.'))}>
             Adicionar à Lista de Envio
           </button>
-          <button type="button" className="rounded-full border border-zinc-600 px-3 py-1" onClick={() => void recalculateSelected(selected).catch(() => setNotice('Não foi possível recalcular a completude.'))}>
+          <button type="button" className="rounded-full border border-border-color px-3 py-1" onClick={() => void recalculateSelected(selected).catch(() => setNotice('Não foi possível recalcular a completude.'))}>
             Recalcular Completude
           </button>
-          <button type="button" className="text-zinc-400 underline" onClick={() => setSelected([])}>
+          <button type="button" className="text-text-muted underline" onClick={() => setSelected([])}>
             Limpar
           </button>
         </div>
@@ -871,21 +959,21 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
 
       {lookupOpen && (
         <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-xl border border-zinc-700 bg-zinc-950 p-5">
-            <h2 className="text-sm font-bold text-white">Buscar SKU ou EAN antes de criar</h2>
-            <p className="mt-1 text-xs text-zinc-400">Se o produto já existe, a criação fica bloqueada.</p>
+          <div className="w-full max-w-md rounded-xl border border-border-color bg-bg-base p-5">
+            <h2 className="text-sm font-bold text-text-primary">Buscar SKU ou EAN antes de criar</h2>
+            <p className="mt-1 text-xs text-text-muted">Se o produto já existe, a criação fica bloqueada.</p>
             <div className="mt-3 flex gap-2">
-              <Search className="mt-2 h-4 w-4 text-zinc-500" />
+              <Search className="mt-2 h-4 w-4 text-text-muted" />
               <input
                 value={lookupSku}
                 onChange={(event) => setLookupSku(event.target.value)}
                 placeholder="SKU ou EAN"
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-white"
+                className="w-full rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-xs text-text-primary"
               />
             </div>
             <button
               type="button"
-              className="mt-3 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
+              className="mt-3 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-text-primary"
               onClick={() => {
                 const term = lookupSku.trim();
                 if (!term) return;
@@ -901,7 +989,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
             {lookupHit && lookupHit !== 'free' && (
               <div className="mt-3 space-y-2 text-xs text-amber-100">
                 <p>Já existe: {lookupHit.name ?? lookupHit.sku}. A criação deste SKU está bloqueada.</p>
-                <Link href={`/catalogo/${lookupHit.blingId}`} className="inline-block rounded-lg bg-zinc-100 px-3 py-1.5 font-semibold text-zinc-950">
+                <Link href={`/catalogo/${lookupHit.blingId}`} className="inline-block rounded-lg bg-text-primary px-3 py-1.5 font-semibold text-bg-base">
                   Ir para o produto existente
                 </Link>
               </div>
@@ -922,11 +1010,11 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                   setConfirmCreate(true);
                 }}
               >
-                <p className="text-zinc-300">SKU livre. Nome, preço e estoque são gravados no Bling.</p>
-                <input value={createName} onChange={(event) => setCreateName(event.target.value)} required placeholder="Nome" className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-white" />
-                <input value={createPrice} onChange={(event) => setCreatePrice(event.target.value)} required inputMode="decimal" placeholder="Preço" className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-white" />
-                <input value={createStock} onChange={(event) => setCreateStock(event.target.value)} required inputMode="decimal" placeholder="Estoque" className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-white" />
-                <input value={createImageUrl} onChange={(event) => setCreateImageUrl(event.target.value)} placeholder="URL da imagem (só no HUB)" className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-white" />
+                <p className="text-text-muted">SKU livre. Nome, preço e estoque são gravados no Bling.</p>
+                <input value={createName} onChange={(event) => setCreateName(event.target.value)} required placeholder="Nome" className="w-full rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-text-primary" />
+                <input value={createPrice} onChange={(event) => setCreatePrice(event.target.value)} required inputMode="decimal" placeholder="Preço" className="w-full rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-text-primary" />
+                <input value={createStock} onChange={(event) => setCreateStock(event.target.value)} required inputMode="decimal" placeholder="Estoque" className="w-full rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-text-primary" />
+                <input value={createImageUrl} onChange={(event) => setCreateImageUrl(event.target.value)} placeholder="URL da imagem (só no HUB)" className="w-full rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-text-primary" />
                 {createError && (
                   <div role="alert" className="space-y-2 rounded-lg border border-rose-700 bg-rose-950 px-3 py-2 text-rose-100">
                     <p>{createError}</p>
@@ -957,7 +1045,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                       </button>
                       <button
                         type="button"
-                        className="rounded-lg bg-amber-500 px-3 py-1.5 font-semibold text-zinc-950"
+                        className="rounded-lg bg-amber-500 px-3 py-1.5 font-semibold text-bg-base"
                         onClick={() => {
                           const price = Number(createPrice.replace(',', '.'));
                           const stock = Number(createStock.replace(',', '.'));
@@ -994,27 +1082,27 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                     </div>
                   </div>
                 )}
-                <button type="submit" className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white">Salvar</button>
+                <button type="submit" className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-text-primary">Salvar</button>
               </form>
             )}
-            <button type="button" onClick={() => setLookupOpen(false)} className="mt-4 text-xs text-zinc-400 underline">Fechar</button>
+            <button type="button" onClick={() => setLookupOpen(false)} className="mt-4 text-xs text-text-muted underline">Fechar</button>
           </div>
         </div>
       )}
 
       {draftFor && (
         <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-xl border border-zinc-700 bg-zinc-950 p-5">
-            <h2 className="text-sm font-bold text-white">Duplicar não cria SKU no ERP</h2>
-            <p className="mt-2 text-xs text-zinc-400">Informe um SKU novo. Se ele já existir, o HUB abre o produto existente.</p>
+          <div className="w-full max-w-md rounded-xl border border-border-color bg-bg-base p-5">
+            <h2 className="text-sm font-bold text-text-primary">Duplicar não cria SKU no ERP</h2>
+            <p className="mt-2 text-xs text-text-muted">Informe um SKU novo. Se ele já existir, o HUB abre o produto existente.</p>
             <input
               value={draftSku}
               onChange={(event) => setDraftSku(event.target.value)}
-              className="mt-3 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-white"
+              className="mt-3 w-full rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-xs text-text-primary"
             />
             <button
               type="button"
-              className="mt-3 rounded-lg border border-zinc-600 px-3 py-1.5 text-xs text-white"
+              className="mt-3 rounded-lg border border-border-color px-3 py-1.5 text-xs text-text-primary"
               onClick={() => {
                 void apiFetch<{ found: boolean; product?: { bling_id: string } }>(
                   `/api/catalog/lookup?sku=${encodeURIComponent(draftSku.trim())}`
@@ -1029,8 +1117,8 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
             >
               Conferir SKU
             </button>
-            {draftResult && <p className="mt-3 text-xs text-zinc-200">{draftResult}</p>}
-            <button type="button" onClick={() => setDraftFor(null)} className="mt-4 text-xs text-zinc-400 underline">Fechar</button>
+            {draftResult && <p className="mt-3 text-xs text-text-primary">{draftResult}</p>}
+            <button type="button" onClick={() => setDraftFor(null)} className="mt-4 text-xs text-text-muted underline">Fechar</button>
           </div>
         </div>
       )}

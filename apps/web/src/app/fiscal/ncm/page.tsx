@@ -109,16 +109,16 @@ export default function FiscalNcmPage() {
           </span>
         );
       default:
-        return <span className="rounded-full border border-zinc-700 bg-zinc-800 px-2.5 py-0.5 text-xs text-zinc-300">{status}</span>;
+        return <span className="rounded-full border border-border-color bg-bg-surface px-2.5 py-0.5 text-xs text-text-muted">{status}</span>;
     }
   };
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
-      <header className="flex flex-col justify-between gap-4 border-b border-zinc-800 pb-6 sm:flex-row sm:items-center">
+      <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-6 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-white">Classificação fiscal (NCM)</h1>
-          <p className="mt-1 text-sm text-zinc-400">
+          <h1 className="text-2xl font-bold text-text-primary">Classificação fiscal (NCM)</h1>
+          <p className="mt-1 text-sm text-text-muted">
             Cada NCM sugerido exige duas confirmações por Revisores Fiscais distintos, cada uma com nota obrigatória de consulta à TIPI. Enquanto isso, a publicação de conteúdo fica bloqueada.
           </p>
         </div>
@@ -151,14 +151,14 @@ export default function FiscalNcmPage() {
           }`}
         >
           <span>{feedback.text}</span>
-          <button type="button" onClick={() => setFeedback(null)} className="hover:text-white">Fechar</button>
+          <button type="button" onClick={() => setFeedback(null)} className="hover:text-text-primary">Fechar</button>
         </div>
       )}
 
       {loadError && (
         <div role="alert" className="mt-6 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">{loadError}</div>
       )}
-      {loading && items.length === 0 && <p className="mt-6 text-sm text-zinc-400" role="status">Carregando sugestões de NCM...</p>}
+      {loading && items.length === 0 && <p className="mt-6 text-sm text-text-muted" role="status">Carregando sugestões de NCM...</p>}
       {!loading && !loadError && items.length === 0 && (
         <div className="mt-6 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-200">
           <CheckCircle2 className="h-5 w-5 text-emerald-400" />
@@ -167,11 +167,11 @@ export default function FiscalNcmPage() {
       )}
 
       {items.length > 0 && (
-        <section className="mt-6 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/50">
+        <section className="mt-6 overflow-hidden rounded-xl border border-border-color bg-bg-surface/50">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <caption className="sr-only">Sugestões de NCM e estado da dupla confirmação</caption>
-              <thead className="border-b border-zinc-800 bg-zinc-900/90 text-xs uppercase tracking-wider text-zinc-400">
+              <thead className="border-b border-border-color bg-bg-surface/90 text-xs uppercase tracking-wider text-text-muted">
                 <tr>
                   <th scope="col" className="px-4 py-3.5">SKU / Produto</th>
                   <th scope="col" className="px-4 py-3.5">NCM atual → proposto</th>
@@ -182,27 +182,27 @@ export default function FiscalNcmPage() {
                   <th scope="col" className="px-4 py-3.5 text-right">Ação</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/80">
+              <tbody className="divide-y divide-border-color/80">
                 {items.map((item) => {
                   const pending = item.status === 'pending_first' || item.status === 'pending_second';
                   const isOwnFirstReview = item.firstReviewer?.id === currentUser.id;
                   return (
-                    <tr key={item.id} className="align-top hover:bg-zinc-900/80">
+                    <tr key={item.id} className="align-top hover:bg-bg-surface/80">
                       <td className="px-4 py-4">
                         <div className="font-mono text-xs font-semibold text-emerald-400">{item.sku || '(Sem SKU)'}</div>
                         {item.blingId ? (
-                          <Link href={`/catalogo/${item.blingId}`} className="mt-0.5 block text-xs text-zinc-300 hover:underline">
+                          <Link href={`/catalogo/${item.blingId}`} className="mt-0.5 block text-xs text-text-muted hover:underline">
                             {item.productName ?? `Produto #${item.blingId}`}
                           </Link>
                         ) : null}
                       </td>
                       <td className="px-4 py-4 font-mono text-xs">
-                        <span className="text-zinc-400">{formatNcm(item.currentNcm)}</span>
-                        <span className="mx-1 text-zinc-500">→</span>
-                        <span className="font-bold text-white">{formatNcm(item.proposedNcm)}</span>
+                        <span className="text-text-muted">{formatNcm(item.currentNcm)}</span>
+                        <span className="mx-1 text-text-muted">→</span>
+                        <span className="font-bold text-text-primary">{formatNcm(item.proposedNcm)}</span>
                       </td>
                       <td className="px-4 py-4">
-                        <span className="rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
+                        <span className="rounded border border-border-color bg-bg-surface px-2 py-0.5 text-xs text-text-muted">
                           {item.sourcePlatform === 'mercadolivre' ? 'Mercado Livre' : 'Nuvemshop'}
                         </span>
                       </td>
@@ -210,7 +210,7 @@ export default function FiscalNcmPage() {
                         {item.firstReviewer ? (
                           <span className="text-emerald-300">{item.firstReviewer.name}</span>
                         ) : (
-                          <span className="text-zinc-500">Pendente</span>
+                          <span className="text-text-muted">Pendente</span>
                         )}
                       </td>
                       <td className="px-4 py-4 text-xs">
@@ -222,7 +222,7 @@ export default function FiscalNcmPage() {
                             <span>Aguardando um segundo aprovador distinto</span>
                           </div>
                         ) : (
-                          <span className="text-zinc-500">Bloqueado até a 1ª revisão</span>
+                          <span className="text-text-muted">Bloqueado até a 1ª revisão</span>
                         )}
                       </td>
                       <td className="px-4 py-4">{statusBadge(item.status)}</td>
@@ -239,7 +239,7 @@ export default function FiscalNcmPage() {
                                 placeholder="Nota de consulta à TIPI (obrigatória)"
                                 value={notes[item.id] ?? ''}
                                 onChange={(e) => setNotes((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                className="w-56 rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                                className="w-56 rounded-md border border-border-color bg-bg-base px-2 py-1 text-xs text-text-primary focus:border-emerald-500 focus:outline-none"
                               />
                               <button
                                 type="button"
@@ -255,7 +255,7 @@ export default function FiscalNcmPage() {
                         ) : item.status === 'approved' ? (
                           <span className="text-xs font-semibold text-emerald-400">Auditado em ncm_audit_log</span>
                         ) : (
-                          <span className="text-xs text-zinc-500">Somente leitura</span>
+                          <span className="text-xs text-text-muted">Somente leitura</span>
                         )}
                       </td>
                     </tr>

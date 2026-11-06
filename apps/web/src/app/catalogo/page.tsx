@@ -5,7 +5,7 @@ import { CatalogScreen } from '../../components/catalog-screen';
 
 export default function CatalogoPage() {
   return (
-    <Suspense fallback={<main className="px-6 py-8 text-sm text-zinc-300">Lendo o catálogo...</main>}>
+    <Suspense fallback={<main className="px-6 py-8 text-sm text-text-muted">Lendo o catálogo...</main>}>
       <CatalogScreen />
     </Suspense>
   );

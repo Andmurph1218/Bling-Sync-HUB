@@ -132,12 +132,12 @@ export default function FiscalEanPage() {
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
-      <header className="flex flex-col justify-between gap-4 border-b border-zinc-800 pb-6 sm:flex-row sm:items-center">
+      <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-6 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-white">
+          <h1 className="text-2xl font-bold text-text-primary">
             Código de barras (EAN)
           </h1>
-          <p className="mt-1 text-sm text-zinc-400">
+          <p className="mt-1 text-sm text-text-muted">
             EAN vindo dos marketplaces permanece como sugestão até aprovação humana. O HUB nunca preenche o Bling automaticamente.
           </p>
         </div>
@@ -176,7 +176,7 @@ export default function FiscalEanPage() {
           }`}
         >
           <span>{feedback.text}</span>
-          <button type="button" onClick={() => setFeedback(null)} className="hover:text-white">
+          <button type="button" onClick={() => setFeedback(null)} className="hover:text-text-primary">
             Fechar
           </button>
         </div>
@@ -188,7 +188,7 @@ export default function FiscalEanPage() {
         </div>
       )}
       {loading && items.length === 0 && (
-        <p className="mt-6 text-sm text-zinc-400" role="status">Carregando propostas de EAN...</p>
+        <p className="mt-6 text-sm text-text-muted" role="status">Carregando propostas de EAN...</p>
       )}
       {!loading && !loadError && items.length === 0 && (
         <div className="mt-6 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-200">
@@ -201,11 +201,11 @@ export default function FiscalEanPage() {
       )}
 
       {items.length > 0 && (
-        <section className="mt-6 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/50">
+        <section className="mt-6 overflow-hidden rounded-xl border border-border-color bg-bg-surface/50">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <caption className="sr-only">Propostas de EAN aguardando revisão fiscal</caption>
-              <thead className="border-b border-zinc-800 bg-zinc-900/90 text-xs uppercase tracking-wider text-zinc-400">
+              <thead className="border-b border-border-color bg-bg-surface/90 text-xs uppercase tracking-wider text-text-muted">
                 <tr>
                   <th scope="col" className="px-4 py-3.5">SKU / Produto</th>
                   <th scope="col" className="px-4 py-3.5">EAN atual (Bling)</th>
@@ -215,31 +215,31 @@ export default function FiscalEanPage() {
                   <th scope="col" className="px-4 py-3.5 text-right">Ações</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/80">
+              <tbody className="divide-y divide-border-color/80">
                 {items.map((item) => {
                   const badge = gs1Badge(item);
                   return (
-                    <tr key={item.id} className="hover:bg-zinc-900/80">
+                    <tr key={item.id} className="hover:bg-bg-surface/80">
                       <td className="px-4 py-4">
                         <div className="font-mono text-xs font-semibold text-emerald-400">{item.variantSku || '(Sem SKU)'}</div>
                         {item.blingId ? (
-                          <Link href={`/catalogo/${item.blingId}`} className="mt-0.5 block text-xs text-zinc-200 hover:underline">
+                          <Link href={`/catalogo/${item.blingId}`} className="mt-0.5 block text-xs text-text-primary hover:underline">
                             {item.productName ?? `Produto #${item.blingId}`}
                           </Link>
                         ) : (
-                          <span className="text-xs text-zinc-400">Produto não localizado</span>
+                          <span className="text-xs text-text-muted">Produto não localizado</span>
                         )}
                       </td>
-                      <td className="px-4 py-4 font-mono text-xs text-zinc-300">{item.currentEan || 'Ausente'}</td>
-                      <td className="px-4 py-4 font-mono text-xs font-bold text-white">{item.proposedEan}</td>
+                      <td className="px-4 py-4 font-mono text-xs text-text-muted">{item.currentEan || 'Ausente'}</td>
+                      <td className="px-4 py-4 font-mono text-xs font-bold text-text-primary">{item.proposedEan}</td>
                       <td className="px-4 py-4">
                         <span className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold ${badge.className}`}>
                           {badge.label}
                         </span>
-                        <div className="mt-1 text-[11px] text-zinc-400">{badge.detail}</div>
+                        <div className="mt-1 text-[11px] text-text-muted">{badge.detail}</div>
                       </td>
                       <td className="px-4 py-4">
-                        <span className="rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
+                        <span className="rounded border border-border-color bg-bg-surface px-2 py-0.5 text-xs text-text-muted">
                           {item.sourcePlatform === 'mercadolivre' ? 'Mercado Livre' : 'Nuvemshop'}
                         </span>
                       </td>

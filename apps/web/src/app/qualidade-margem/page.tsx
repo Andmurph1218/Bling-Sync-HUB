@@ -64,11 +64,11 @@ export default function QualidadeMargemPage() {
       {loadError && (
         <div role="alert" className="mb-6 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">{loadError}</div>
       )}
-      <header className="flex flex-col justify-between gap-4 border-b border-zinc-800 pb-6 sm:flex-row sm:items-center">
+      <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-6 sm:flex-row sm:items-center">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <TrendingUp className="h-6 w-6 text-emerald-400" />
-            <h1 className="text-2xl font-bold text-white">
+            <h1 className="text-2xl font-bold text-text-primary">
               Qualidade do cadastro
             </h1>
             <span
@@ -81,7 +81,7 @@ export default function QualidadeMargemPage() {
               {liveFromDb ? 'Dados lidos do banco' : 'Sem leitura do banco'}
             </span>
           </div>
-          <p className="mt-1 text-sm text-zinc-400">
+          <p className="mt-1 text-sm text-text-muted">
             Monitora preço contra custo cadastrado no Bling, explica as notas de prontidão e apresenta os 10 Indicadores Administrativos formais.
           </p>
         </div>
@@ -92,7 +92,7 @@ export default function QualidadeMargemPage() {
         <section className="mt-6">
           <div className="mb-3 flex items-center gap-2">
             <BarChart3 className="h-4 w-4 text-emerald-400" />
-            <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-300">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-text-muted">
               Indicadores Administrativos Conciliados (Seção 9 — Fórmula, Fonte e Período)
             </h2>
           </div>
@@ -100,16 +100,16 @@ export default function QualidadeMargemPage() {
             {indicators.map((ind) => (
               <div
                 key={ind.code}
-                className="flex flex-col justify-between rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 text-xs"
+                className="flex flex-col justify-between rounded-xl border border-border-color bg-bg-surface/60 p-4 text-xs"
               >
                 <div>
-                  <span className="font-semibold text-zinc-300">{ind.name}</span>
+                  <span className="font-semibold text-text-muted">{ind.name}</span>
                   <p className="mt-1.5 text-base font-bold text-emerald-400">
                     {ind.value}
                   </p>
-                  <p className="mt-1 text-[11px] text-zinc-400">{ind.definition}</p>
+                  <p className="mt-1 text-[11px] text-text-muted">{ind.definition}</p>
                 </div>
-                <div className="mt-3 border-t border-zinc-800/80 pt-2 text-[10px] text-zinc-500">
+                <div className="mt-3 border-t border-border-color/80 pt-2 text-[10px] text-text-muted">
                   <div>
                     <strong>Fórmula:</strong> {ind.formula}
                   </div>
@@ -124,11 +124,11 @@ export default function QualidadeMargemPage() {
       )}
 
       {/* Regra Formal de Cálculo de Margem (Seção 5.5) */}
-      <section className="mt-8 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 text-xs text-zinc-300">
+      <section className="mt-8 rounded-xl border border-border-color bg-bg-surface/60 p-4 text-xs text-text-muted">
         <div className="flex items-start gap-2.5">
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-sky-400" />
           <div>
-            <strong className="text-white">
+            <strong className="text-text-primary">
               Regra de Transparência Financeira (Margem Bruta Simplificada):
             </strong>{' '}
             Como comissões variáveis e frete por venda pertencem ao fechamento do pedido no canal, este painel apresenta a{' '}
@@ -140,10 +140,10 @@ export default function QualidadeMargemPage() {
       </section>
 
       {/* Tabela de Proteção Comercial */}
-      <section className="mt-6 overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/50">
+      <section className="mt-6 overflow-hidden rounded-xl border border-border-color bg-bg-surface/50">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-zinc-800 bg-zinc-900/90 text-xs uppercase tracking-wider text-zinc-400">
+            <thead className="border-b border-border-color bg-bg-surface/90 text-xs uppercase tracking-wider text-text-muted">
               <tr>
                 <th className="px-4 py-3.5">SKU / Produto (Bling)</th>
                 <th className="px-4 py-3.5">Preço Venda</th>
@@ -153,30 +153,30 @@ export default function QualidadeMargemPage() {
                 <th className="px-4 py-3.5">Prontidão (Bling / ML / NS)</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800/80">
+            <tbody className="divide-y divide-border-color/80">
               {items.map((row) => (
                 <tr
                   key={row.blingId}
                   className={
                     row.belowCost
                       ? 'bg-rose-950/20 hover:bg-rose-950/30'
-                      : 'hover:bg-zinc-900/80'
+                      : 'hover:bg-bg-surface/80'
                   }
                 >
                   <td className="px-4 py-4">
                     <div className="font-mono text-xs font-semibold text-emerald-400">
                       {row.skuBlank || isBlankSku(row.sku) ? <EmptySkuNotice /> : row.sku}
                     </div>
-                    <div className="mt-0.5 text-xs text-white">
+                    <div className="mt-0.5 text-xs text-text-primary">
                       {row.productName}
                     </div>
                   </td>
-                  <td className="px-4 py-4 font-mono text-xs font-bold text-white">
+                  <td className="px-4 py-4 font-mono text-xs font-bold text-text-primary">
                     R$ {row.salePrice.toFixed(2)}
                   </td>
                   <td className="px-4 py-4 font-mono text-xs">
                     {row.costPrice !== null ? (
-                      <span className="text-zinc-200">
+                      <span className="text-text-primary">
                         R$ {row.costPrice.toFixed(2)}
                       </span>
                     ) : (
@@ -187,7 +187,7 @@ export default function QualidadeMargemPage() {
                   </td>
                   <td className="px-4 py-4 text-xs">
                     {row.grossMarginPct === null ? (
-                      <span className="text-zinc-400">
+                      <span className="text-text-muted">
                         Cadastrar custo no Bling para calcular
                       </span>
                     ) : row.belowCost ? (
@@ -202,11 +202,11 @@ export default function QualidadeMargemPage() {
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-4 font-mono text-xs text-zinc-200">
+                  <td className="px-4 py-4 font-mono text-xs text-text-primary">
                     {row.stockSeller !== null ? `${row.stockSeller} un.` : '—'}
                   </td>
                   <td className="px-4 py-4 text-xs">
-                    <span className="text-zinc-300">
+                    <span className="text-text-muted">
                       Bling: <strong>{row.scoreBling}</strong> · ML:{' '}
                       <strong className={row.scoreMl >= 50 ? 'text-emerald-400' : 'text-amber-300'}>
                         {row.scoreMl}

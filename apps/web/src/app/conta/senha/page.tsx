@@ -41,7 +41,7 @@ export default function ChangePasswordPage() {
     <main className="mx-auto flex min-h-[70vh] max-w-md items-center px-6 py-10">
       <form
         onSubmit={(e) => void handleSubmit(e)}
-        className="w-full space-y-5 rounded-xl border border-zinc-800 bg-zinc-900/70 p-7"
+        className="w-full space-y-5 rounded-xl border border-border-color bg-bg-surface/70 p-7"
         aria-labelledby="change-password-title"
       >
         <div className="flex items-center gap-3">
@@ -49,10 +49,10 @@ export default function ChangePasswordPage() {
             <KeyRound className="h-5 w-5" />
           </div>
           <div>
-            <h1 id="change-password-title" className="text-lg font-bold text-white">
+            <h1 id="change-password-title" className="text-lg font-bold text-text-primary">
               Troque sua senha
             </h1>
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-text-muted">
               A senha inicial vale só para este primeiro acesso. O restante do HUB fica bloqueado até a troca.
             </p>
           </div>
@@ -65,7 +65,7 @@ export default function ChangePasswordPage() {
           </div>
         )}
 
-        <label className="block space-y-1.5 text-xs font-medium text-zinc-300">
+        <label className="block space-y-1.5 text-xs font-medium text-text-muted">
           Senha atual
           <input
             type="password"
@@ -73,11 +73,11 @@ export default function ChangePasswordPage() {
             required
             value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)}
-            className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            className="w-full rounded-lg border border-border-color bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-emerald-500 focus:outline-none"
           />
         </label>
 
-        <label className="block space-y-1.5 text-xs font-medium text-zinc-300">
+        <label className="block space-y-1.5 text-xs font-medium text-text-muted">
           Nova senha
           <input
             type="password"
@@ -86,11 +86,11 @@ export default function ChangePasswordPage() {
             minLength={8}
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
-            className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            className="w-full rounded-lg border border-border-color bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-emerald-500 focus:outline-none"
           />
         </label>
 
-        <label className="block space-y-1.5 text-xs font-medium text-zinc-300">
+        <label className="block space-y-1.5 text-xs font-medium text-text-muted">
           Confirmar nova senha
           <input
             type="password"
@@ -99,14 +99,14 @@ export default function ChangePasswordPage() {
             minLength={8}
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
-            className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:outline-none"
+            className="w-full rounded-lg border border-border-color bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-emerald-500 focus:outline-none"
           />
         </label>
 
         <button
           type="submit"
           disabled={submitting}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-60"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-emerald-500 disabled:opacity-60"
         >
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
           Salvar senha

@@ -28,15 +28,15 @@ const FILTERS: Array<{ id: CategoryFilter; label: string }> = [
 ];
 
 const MARK: Record<string, string> = {
-  mercadolivre: 'bg-amber-400 text-zinc-950',
-  nuvemshop: 'bg-sky-600 text-white',
-  shopee: 'bg-orange-500 text-white',
-  amazon: 'bg-zinc-800 text-white',
-  tiktok: 'bg-zinc-900 text-white',
-  bling: 'bg-emerald-600 text-white',
-  omie: 'bg-blue-700 text-white',
-  correios: 'bg-yellow-500 text-zinc-950',
-  melhorenvio: 'bg-zinc-700 text-white',
+  mercadolivre: 'bg-amber-400 text-bg-base',
+  nuvemshop: 'bg-sky-600 text-text-primary',
+  shopee: 'bg-orange-500 text-text-primary',
+  amazon: 'bg-bg-surface text-text-primary',
+  tiktok: 'bg-bg-surface text-text-primary',
+  bling: 'bg-emerald-600 text-text-primary',
+  omie: 'bg-blue-700 text-text-primary',
+  correios: 'bg-yellow-500 text-bg-base',
+  melhorenvio: 'bg-bg-surface text-text-primary',
 };
 
 export default function AdminIntegrationsPage() {
@@ -66,7 +66,7 @@ export default function AdminIntegrationsPage() {
   }, [isAdmin]);
 
   if (!isAdmin) {
-    return <main className="px-6 py-8 text-sm text-zinc-300">Acesso restrito ao administrador.</main>;
+    return <main className="px-6 py-8 text-sm text-text-muted">Acesso restrito ao administrador.</main>;
   }
 
   const visible = apps.filter((app) => filter === 'todos' || app.category === filter);
@@ -119,10 +119,10 @@ export default function AdminIntegrationsPage() {
   };
 
   return (
-    <main className="min-h-full bg-[#f4f5f7] px-6 py-8 text-zinc-900">
+    <main className="min-h-full bg-bg-base px-6 py-8 text-text-primary">
       <div className="mx-auto max-w-6xl">
         <h1 className="text-2xl font-bold">Loja de integrações</h1>
-        <p className="mt-1 text-sm text-zinc-500">Aplicativos de ERP, canais de venda e logística. Só o administrador configura.</p>
+        <p className="mt-1 text-sm text-text-muted">Aplicativos de ERP, canais de venda e logística. Só o administrador configura.</p>
         {error && <p className="mt-4 text-sm text-rose-700" role="alert">{error}</p>}
         {notice && <p className="mt-4 text-sm text-emerald-800" role="status">{notice}</p>}
         <div className="mt-6 grid gap-6 md:grid-cols-[220px_1fr]">
@@ -138,11 +138,11 @@ export default function AdminIntegrationsPage() {
                       type="button"
                       onClick={() => setFilter(item.id)}
                       className={`flex w-full items-center justify-between border-l-2 px-3 py-2 text-left text-sm ${
-                        selected ? 'border-emerald-600 bg-emerald-50 font-semibold text-emerald-800' : 'border-transparent text-zinc-600 hover:bg-white'
+                        selected ? 'border-emerald-600 bg-emerald-50 font-semibold text-emerald-800' : 'border-transparent text-text-muted hover:bg-bg-surface'
                       }`}
                     >
                       <span>{item.label}</span>
-                      <span className="text-zinc-400">{count}</span>
+                      <span className="text-text-muted">{count}</span>
                     </button>
                   </li>
                 );
@@ -154,27 +154,27 @@ export default function AdminIntegrationsPage() {
               const soon = !app.isAvailable;
               const healthy = app.hasCredentials && app.tokenValid;
               return (
-                <article key={app.id} className={`flex min-h-[180px] flex-col rounded-xl border bg-white p-5 shadow-sm ${soon ? 'border-zinc-200 opacity-80' : 'border-zinc-200'}`}>
+                <article key={app.id} className={`flex min-h-[180px] flex-col rounded-xl border bg-bg-surface p-5 shadow-sm ${soon ? 'border-border-color opacity-80' : 'border-border-color'}`}>
                   <div className="flex items-start gap-3">
-                    <span className={`flex h-10 w-10 items-center justify-center rounded-lg text-xs font-bold ${MARK[app.slug] ?? 'bg-zinc-200'}`}>
+                    <span className={`flex h-10 w-10 items-center justify-center rounded-lg text-xs font-bold ${MARK[app.slug] ?? 'bg-bg-surface'}`}>
                       {app.name.slice(0, 2).toUpperCase()}
                     </span>
                     <div>
                       <h3 className="font-semibold">{app.name}</h3>
-                      <p className="text-xs text-zinc-500">{app.category === 'Marketplace' ? 'Canal de venda' : app.category}</p>
+                      <p className="text-xs text-text-muted">{app.category === 'Marketplace' ? 'Canal de venda' : app.category}</p>
                     </div>
-                    <span className={`ml-auto mt-1 h-2.5 w-2.5 rounded-full ${soon ? 'bg-zinc-300' : healthy ? 'bg-emerald-500' : app.hasCredentials ? 'bg-amber-400' : 'bg-zinc-300'}`} title={healthy ? 'Token válido' : app.hasCredentials ? 'Token expirado' : 'Sem credenciais'} />
+                    <span className={`ml-auto mt-1 h-2.5 w-2.5 rounded-full ${soon ? 'bg-text-muted' : healthy ? 'bg-emerald-500' : app.hasCredentials ? 'bg-amber-400' : 'bg-text-muted'}`} title={healthy ? 'Token válido' : app.hasCredentials ? 'Token expirado' : 'Sem credenciais'} />
                   </div>
-                  <p className="mt-3 text-xs text-zinc-500">
+                  <p className="mt-3 text-xs text-text-muted">
                     {soon ? 'Em breve' : healthy ? 'Credenciais salvas e token válido' : app.hasCredentials ? 'Credenciais salvas. Token expirado.' : 'Ainda sem credenciais'}
                   </p>
                   <div className="mt-auto pt-4">
                     {soon ? (
-                      <button type="button" className="rounded-lg bg-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-700" onClick={() => void requestApp(app)}>
+                      <button type="button" className="rounded-lg bg-bg-surface px-3 py-1.5 text-xs font-semibold text-text-muted" onClick={() => void requestApp(app)}>
                         Solicitar Integração
                       </button>
                     ) : (
-                      <button type="button" className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white" onClick={() => void openCredentials(app)}>
+                      <button type="button" className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-text-primary" onClick={() => void openCredentials(app)}>
                         Configurar
                       </button>
                     )}
@@ -187,24 +187,24 @@ export default function AdminIntegrationsPage() {
       </div>
       {credentialsFor && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-md rounded-xl bg-white p-5 text-sm">
+          <div className="w-full max-w-md rounded-xl bg-bg-surface p-5 text-sm">
             <h2 className="font-bold">Credenciais · {credentialsFor.name}</h2>
-            <label className="mt-3 block text-xs text-zinc-600">
+            <label className="mt-3 block text-xs text-text-muted">
               Client ID
-              <input value={clientId} onChange={(event) => setClientId(event.target.value)} className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5" />
+              <input value={clientId} onChange={(event) => setClientId(event.target.value)} className="mt-1 w-full rounded border border-border-color px-2 py-1.5" />
             </label>
-            <label className="mt-2 block text-xs text-zinc-600">
+            <label className="mt-2 block text-xs text-text-muted">
               Client Secret
-              <input type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5" />
+              <input type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} className="mt-1 w-full rounded border border-border-color px-2 py-1.5" />
             </label>
-            <label className="mt-2 block text-xs text-zinc-600">
+            <label className="mt-2 block text-xs text-text-muted">
               Segredo do webhook
-              <input type="password" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} className="mt-1 w-full rounded border border-zinc-300 px-2 py-1.5" />
+              <input type="password" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} className="mt-1 w-full rounded border border-border-color px-2 py-1.5" />
             </label>
-            <p className="mt-2 break-all font-mono text-[11px] text-zinc-500">{callbackUrl || 'O callback aparece depois de salvar.'}</p>
+            <p className="mt-2 break-all font-mono text-[11px] text-text-muted">{callbackUrl || 'O callback aparece depois de salvar.'}</p>
             <div className="mt-4 flex gap-2">
-              <button type="button" className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white" onClick={() => void saveCredentials()}>Salvar</button>
-              <button type="button" className="text-xs text-zinc-500 underline" onClick={() => setCredentialsFor(null)}>Fechar</button>
+              <button type="button" className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-text-primary" onClick={() => void saveCredentials()}>Salvar</button>
+              <button type="button" className="text-xs text-text-muted underline" onClick={() => setCredentialsFor(null)}>Fechar</button>
             </div>
           </div>
         </div>

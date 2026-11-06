@@ -39,12 +39,12 @@ const COPY: Record<string, string> = {
 };
 
 const MARK: Record<string, string> = {
-  mercadolivre: 'bg-amber-400 text-zinc-950',
-  nuvemshop: 'bg-sky-600 text-white',
-  shopee: 'bg-orange-500 text-white',
-  amazon: 'bg-zinc-800 text-white',
-  tiktok: 'bg-zinc-900 text-white',
-  bling: 'bg-emerald-600 text-white',
+  mercadolivre: 'bg-amber-400 text-bg-base',
+  nuvemshop: 'bg-sky-600 text-text-primary',
+  shopee: 'bg-orange-500 text-text-primary',
+  amazon: 'bg-bg-surface text-text-primary',
+  tiktok: 'bg-bg-surface text-text-primary',
+  bling: 'bg-emerald-600 text-text-primary',
 };
 
 function matchesCategory(app: IntegrationAppCard, category: StoreCategory): boolean {
@@ -137,15 +137,15 @@ export default function IntegracoesPage() {
   });
 
   return (
-    <main className="min-h-full bg-[#f4f5f7] px-6 py-8 text-zinc-900">
+    <main className="min-h-full bg-bg-base px-6 py-8 text-text-primary">
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-wrap items-center gap-3">
-          <div className="inline-flex rounded-full bg-white p-1 shadow-sm">
+          <div className="inline-flex rounded-full bg-bg-surface p-1 shadow-sm">
             <button
               type="button"
               onClick={() => setTab('store')}
               className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ${
-                tab === 'store' ? 'bg-emerald-600 text-white' : 'text-zinc-600'
+                tab === 'store' ? 'bg-emerald-600 text-text-primary' : 'text-text-muted'
               }`}
             >
               <Store className="h-4 w-4" />
@@ -155,7 +155,7 @@ export default function IntegracoesPage() {
               type="button"
               onClick={() => setTab('mine')}
               className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ${
-                tab === 'mine' ? 'bg-emerald-600 text-white' : 'text-zinc-600'
+                tab === 'mine' ? 'bg-emerald-600 text-text-primary' : 'text-text-muted'
               }`}
             >
               <LayoutGrid className="h-4 w-4" />
@@ -164,24 +164,24 @@ export default function IntegracoesPage() {
           </div>
           <label className="relative min-w-[220px] flex-1">
             <span className="sr-only">Pesquisar aplicativos</span>
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Pesquisar aplicativos..."
-              className="w-full rounded-lg border border-zinc-200 bg-white py-2 pl-9 pr-3 text-sm outline-none focus:border-emerald-500"
+              className="w-full rounded-lg border border-border-color bg-bg-surface py-2 pl-9 pr-3 text-sm outline-none focus:border-emerald-500"
             />
           </label>
-          <p className="text-sm text-zinc-500">{visible.length} registros</p>
+          <p className="text-sm text-text-muted">{visible.length} registros</p>
           <Link href="/canais" className="text-sm font-semibold text-emerald-700">
             Canais de venda
           </Link>
         </div>
 
         {data && (
-          <p className="mt-4 rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-600">
+          <p className="mt-4 rounded-lg border border-border-color bg-bg-surface px-4 py-3 text-sm text-text-muted">
             {data.publicWebhooks?.bling
-              ? <>Endereço fixo do Bling: <span className="font-mono text-zinc-900">{data.publicWebhooks.bling}</span></>
+              ? <>Endereço fixo do Bling: <span className="font-mono text-text-primary">{data.publicWebhooks.bling}</span></>
               : 'O endereço público ainda não está definido. Grave PUBLIC_BASE_URL com o seu domínio e reinicie a API.'}
           </p>
         )}
@@ -189,12 +189,12 @@ export default function IntegracoesPage() {
         {loadError && (
           <div role="alert" className="mt-6 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{loadError}</div>
         )}
-        {!data && !loadError && <p className="mt-6 text-sm text-zinc-500" role="status">Carregando integrações...</p>}
+        {!data && !loadError && <p className="mt-6 text-sm text-text-muted" role="status">Carregando integrações...</p>}
 
         {data && (
           <div className="mt-6 grid gap-6 md:grid-cols-[220px_1fr]">
             <nav aria-label="Categorias">
-              <h2 className="px-3 text-lg font-semibold text-zinc-800">Categorias</h2>
+              <h2 className="px-3 text-lg font-semibold text-text-primary">Categorias</h2>
               <ul className="mt-3">
                 {data.categories.map((item) => {
                   const count = pool.filter((app) => matchesCategory(app, item.id)).length;
@@ -207,11 +207,11 @@ export default function IntegracoesPage() {
                         className={`flex w-full items-center justify-between border-l-2 px-3 py-2 text-left text-sm ${
                           selected
                             ? 'border-emerald-600 bg-emerald-50 font-semibold text-emerald-800'
-                            : 'border-transparent text-zinc-600 hover:bg-white'
+                            : 'border-transparent text-text-muted hover:bg-bg-surface'
                         }`}
                       >
                         <span>{item.label}</span>
-                        <span className="text-zinc-400">{count}</span>
+                        <span className="text-text-muted">{count}</span>
                       </button>
                     </li>
                   );
@@ -221,23 +221,23 @@ export default function IntegracoesPage() {
 
             <section className="grid content-start gap-4 sm:grid-cols-2">
               {visible.length === 0 && (
-                <p className="text-sm text-zinc-500">Nenhum aplicativo nesta categoria.</p>
+                <p className="text-sm text-text-muted">Nenhum aplicativo nesta categoria.</p>
               )}
               {visible.map((app) => (
-                <article key={app.id} className="flex min-h-[180px] flex-col rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+                <article key={app.id} className="flex min-h-[180px] flex-col rounded-xl border border-border-color bg-bg-surface p-5 shadow-sm">
                   <div className="flex items-start gap-3">
-                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${MARK[app.id] ?? 'bg-zinc-200 text-zinc-800'}`}>
+                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${MARK[app.id] ?? 'bg-bg-surface text-text-primary'}`}>
                       {app.name.slice(0, 2).toUpperCase()}
                     </span>
                     <div>
-                      <h3 className="font-semibold text-zinc-900">{app.name}</h3>
-                      <p className="text-xs text-zinc-400">{app.category === 'erps' ? 'ERP' : app.category === 'logistics' ? 'Logística' : 'Marketplaces'}</p>
+                      <h3 className="font-semibold text-text-primary">{app.name}</h3>
+                      <p className="text-xs text-text-muted">{app.category === 'erps' ? 'ERP' : app.category === 'logistics' ? 'Logística' : 'Marketplaces'}</p>
                     </div>
                   </div>
-                  <p className="mt-3 line-clamp-3 flex-1 text-sm text-zinc-500">{COPY[app.id] ?? app.reason ?? 'Integração do catálogo.'}</p>
+                  <p className="mt-3 line-clamp-3 flex-1 text-sm text-text-muted">{COPY[app.id] ?? app.reason ?? 'Integração do catálogo.'}</p>
                   {app.reason && <p className="mt-2 text-xs text-amber-700">{app.reason}</p>}
-                  <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 text-sm">
-                    <span className={`inline-flex items-center gap-1.5 font-medium ${app.status === 'attention' ? 'text-amber-600' : app.status === 'installed' ? 'text-emerald-600' : 'text-zinc-400'}`}>
+                  <div className="mt-4 flex items-center justify-between border-t border-border-color pt-3 text-sm">
+                    <span className={`inline-flex items-center gap-1.5 font-medium ${app.status === 'attention' ? 'text-amber-600' : app.status === 'installed' ? 'text-emerald-600' : 'text-text-muted'}`}>
                       {app.status === 'installed' && <Check className="h-4 w-4" />}
                       {app.status === 'attention' && <AlertTriangle className="h-4 w-4" />}
                       {app.statusLabel}
@@ -249,7 +249,7 @@ export default function IntegracoesPage() {
                         </a>
                       )}
                       {isAdmin && (
-                        <button type="button" className="font-semibold text-zinc-700" onClick={() => void openCredentials(app)}>
+                        <button type="button" className="font-semibold text-text-muted" onClick={() => void openCredentials(app)}>
                           Credenciais
                         </button>
                       )}
@@ -263,38 +263,38 @@ export default function IntegracoesPage() {
       </div>
       {credentialsFor && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl">
-            <h2 className="text-lg font-semibold text-zinc-900">Credenciais — {credentialsFor.name}</h2>
-            <p className="mt-1 text-sm text-zinc-500">O segredo fica criptografado no banco. Cole no painel do aplicativo a URL de callback abaixo.</p>
-            <label className="mt-4 block text-sm text-zinc-700">
+          <div className="w-full max-w-lg rounded-xl bg-bg-surface p-5 shadow-xl">
+            <h2 className="text-lg font-semibold text-text-primary">Credenciais — {credentialsFor.name}</h2>
+            <p className="mt-1 text-sm text-text-muted">O segredo fica criptografado no banco. Cole no painel do aplicativo a URL de callback abaixo.</p>
+            <label className="mt-4 block text-sm text-text-muted">
               Client ID
-              <input value={clientId} onChange={(event) => setClientId(event.target.value)} className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" />
+              <input value={clientId} onChange={(event) => setClientId(event.target.value)} className="mt-1 w-full rounded-lg border border-border-color px-3 py-2 text-sm" />
             </label>
-            <label className="mt-3 block text-sm text-zinc-700">
+            <label className="mt-3 block text-sm text-text-muted">
               Client Secret {hasSavedSecret ? '(em branco mantém o atual)' : ''}
-              <input type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" autoComplete="off" />
+              <input type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} className="mt-1 w-full rounded-lg border border-border-color px-3 py-2 text-sm" autoComplete="off" />
             </label>
-            <label className="mt-3 block text-sm text-zinc-700">
+            <label className="mt-3 block text-sm text-text-muted">
               Segredo do webhook
-              <input type="password" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} className="mt-1 w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm" autoComplete="off" />
+              <input type="password" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} className="mt-1 w-full rounded-lg border border-border-color px-3 py-2 text-sm" autoComplete="off" />
             </label>
-            <label className="mt-3 block text-sm text-zinc-700">
+            <label className="mt-3 block text-sm text-text-muted">
               URL de callback
               <div className="mt-1 flex gap-2">
-                <input readOnly value={callbackUrl} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 font-mono text-xs" />
+                <input readOnly value={callbackUrl} className="w-full rounded-lg border border-border-color bg-bg-surface px-3 py-2 font-mono text-xs" />
                 <button
                   type="button"
-                  className="shrink-0 rounded-lg border border-zinc-300 px-3 text-sm font-semibold"
+                  className="shrink-0 rounded-lg border border-border-color px-3 text-sm font-semibold"
                   onClick={() => void navigator.clipboard.writeText(callbackUrl)}
                 >
                   Copiar
                 </button>
               </div>
             </label>
-            {credentialNotice && <p className="mt-3 text-sm text-zinc-600" role="status">{credentialNotice}</p>}
+            {credentialNotice && <p className="mt-3 text-sm text-text-muted" role="status">{credentialNotice}</p>}
             <div className="mt-5 flex justify-end gap-2">
-              <button type="button" className="rounded-lg px-3 py-2 text-sm text-zinc-600" onClick={() => setCredentialsFor(null)}>Fechar</button>
-              <button type="button" className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white" onClick={() => void saveCredentials()}>Salvar</button>
+              <button type="button" className="rounded-lg px-3 py-2 text-sm text-text-muted" onClick={() => setCredentialsFor(null)}>Fechar</button>
+              <button type="button" className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-text-primary" onClick={() => void saveCredentials()}>Salvar</button>
             </div>
           </div>
         </div>

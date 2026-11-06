@@ -22,6 +22,10 @@ O HUB ficou complexo demais para produção. Quem opera logística e estoque pre
 - Plugg.to — [demo](https://youtu.be/239wfkYZD2Q)
 - Moovin HUB — [demo](https://www.youtube.com/watch?v=Yx0fuxKGQE0)
 
+## Estado em 06/11/2026
+
+O painel público está em `https://hub.jhshopping.com.br`. O operador troca tema claro e escuro no cabeçalho. Produto incompleto na lista de envio recebe um aviso com as pendências e o atalho para a ficha, sem o banner verde de texto corrido. O acompanhamento está em [status-implantacao.md](status-implantacao.md).
+
 ## Fora do escopo (alinhado ao plano-mestre)
 
 Pedidos, NF-e, frete, expedição e escrita em estoque Full do Mercado Livre.

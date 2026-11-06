@@ -1,7 +1,7 @@
 # Documentação de Implantação — Bling Sync HUB
 
-Data de referência: **5 de novembro de 2026**  
-Último commit de código no `main`: `e7aac52` (28/10/2026)  
+Data de referência: **6 de novembro de 2026, noite**  
+Estado publicado em `https://hub.jhshopping.com.br`. O detalhe desta noite está na seção 11.  
 Especificação normativa: [plano-mestre.md](plano-mestre.md)  
 Resumo executivo: [descricao.md](descricao.md)  
 Registro de revisão e maturidade: [revisao-plano-mestre.md](revisao-plano-mestre.md)  
@@ -377,7 +377,7 @@ Testes: 17 suítes / 69 testes (`npm test` na raiz), incluindo `p1-catalog.test.
 | Item | Estado | O que ficou |
 |---|---|---|
 | P1.1 Home | **Feito no código** | Seis cards leem `GET /api/catalog/home` e abrem `/catalogo`, `/catalogo?status=ready`, `/completude`, `/vinculos`, `/problemas` e `/publicacoes`. A faixa mostra % pronto, última sync e as lacunas sem SKU, sem categoria e sem imagem. O número do card é o mesmo `counts` da lista |
-| P1.2 Lista | **Feito no código** | `/catalogo` tem filtros, abas com contador, colunas da seção 6.2 e ações Editar, Duplicar, Depósitos e Arquivar. Não há Excluir. Lista de envio, importação e exportação aparecem vazias: a publicação e a planilha ficam no P2. Teste com 1.000 SKUs filtra em menos de 1 s no pg-mem |
+| P1.2 Lista | **Feito no código** | `/catalogo` tem filtros, abas com contador, colunas da seção 6.2 e ações Editar, Duplicar, Depósitos e Arquivar. Não há Excluir. A lista de envio, a importação e a exportação entram no P2. O teste de 1.000 SKUs aceita até 3 s, para não falhar por poucos milissegundos no Windows; no Linux o mesmo filtro continua bem abaixo disso |
 | P1.3 Arquivar | **Feito** | `archived_at` tira o produto de Todos e coloca em Arquivados. Desarquivar devolve. `catalog_status` permanece `active`. Nenhuma chamada ao ERP |
 | P1.4 Ficha | **Feito no código** | Abas Geral, Variações, Imagens, Atributos, Canais e Fiscal. O nome do ERP é texto, não campo editável. Categoria do catálogo é escolhida na aba Geral |
 | P1.5 Completude | **Feito** | Checklist calculado em `evaluateCatalogChecklist`, com frase em português e link Corrigir. A aba Completude usa a mesma conta da home |
@@ -400,7 +400,7 @@ P2.1 em andamento. No Catálogo, o operador marca produtos, vê o JSON de cada u
 
 ## 10. Auditoria de arquitetura — 06/11/2026
 
-Fonte: leitura do código em `apps/api`, `apps/web`, migrations 1–20 e testes. Não houve novo deploy em `hub.jhshopping.com.br`.
+Fonte: leitura do código em `apps/api`, `apps/web`, migrations 1–20 e testes, na manhã de 06/11. O deploy da noite está na seção 11.
 
 ### Resumo executivo
 
@@ -443,13 +443,31 @@ Dívida. Duas rotas de simulação. Duas telas de integrações (`/integracoes` 
 - `apps/api/src/queues/publish-queue.ts`: com a flag desligada, não marcar sucesso se o checklist do canal estiver vermelho. Continuar sem chamar `createListing`.
 - `apps/api/src/__tests__/publish-queue.test.ts`: produto incompleto não pode entrar na `publish_queue` pela rota que a tela usa.
 
-Correção aplicada em 06/11/2026. `send-list` e `publish/batch` usam a mesma validação. O worker, mesmo com a publicação ao vivo desligada, grava falha com os itens do checklist. A Lista de Envio mostra esse texto e o botão Corrigir. O teste cobre o produto incompleto barrado e o produto verde simulado com sucesso.
+Correção aplicada em 06/11/2026. `send-list` e `publish/batch` usam a mesma validação. O worker, mesmo com a publicação ao vivo desligada, grava falha com os itens do checklist. O teste cobre o produto incompleto barrado e o produto verde simulado com sucesso.
+
+Na mesma noite a Lista de Envio deixou o banner verde com o texto corrido. Produto rejeitado no clique permanece no Catálogo e abre um aviso no canto: nome, SKU, pendências em lista e **Corrigir Cadastro**. A fila vazia explica o próximo passo. Um item que falhou na aba aparece em cartão de alerta, com nome e SKU, sem o identificador interno do Bling, e com **Corrigir Pendências**.
 
 ### Próximos passos
 
-1. Fechar o gate do P2.1 na rota da tela e no worker simulado.
-2. Publicar este código no servidor só depois dessa correção, com migration 20 e sem recriar o `.env`.
-3. Reautorizar o Mercado Livre com a chave de criptografia que já está no servidor.
-4. A planilha não grava nome, descrição nem categoria. O + Produto cria o item na API do Bling e salva o ID oficial; se o Bling recusar, o HUB não grava e mostra o motivo.
-5. Manter `ENABLE_LIVE_PUBLISHING` diferente de `true` até o checklist verde ser a única porta da fila.
+1. Reautorizar o Mercado Livre com a chave de criptografia que já está no servidor.
+2. A planilha não grava nome, descrição nem categoria. O + Produto cria o item na API do Bling e salva o ID oficial; se o Bling recusar, o HUB não grava e mostra o motivo.
+3. Manter `ENABLE_LIVE_PUBLISHING` diferente de `true` até o checklist verde ser a única porta da fila.
+4. Continuar a sync do Bling a partir da página que parou depois dos cerca de 10.000 itens.
+5. Validar a interface com quem opera estoque (seção 12 do plano de evolução).
+
+## 11. Estado no ar — 06/11/2026, noite
+
+O HUB público é `https://hub.jhshopping.com.br`, na Droplet `201.79.39.118`. Node 20, PostgreSQL, Redis, Caddy e os serviços `bling-hub-api` e `bling-hub-web` estão ativos. O Caddy entrega o painel na raiz e encaminha `/api`, `/auth`, `/oauth`, `/webhooks` e `/health` para a API.
+
+A atualização usa `deploy/update-hub.sh`. Ela copia o código, roda `npm ci` com as devDependencies, compila API e painel, aplica `npm run migrate:up` e reinicia os serviços. O `.env` de produção não é recriado. `deploy/remote-deploy.sh` apaga esse arquivo e gera senhas novas; não entra numa atualização.
+
+`npm ci` e `npm install` no servidor são o install completo. `typescript` e `tsx` estão em devDependencies porque o build e a migration rodam na própria Droplet. Não usar `--omit=dev`, `--production` nem `NODE_ENV=production` no shell do install. O `NODE_ENV=production` do `.env` vale só para o processo do systemd.
+
+Na noite de 06/11 as migrations 17 a 20 já estavam aplicadas: fila de publicação, credenciais dos canais, vínculos de anúncio e catálogo de integrações. O health da API respondeu com Postgres e Redis ok, e o login do painel abriu.
+
+Os quatro usuários do bootstrap existem, ativos, e ainda exigem troca em `/conta/senha`. A senha de cada um está em `/root/bling-initial-passwords.txt` na Droplet. A senha padrão do repositório não abre sessão em produção.
+
+O painel tem tema claro e escuro (`next-themes`), com o botão no cabeçalho ao lado de Sair. A preferência fica no navegador. O escuro usa o marrom `#312c20`, cards `#494d4b` e título `#e2cb92`. O claro mantém o fundo menta, com texto quase preto, borda oliva e cards em degradê do creme para o verde, com sombra leve.
+
+A última suíte da API conferida nesta data foi de 25 arquivos e 89 testes, antes do tema. O tema é só frontend.
 

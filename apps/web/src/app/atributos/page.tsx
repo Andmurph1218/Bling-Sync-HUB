@@ -92,15 +92,15 @@ export default function AtributosPage() {
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-8">
-      <h1 className="text-2xl font-bold text-white">Atributos</h1>
-      <p className="mt-1 text-sm text-zinc-400">
+      <h1 className="text-2xl font-bold text-text-primary">Atributos</h1>
+      <p className="mt-1 text-sm text-text-muted">
         Mapeie uma vez por categoria do catálogo e canal. Verde só quando todo obrigatório está resolvido.
       </p>
-      {message && <p className="mt-4 text-sm text-zinc-200" role="status">{message}</p>}
+      {message && <p className="mt-4 text-sm text-text-primary" role="status">{message}</p>}
 
-      <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-        <h2 className="text-sm font-semibold text-white">Categorias do catálogo</h2>
-        <ul className="mt-2 space-y-1 text-xs text-zinc-300">
+      <section className="mt-6 rounded-xl border border-border-color bg-bg-surface/50 p-4">
+        <h2 className="text-sm font-semibold text-text-primary">Categorias do catálogo</h2>
+        <ul className="mt-2 space-y-1 text-xs text-text-muted">
           {categories.length === 0 && <li>Nenhuma categoria. Um produto sem categoria aparece em Completude.</li>}
           {categories.map((category) => (
             <li key={category.id}>{category.name}</li>
@@ -111,11 +111,11 @@ export default function AtributosPage() {
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="Nome da categoria"
-            className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-white"
+            className="rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
           />
           <button
             type="button"
-            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
+            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-text-primary"
             onClick={() => {
               void apiFetch('/api/catalog/categories', { method: 'POST', json: { name } })
                 .then(() => {
@@ -130,13 +130,13 @@ export default function AtributosPage() {
         </div>
       </section>
 
-      <section className="mt-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-        <h2 className="text-sm font-semibold text-white">Mapa categoria × canal</h2>
+      <section className="mt-6 rounded-xl border border-border-color bg-bg-surface/50 p-4">
+        <h2 className="text-sm font-semibold text-text-primary">Mapa categoria × canal</h2>
         <div className="mt-3 flex flex-wrap gap-2">
           <select
             value={categoryId}
             onChange={(event) => setCategoryId(event.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-white"
+            className="rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
           >
             <option value="">Categoria</option>
             {categories.map((category) => (
@@ -146,19 +146,19 @@ export default function AtributosPage() {
           <select
             value={platform}
             onChange={(event) => setPlatform(event.target.value as 'mercadolivre' | 'nuvemshop')}
-            className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-white"
+            className="rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
           >
             <option value="mercadolivre">Mercado Livre</option>
             <option value="nuvemshop">Nuvemshop</option>
           </select>
-          <button type="button" onClick={() => void loadSpecs().catch(() => setMessage('Fixture de atributos indisponível.'))} className="rounded-lg border border-zinc-600 px-3 py-1.5 text-xs text-white">
+          <button type="button" onClick={() => void loadSpecs().catch(() => setMessage('Fixture de atributos indisponível.'))} className="rounded-lg border border-border-color px-3 py-1.5 text-xs text-text-primary">
             Ler atributos da categoria do canal
           </button>
         </div>
         <div className="mt-4 space-y-3">
           {draft.map((row, index) => (
-            <div key={row.channelAttributeId} className="grid gap-2 rounded-lg border border-zinc-800 p-3 sm:grid-cols-4">
-              <div className="text-xs text-zinc-200">
+            <div key={row.channelAttributeId} className="grid gap-2 rounded-lg border border-border-color p-3 sm:grid-cols-4">
+              <div className="text-xs text-text-primary">
                 {row.channelAttributeName}
                 {row.required ? ' (obrigatório)' : ' (opcional)'}
               </div>
@@ -168,7 +168,7 @@ export default function AtributosPage() {
                   const mode = event.target.value as DraftAttr['mode'];
                   setDraft((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, mode } : item)));
                 }}
-                className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white"
+                className="rounded border border-border-color bg-bg-base px-2 py-1 text-xs text-text-primary"
               >
                 <option value="fixed">Fixo</option>
                 <option value="dynamic">Dinâmico</option>
@@ -181,7 +181,7 @@ export default function AtributosPage() {
                     setDraft((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, fixedValue: event.target.value } : item)))
                   }
                   placeholder="Valor fixo"
-                  className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white"
+                  className="rounded border border-border-color bg-bg-base px-2 py-1 text-xs text-text-primary"
                 />
               )}
               {row.mode === 'dynamic' && (
@@ -191,13 +191,13 @@ export default function AtributosPage() {
                     setDraft((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, sourceField: event.target.value } : item)))
                   }
                   placeholder="brand, name ou eixo"
-                  className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white"
+                  className="rounded border border-border-color bg-bg-base px-2 py-1 text-xs text-text-primary"
                 />
               )}
             </div>
           ))}
         </div>
-        <button type="button" onClick={() => void save().catch(() => setMessage('Não foi possível salvar o mapa.'))} className="mt-4 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">
+        <button type="button" onClick={() => void save().catch(() => setMessage('Não foi possível salvar o mapa.'))} className="mt-4 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-text-primary">
           Salvar mapa
         </button>
         {green !== null && (
