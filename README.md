@@ -34,6 +34,27 @@ TypeScript estrito, Node.js 20, Express, Next.js, PostgreSQL 16, Redis 7, BullMQ
 
 Premissa de operação: uma conta Bling, um seller Mercado Livre, uma loja Nuvemshop.
 
+## Migrations
+
+As migrations ficam em `apps/api/src/db/migrations` e são TypeScript. O `node-pg-migrate` carrega cada arquivo com `require()`. No Linux o Node recusa essa sintaxe (`SyntaxError: Unexpected token '{'`). O script `npm run migrate:up` executa o binário com `tsx`, que transpila o TypeScript nesse `require`.
+
+No servidor, depois de atualizar o código:
+
+```bash
+git pull
+npm install
+npm run build
+npm run migrate:up
+```
+
+A Droplet compila a API e o painel e aplica as migrations na própria máquina. `typescript` (`tsc`) e `tsx` estão em devDependencies, então o install do servidor é o completo (`npm install` ou `npm ci`). O espaço extra fica na casa de dezenas de megabytes e cabe na Droplet.
+
+O servidor não deve usar `npm install --omit=dev`, `npm ci --omit=dev` nem `npm install --production`. Um shell com `NODE_ENV=production` tem o mesmo efeito: o npm deixa as devDependencies de fora e `tsc` ou `tsx` passam a falhar com comando não encontrado. O `NODE_ENV=production` do `.env` vale para o processo do systemd. O install roda sem essa variável exportada no shell.
+
+`npm run migrate:down` reverte a última migration pelo mesmo loader.
+
+O build da API grava `apps/api/dist/db/migrations/package.json` com `{"type":"commonjs"}`. O `tsc` emite essas migrations como CommonJS, e esse arquivo faz o Node tratá-las assim. Não crie esse arquivo à mão no servidor.
+
 ## Motores
 
 | Motor | Função |

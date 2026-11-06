@@ -4,12 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"require('fs').writeFileSync('dist/db/migrations/package.json', JSON.stringify({type:'commonjs'}))\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "bootstrap": "tsx src/scripts/bootstrap.ts",
-    "migrate:up": "node-pg-migrate up -m src/db/migrations",
-    "migrate:down": "node-pg-migrate down -m src/db/migrations"
+    "migrate:up": "tsx ../../node_modules/node-pg-migrate/bin/node-pg-migrate.js up -m src/db/migrations",
+    "migrate:down": "tsx ../../node_modules/node-pg-migrate/bin/node-pg-migrate.js down -m src/db/migrations"
   },
   "dependencies": {
     "bullmq": "5.12.12",
