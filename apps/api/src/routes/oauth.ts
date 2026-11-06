@@ -5,6 +5,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { query } from '../db/pool.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
 import { sharedBlingRateLimiter } from '../connectors/bling-rate-limiter.js';
+import { getPublicBaseUrl as readPublicBaseUrl } from '../config/public-url.js';
 
 export const oauthRouter = Router();
 const tokenManager = new OAuthTokenManager();
@@ -84,8 +85,7 @@ export async function refreshMlTokenViaHttp(
 function getPublicBaseUrl(): string | null {
   dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
   dotenv.config({ path: path.resolve(process.cwd(), '../../.env'), override: true });
-  const base = (process.env.PUBLIC_BASE_URL ?? '').trim();
-  return base.length > 0 ? base.replace(/\/+$/, '') : null;
+  return readPublicBaseUrl();
 }
 
 /**

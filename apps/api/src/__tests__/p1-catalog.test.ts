@@ -291,4 +291,37 @@ describe('P1 — catálogo no banco', () => {
       clientManual.release();
     }
   });
+
+  it('salvar a capa recalcula a completude na leitura seguinte, sem cache', async () => {
+    const created = await query<{ id: string; bling_id: string }>(
+      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+       VALUES ('p1-cover', 'CAPA-NOVA', 'Produto sem capa', 'P', 'S')
+       RETURNING id, bling_id`
+    );
+    const product = created.rows[0]!;
+    const before = await listCatalog({
+      tab: 'todos',
+      sku: 'CAPA-NOVA',
+      name: '',
+      brand: '',
+      page: 1,
+      pageSize: 1,
+    });
+    expect(before.items[0]?.checklist.items.find((item) => item.code === 'cover')?.ok).toBe(false);
+
+    const saved = await request(app)
+      .post(`/api/catalog/products/${product.id}/cover`)
+      .set('Cookie', cookie)
+      .send({ url: 'https://img.local/capa-nova.jpg' });
+    expect(saved.status).toBe(200);
+    expect(saved.body.recalculatedOnRead).toBe(true);
+    expect(saved.body.checklist.items.find((item: { code: string }) => item.code === 'cover')?.ok).toBe(true);
+
+    const after = await request(app)
+      .get('/api/catalog/products?status=todos&sku=CAPA-NOVA&pageSize=5')
+      .set('Cookie', cookie);
+    const row = after.body.items.find((item: { sku: string }) => item.sku === 'CAPA-NOVA');
+    expect(row.checklist.items.find((item: { code: string; ok: boolean }) => item.code === 'cover')?.ok).toBe(true);
+    expect(row.checklist.percent).toBeGreaterThan(before.items[0]!.checklist.percent);
+  });
 });

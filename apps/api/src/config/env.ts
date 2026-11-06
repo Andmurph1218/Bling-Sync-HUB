@@ -26,6 +26,10 @@ const envSchema = z.object({
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, 'OAUTH_ENCRYPTION_KEY deve conter 64 caracteres hex (32 bytes)')
     .default('0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'),
+  ENABLE_LIVE_PUBLISHING: z
+    .string()
+    .optional()
+    .transform((value) => value === 'true'),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

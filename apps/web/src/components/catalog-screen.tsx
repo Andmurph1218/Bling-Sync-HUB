@@ -39,6 +39,30 @@ interface CatalogPayload {
   counts: Record<CatalogTab, number>;
 }
 
+interface SendListItem {
+  id: string;
+  channel: string;
+  status: string;
+  error_message: string | null;
+  sku: string;
+  name: string | null;
+}
+
+interface PublishPreview {
+  published: false;
+  payload: {
+    title: string | null;
+    category_id: string | null;
+    price: number;
+    currency_id: string;
+    available_quantity: number;
+    seller_custom_field: string;
+    attributes: Array<{ id: string; value_name: string }>;
+  };
+  attributesComplete: boolean;
+  missingAttributes: string[];
+}
+
 interface VariantRow {
   id: string;
   sku: string;
@@ -109,6 +133,13 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
   const [draftFor, setDraftFor] = useState<CatalogItem | null>(null);
   const [draftSku, setDraftSku] = useState('');
   const [draftResult, setDraftResult] = useState<string | null>(null);
+  const [sendItems, setSendItems] = useState<SendListItem[]>([]);
+  const [simulation, setSimulation] = useState<{
+    sku: string;
+    loading: boolean;
+    body: PublishPreview | null;
+    error: string | null;
+  } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -168,6 +199,64 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
     setNotice(archived ? 'Produto arquivado no HUB. O ERP não foi alterado.' : 'Produto voltou para Todos. O ERP não foi alterado.');
     await load();
   };
+
+  const loadSendList = async () => {
+    const payload = await apiFetch<{ items: SendListItem[] }>('/api/catalog/publish-queue');
+    setSendItems(payload.items);
+  };
+
+  const addToSendList = async (ids: string[]) => {
+    if (ids.length === 0) {
+      setNotice('Selecione ao menos um produto.');
+      return;
+    }
+    const result = await apiFetch<{ queued: string[]; skipped: Array<{ reason: string }> }>(
+      '/api/catalog/products/send-list',
+      { method: 'POST', json: { ids, channel: 'mercadolivre' } }
+    );
+    setSelected([]);
+    setView('envio');
+    setNotice(
+      `${result.queued.length} produto(s) na lista de envio. Nenhuma requisição foi feita ao Mercado Livre.${
+        result.skipped.length ? ` ${result.skipped.length} ignorado(s).` : ''
+      }`
+    );
+    await loadSendList();
+  };
+
+  const recalculateSelected = async (ids: string[]) => {
+    if (ids.length === 0) {
+      setNotice('Selecione ao menos um produto.');
+      return;
+    }
+    const result = await apiFetch<{ items: Array<{ id: string; percent: number }> }>(
+      '/api/catalog/products/recalculate-completeness',
+      { method: 'POST', json: { ids } }
+    );
+    setNotice(`Completude recalculada para ${result.items.length} produto(s).`);
+    await load();
+  };
+
+  const simulatePublish = async (item: CatalogItem) => {
+    setSimulation({ sku: item.sku || item.blingId, loading: true, body: null, error: null });
+    try {
+      const body = await apiFetch<PublishPreview>(
+        `/api/catalog/products/${item.id}/simulate-publish?channel=mercadolivre`,
+        { method: 'POST' }
+      );
+      setSimulation({ sku: item.sku || item.blingId, loading: false, body, error: null });
+    } catch {
+      setSimulation({
+        sku: item.sku || item.blingId,
+        loading: false,
+        body: null,
+        error: 'Não foi possível montar o JSON do anúncio.',
+      });
+    }
+  };
+
+  const pageIds = data?.items.map((item) => item.id) ?? [];
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.includes(id));
 
   const counts = data?.counts;
 
@@ -267,8 +356,8 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
               className="mt-3 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs text-white"
             >
               <option value="arquivar">Arquivar</option>
-              <option value="envio">Enviar para lista de envio</option>
-              <option value="exportar">Exportar seleção</option>
+              <option value="envio">Adicionar à Lista de Envio</option>
+              <option value="completude">Recalcular Completude</option>
             </select>
             <button
               type="button"
@@ -278,11 +367,11 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                   void archiveIds(selected, true).catch(() => setNotice('Não foi possível arquivar a seleção.'));
                   return;
                 }
-                setNotice(
-                  bulkAction === 'envio'
-                    ? 'A lista de envio com publicação real entra no P2. Nada foi enviado ao canal.'
-                    : 'A exportação de planilha entra no P2. Nenhum arquivo foi gerado.'
-                );
+                if (bulkAction === 'envio') {
+                  void addToSendList(selected).catch(() => setNotice('Não foi possível adicionar à lista de envio.'));
+                  return;
+                }
+                void recalculateSelected(selected).catch(() => setNotice('Não foi possível recalcular a completude.'));
               }}
             >
               Executar
@@ -310,7 +399,10 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
               <button
                 key={id}
                 type="button"
-                onClick={() => setView(id)}
+                onClick={() => {
+                  setView(id);
+                  if (id === 'envio') void loadSendList().catch(() => setNotice('Não foi possível ler a lista de envio.'));
+                }}
                 className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
                   view === id
                     ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200'
@@ -322,9 +414,26 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
             ))}
           </div>
 
-          {view !== 'produtos' && (
+          {view === 'envio' && (
+            <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/50 p-4 text-sm text-zinc-300" role="status">
+              {sendItems.length === 0 && 'Nenhum produto na lista de envio. A publicação real continua desligada.'}
+              {sendItems.length > 0 && (
+                <ul className="space-y-2">
+                  {sendItems.map((item) => (
+                    <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="font-mono text-emerald-300">{item.sku}</span>
+                      <span>{item.name || 'Sem nome'}</span>
+                      <span>{item.channel === 'mercadolivre' ? 'Mercado Livre' : item.channel}</span>
+                      <span>{item.status}</span>
+                      <span className="text-zinc-400">{item.error_message || 'aguardando'}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+          {view !== 'produtos' && view !== 'envio' && (
             <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 text-sm text-zinc-300" role="status">
-              {view === 'envio' && 'Nenhum envio nesta lista. A publicação em lote entra no P2 e não grava anúncio no canal.'}
               {view === 'importacoes' && 'Nenhuma importação registrada. O HUB não inventa linhas de planilha.'}
               {view === 'exportacoes' && 'Nenhuma exportação gerada. O download de planilha entra no P2.'}
             </div>
@@ -358,10 +467,37 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
               </div>
 
               <div className="mt-4 overflow-hidden rounded-xl border border-zinc-800">
+                {selected.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-100">
+                    <span>{selected.length} selecionado(s)</span>
+                    <button type="button" className="rounded-lg bg-emerald-600 px-2.5 py-1 font-semibold text-white" onClick={() => void addToSendList(selected).catch(() => setNotice('Não foi possível adicionar à lista de envio.'))}>
+                      Adicionar à Lista de Envio
+                    </button>
+                    <button type="button" className="rounded-lg border border-zinc-600 px-2.5 py-1" onClick={() => void recalculateSelected(selected).catch(() => setNotice('Não foi possível recalcular a completude.'))}>
+                      Recalcular Completude
+                    </button>
+                    <button type="button" className="text-zinc-400 underline" onClick={() => setSelected([])}>
+                      Limpar
+                    </button>
+                  </div>
+                )}
                 <table className="w-full text-left text-xs">
                   <thead className="bg-zinc-900 text-[11px] uppercase tracking-wider text-zinc-400">
                     <tr>
-                      <th className="px-3 py-3"> </th>
+                      <th className="px-3 py-3">
+                        <input
+                          type="checkbox"
+                          checked={allPageSelected}
+                          onChange={(event) => {
+                            setSelected((prev) =>
+                              event.target.checked
+                                ? Array.from(new Set([...prev, ...pageIds]))
+                                : prev.filter((id) => !pageIds.includes(id))
+                            );
+                          }}
+                          aria-label="Selecionar os produtos desta página"
+                        />
+                      </th>
                       <th className="px-3 py-3">Imagem</th>
                       <th className="px-3 py-3">Nome</th>
                       <th className="px-3 py-3">Tipo</th>
@@ -460,6 +596,13 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                               >
                                 <Archive className="h-3.5 w-3.5" />
                               </button>
+                              <button
+                                type="button"
+                                className="rounded border border-sky-700 px-1.5 py-1 text-[10px] font-semibold text-sky-200"
+                                onClick={() => void simulatePublish(item)}
+                              >
+                                Simular envio
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -506,6 +649,32 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
           )}
         </section>
       </div>
+
+      {simulation && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="simulate-title">
+          <div className="max-h-[80vh] w-full max-w-2xl overflow-auto rounded-xl border border-zinc-700 bg-zinc-950 p-5">
+            <h2 id="simulate-title" className="text-sm font-bold text-white">Simulação de envio — Mercado Livre</h2>
+            <p className="mt-1 text-xs text-zinc-400">SKU {simulation.sku}. Nada foi publicado no marketplace.</p>
+            {simulation.loading && <p className="mt-4 text-sm text-zinc-300">Montando o JSON...</p>}
+            {simulation.error && <p className="mt-4 text-sm text-rose-200" role="alert">{simulation.error}</p>}
+            {simulation.body && (
+              <>
+                {!simulation.body.attributesComplete && (
+                  <p className="mt-3 text-xs text-amber-200">
+                    Atributos incompletos{simulation.body.missingAttributes.length ? `: ${simulation.body.missingAttributes.join(', ')}` : ''}.
+                  </p>
+                )}
+                <pre className="mt-3 overflow-auto rounded-lg bg-zinc-900 p-3 text-[11px] leading-relaxed text-emerald-100">
+                  {JSON.stringify(simulation.body.payload, null, 2)}
+                </pre>
+              </>
+            )}
+            <button type="button" className="mt-4 rounded-lg border border-zinc-600 px-3 py-1.5 text-xs text-zinc-100" onClick={() => setSimulation(null)}>
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
 
       {lookupOpen && (
         <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 p-4">

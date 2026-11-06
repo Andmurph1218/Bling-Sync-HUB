@@ -7,6 +7,9 @@ import { webhooksRouter } from './routes/webhooks.js';
 import { dashboardRouter } from './routes/dashboard.js';
 import { catalogRouter } from './routes/catalog.js';
 import { oauthRouter } from './routes/oauth.js';
+import { integrationsRouter } from './routes/integrations.js';
+import { adminSyncRouter } from './routes/admin-sync.js';
+import { publishQueueRouter } from './routes/publish-queue.js';
 import { logger } from './lib/logger.js';
 
 export function createApp(): Express {
@@ -31,6 +34,9 @@ export function createApp(): Express {
   app.use(dashboardRouter);
   app.use(catalogRouter);
   app.use(oauthRouter);
+  app.use(integrationsRouter);
+  app.use(adminSyncRouter);
+  app.use(publishQueueRouter);
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     const message = err instanceof Error ? err.message : 'Erro interno do servidor';

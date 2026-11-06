@@ -1,0 +1,23 @@
+# A raiz entrega o Next.js. A API continua em 127.0.0.1:3001.
+# /auth, /oauth, /webhooks e /health também são da API: o navegador e o Bling chamam esses caminhos fora de /api.
+hub.jhshopping.com.br {
+	encode gzip
+	handle /api/* {
+		reverse_proxy 127.0.0.1:3001
+	}
+	handle /auth/* {
+		reverse_proxy 127.0.0.1:3001
+	}
+	handle /oauth/* {
+		reverse_proxy 127.0.0.1:3001
+	}
+	handle /webhooks/* {
+		reverse_proxy 127.0.0.1:3001
+	}
+	handle /health {
+		reverse_proxy 127.0.0.1:3001
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+}

@@ -490,6 +490,37 @@ function FichaUnicaProdutoPage({
                   </li>
                 ))}
               </ul>
+              <form
+                className="mb-4 flex flex-wrap items-end gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const form = event.currentTarget;
+                  const url = String(new FormData(form).get('url') ?? '').trim();
+                  if (!sheet || url.length < 8) return;
+                  void apiFetch<{ checklist: CatalogSheet['item']['checklist'] }>(
+                    `/api/catalog/products/${sheet.item.id}/cover`,
+                    { method: 'POST', json: { url } }
+                  ).then((result) => {
+                    setSheet((current) => current ? {
+                      ...current,
+                      images: [
+                        { url_normalized: url, is_cover_eligible: true, rights_status: 'owned', position_ml: null, position_ns: null },
+                        ...current.images.filter((image) => image.url_normalized !== url),
+                      ],
+                      item: { ...current.item, checklist: result.checklist },
+                    } : current);
+                    form.reset();
+                  });
+                }}
+              >
+                <label className="text-[11px] text-zinc-400">
+                  URL da capa
+                  <input name="url" className="mt-1 block w-72 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-white" />
+                </label>
+                <button type="submit" className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">
+                  Salvar capa
+                </button>
+              </form>
               <table className="w-full text-left text-xs">
                 <thead className="border-b border-zinc-800 text-[11px] uppercase text-zinc-400">
                   <tr>

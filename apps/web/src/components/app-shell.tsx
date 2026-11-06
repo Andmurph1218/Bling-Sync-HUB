@@ -11,6 +11,7 @@ import {
   Send,
   TrendingUp,
   Sliders,
+  Store,
   Tags,
   History,
   Barcode,
@@ -120,7 +121,8 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/qualidade-margem', label: 'Qualidade do cadastro', shortLabel: 'Qualidade', icon: TrendingUp, allowedRoles: ['admin', 'fiscal_approver', 'operator'], isSubItem: true },
   { href: '/publicacoes', label: 'Publicações', shortLabel: 'Publicar', icon: Send, allowedRoles: ['admin', 'operator'] },
   { href: '/vinculos', label: 'Vínculos', shortLabel: 'Vínculos', icon: GitCompare, allowedRoles: ['admin', 'operator'] },
-  { href: '/canais', label: 'Canais', shortLabel: 'Canais', icon: Sliders, allowedRoles: ['admin'] },
+  { href: '/canais', label: 'Canais', shortLabel: 'Canais', icon: Sliders, allowedRoles: ['admin', 'operator'] },
+  { href: '/integracoes', label: 'Integrações', shortLabel: 'Integrações', icon: Store, allowedRoles: ['admin', 'operator'] },
   { href: '/auditoria', label: 'Auditoria', shortLabel: 'Auditoria', icon: History, allowedRoles: ['admin', 'fiscal_approver'] },
 ];
 

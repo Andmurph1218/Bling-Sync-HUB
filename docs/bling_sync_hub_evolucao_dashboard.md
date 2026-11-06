@@ -394,6 +394,8 @@ Prioridade define a ordem. Cada etapa só fecha com o critério de saída verifi
 
 ### P2 — Operação diária
 
+A publicação entra por `MarketplaceConnector` (`createListing`, `updateStock`, `receiveWebhook`) e o ERP por `ErpConnector` (`syncProduct`, `getStock`, `getPrice`). A fábrica em `connectors/strategy` já isola Bling, Mercado Livre e Nuvemshop. Shopee e Amazon estão registradas como não instaladas. Enquanto a escrita ao vivo estiver desligada, `createListing` e `updateStock` recusam a chamada. A lista do catálogo ainda não passa por essa fábrica.
+
 | # | Ajuste | Onde | Critério de saída |
 |---|---|---|---|
 | P2.1 | **Lista de envio**: selecionar produtos, ver o checklist por canal e simular antes de publicar | Sub-visão do Catálogo + simulador existente | Publicação só sai para produtos com checklist verde no canal escolhido |
@@ -410,7 +412,7 @@ Prioridade define a ordem. Cada etapa só fecha com o critério de saída verifi
 
 | # | Ajuste | Onde | Critério de saída |
 |---|---|---|---|
-| P3.1 | Interface `ErpConnector` com a implementação Bling isolada | `connectors/` | Catálogo e atributos não importam código específico do Bling |
+| P3.1 | Interface `ErpConnector` com a implementação Bling isolada. O contrato e a fábrica foram adiantados no P0.6 | `connectors/strategy` | Catálogo e atributos não importam código específico do Bling |
 | P3.2 | Contrato documentado para um segundo ERP | `docs/` | Documento lista os métodos e campos soberanos que o ERP precisa expor |
 | P3.3 | Estrutura para novos canais (Shopee, TikTok) no serviço de atributos | Serviço de atributos | Adicionar canal não exige mudar a tela Atributos |
 | P3.4 | Relatórios de qualidade do catálogo por canal e evolução da completude | Home / relatórios | Gráfico de completude no tempo com fonte e período |

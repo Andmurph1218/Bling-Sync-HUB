@@ -14,6 +14,8 @@ import * as m012 from './migrations/1729080000012_partitions-and-seeds.js';
 import * as m013 from './migrations/1729080000013_empty-sku-handling.js';
 import * as m014 from './migrations/1729080000014_must-change-password.js';
 import * as m015 from './migrations/1729080000015_catalog-v2.js';
+import * as m016 from './migrations/1729080000016_catalog-list-indexes.js';
+import * as m017 from './migrations/1729080000017_publish-queue.js';
 
 export interface MigrationStep {
   id: number;
@@ -38,6 +40,8 @@ export const ALL_MIGRATIONS: MigrationStep[] = [
   { id: 13, name: '1729080000013_empty-sku-handling', upSql: m013.UP_SQL, downSql: m013.DOWN_SQL },
   { id: 14, name: '1729080000014_must-change-password', upSql: m014.UP_SQL, downSql: m014.DOWN_SQL },
   { id: 15, name: '1729080000015_catalog-v2', upSql: m015.UP_SQL, downSql: m015.DOWN_SQL },
+  { id: 16, name: '1729080000016_catalog-list-indexes', upSql: m016.UP_SQL, downSql: m016.DOWN_SQL },
+  { id: 17, name: '1729080000017_publish-queue', upSql: m017.UP_SQL, downSql: m017.DOWN_SQL },
 ];
 
 /**

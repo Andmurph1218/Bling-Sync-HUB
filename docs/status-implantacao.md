@@ -17,7 +17,7 @@ Plano de evolução do dashboard: [bling_sync_hub_evolucao_dashboard.md](bling_s
 | Evolução do Dashboard (Etapas 0 a 4 do plano de evolução) | **Concluída** |
 | Homologação real (Passos 1 a 7) | **Concluída até a 1ª sync `shadow`** |
 | Fase atual | **Homologação operacional em `shadow` + `bling_native`** |
-| Evolução v2 — P0 | **P0.1 a P0.5 implantados em 05/11/2026. P0.6 aguarda painel externo** |
+| Evolução v2 — P0 | **P0.1 a P0.6 no código. Painel externo do ML e do Bling continua aberto** |
 
 Não há fase de código da seção 13 do plano-mestre em aberto. O trabalho restante é operação, calibração e telas/admin ainda não cobertos pela evolução.
 
@@ -27,7 +27,7 @@ Não há fase de código da seção 13 do plano-mestre em aberto. O trabalho res
 4. **Homologação já feita**: OAuth dos 3 canais em `oauth_tokens`; webhooks de produto Bling e Nuvemshop recebendo eventos; 1ª sync `shadow` executada em 22/10 (15 produtos Bling, 50 anúncios ML, 50 produtos Nuvemshop); login real e 8 áreas do dashboard com dados do PostgreSQL (28/10).
 5. **Pendências de homologação ainda abertas**:
    - Desmarcar recurso `order`/`orderNF` na assinatura de webhooks do app do Bling (pedidos ficam na integração nativa);
-   - Confirmar scope `offline_access` no app do Mercado Livre (token atual não retornou `refresh_token`) e manter a URL de notificação `https://rickety-lash-passive.ngrok-free.dev/webhooks/mercadolivre` cadastrada;
+   - Confirmar scope `offline_access` no app do Mercado Livre (token atual não retornou `refresh_token`) e cadastrar a URL de notificação `https://hub.jhshopping.com.br/webhooks/mercadolivre`;
    - Validar a interface com operadores (Seção 11 do plano de evolução);
    - No próximo login local, trocar a senha na tela `/conta/senha` (os quatro usuários do bootstrap já estão com `must_change_password`). Fora de desenvolvimento a senha padrão é recusada;
    - Só depois de validar matching/fiscal: virar `enrichment_controls.mode` para `live` e, se desejado, `stock_price` para `hub` (com a nativa de estoque/preço desligada e a entrada de pedidos mantida no Bling).
@@ -97,7 +97,7 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 - **Mappers Puros (`mappers.ts`)**:
   - `mapBlingProductToCatalog`, `computePublishableStockFromBalances`, `resolveVariantChannelPrice`, `resolveBlingLifecycleSignal`, `classifyApiHttpError`, `mapMercadoLivreListingGroup`, `mapMercadoLivreStockLocations`, `applyMlUptinMigration` e `mapNuvemshopProduct`.
 
-#### 2.3 Banco de Dados — As 15 Migrations (`apps/api/src/db/migrations/*`)
+#### 2.3 Banco de Dados — As 16 Migrations (`apps/api/src/db/migrations/*`)
 1. `1729080000001_identity-and-controls.ts`: `users`, `user_roles`, `sessions`, `oauth_tokens`, `stock_warehouses`, `channel_stores`, `channel_sync_owners`, `enrichment_controls`, `control_changes` (com trigger de imutabilidade), `sync_cursors`, `hub_writes`.
 2. `1729080000002_products-variants-and-axes.ts`: `master_products`, `product_variants` (com índice único parcial `uq_one_default_variant`), `product_components`, `variant_stock_balances`, `variant_channel_prices`, `attribute_axes`, `product_axes`, `attribute_value_aliases`, `variant_attributes`.
 3. `1729080000003_platform-links-and-matching.ts`: `platform_links` (com constraint `family_confidence` para `user_product`), `platform_variant_links`, `ml_selling_conditions`, `ml_stock_locations`, `platform_items`, `matching_queue`, `match_rejections`, `variant_matrix_analysis`.
@@ -113,6 +113,7 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 13. `1729080000013_empty-sku-handling.ts`: corrige colisão de SKU vazio na constraint `UNIQUE` ao importar catálogo real do Bling (homologação 22/10).
 14. `1729080000014_must-change-password.ts`: coluna `users.must_change_password` e marcação dos quatro usuários do bootstrap (P0.2, aplicada no banco local em 05/11/2026).
 15. `1729080000015_catalog-v2.ts`: `master_products.archived_at`, `hub_categories`, vínculo `hub_category_id` e mapas `channel_category_maps`, `channel_attribute_maps`, `channel_attribute_value_maps` (P1, 06/11/2026).
+16. `1729080000016_catalog-list-indexes.ts`: índices de `archived_at`, `hub_category_id`, `hub_categories.parent_id`, mapa de atributos e capa elegível. SKU e `catalog_status` já tinham índice nas migrations 13 e 11.
 
 #### 2.4 Conectores, Rate Limiter Global e OAuth Single-Flight (`apps/api/src/connectors/*`)
 - **`bling-rate-limiter.ts`**: Balde único de 3 req/s com fila ordenada por prioridade (`token` > `webhook_p1_push_stock` > `stock_sync` > `price_check` > `delta_enrich` > `full_enrich`), proteção de 20 req/60s em `/oauth/token` e repartição da cota diária de 120.000 chamadas (`full_enrich` pausa em 96.000; jobs não-P1 param em 108.000 preservando 12.000 chamadas para P1/webhook/push).
@@ -289,25 +290,22 @@ Siga esta sequência exata para colocar o **Bling Sync HUB** em operação com o
    - **Loja Mercado Livre (`channel_stores`)**: `204990471` — **JHS SHOPPING ML** (`platform = 'mercadolivre'`)
    - **Loja Nuvemshop (`channel_stores`)**: `205681549` — **Nuvemshop** (`platform = 'nuvemshop'`)
 
-### Passo 6 — Configurar os Webhooks nas Três Plataformas — **[TÚNEL HTTPS ATIVO]**
-Túnel HTTPS **ngrok com domínio estático** (`rickety-lash-passive.ngrok-free.dev`, fixo por conta) ativo encaminhando para `http://localhost:3001` (substitui o túnel temporário `trycloudflare` de 2026-10-19/20 — `PUBLIC_BASE_URL` mantida no `.env`):
-- **Base HTTPS ativa**: `https://rickety-lash-passive.ngrok-free.dev`
+### Passo 6 — Configurar os Webhooks nas Três Plataformas — **[DOMÍNIO hub.jhshopping.com.br]**
+O endereço público é `https://hub.jhshopping.com.br`, com registro A em `201.79.39.118`. O Caddy termina o HTTPS e encaminha para a API em `127.0.0.1:3001`. `PUBLIC_BASE_URL` no servidor usa esse domínio.
 
-Credenciais OAuth cadastradas no `.env`: **Bling** (app JHS, token já autorizado e criptografado em `oauth_tokens`) **Mercado Livre** (app `4952161147502333`, seller `184060242` JHS SHOPPING autorizado — token em `oauth_tokens`; `refresh_token` não retornado, verificar scope `offline_access` no app), e **Nuvemshop** (app `37416`, loja `store_id = 6667412` autorizada — token em `oauth_tokens` e webhooks `product/created|updated|deleted` registrados: ids `40454738/40454739/40454740`).
-Rota de callback implementada: `GET /oauth/nuvemshop/callback` troca o `code` por `access_token`, grava criptografado em `oauth_tokens` e, quando `PUBLIC_BASE_URL` está definida, registra automaticamente os webhooks `product/created`, `product/updated` e `product/deleted` apontando para `/webhooks/nuvemshop`.
-
-URLs prontas para colar nos painéis de desenvolvedor:
+URLs para os painéis:
 1. **Bling ERP v3**:
-   - **URL do Servidor**: `https://rickety-lash-passive.ngrok-free.dev/webhooks/bling`
-   - **Cabeçalho validado**: `X-Bling-Signature-256` (HMAC-SHA256 com `BLING_WEBHOOK_SECRET`, já configurado no `.env`).
-   - **Recursos para ativar na aba Webhooks do aplicativo no Bling**: `Produto` (`created`, `updated`, `deleted`), `Estoque` (`stock`) e `Estoque Virtual` (`virtual_stock`). *(Não ativar pedidos nem notas fiscais).*
+   - **URL do Servidor**: `https://hub.jhshopping.com.br/webhooks/bling`
+   - **Callback OAuth**: `https://hub.jhshopping.com.br/oauth/bling/callback`
+   - **Cabeçalho validado**: `X-Bling-Signature-256` (HMAC-SHA256 com `BLING_WEBHOOK_SECRET`).
+   - **Recursos**: Produto (`created`, `updated`, `deleted`), Estoque (`stock`) e Estoque Virtual (`virtual_stock`). Pedido e nota fiscal ficam desligados.
 2. **Mercado Livre**:
-   - **URL de Notificação**: `https://rickety-lash-passive.ngrok-free.dev/webhooks/mercadolivre`
-   - **Tópicos para assinar**: `items` e `user-products-families` (cabeçalho `x-signature`).
+   - **URL de Notificação**: `https://hub.jhshopping.com.br/webhooks/mercadolivre`
+   - **Callback OAuth**: `https://hub.jhshopping.com.br/oauth/mercadolivre/callback`
+   - **Tópicos**: `items` e `user-products-families`.
 3. **Nuvemshop**:
-   - **URL do Webhook** (registrada automaticamente via `POST /{store_id}/webhooks` após o OAuth): `https://rickety-lash-passive.ngrok-free.dev/webhooks/nuvemshop`
-   - **Eventos**: `product/created`, `product/updated` e `product/deleted` (cabeçalho `x-linkedstore-hmac-sha256`).
-   - Os 3 campos de webhook do cadastro do app no Partners Portal são exclusivos de privacidade/LGPD (`store/redact`, `customer/redact`, `customers/data_request`) e ficam em branco até implementarmos os receptores de privacidade.
+   - **URL do Webhook**: `https://hub.jhshopping.com.br/webhooks/nuvemshop`
+   - **Eventos**: `product/created`, `product/updated` e `product/deleted`.
 
 ### Passo 7 — Operação Inicial em `shadow` e Roteiro Seguro de Virada para `live` / `hub` — **[1ª SYNC REAL EXECUTADA 22/10]**
 0. **Primeira sincronização real executada** (`apps/api/src/scripts/shadow-sync.ts`): 15 produtos do Bling importados com variantes e saldos reais (`stock` somando só depósito `seller` 14886768228), 50 anúncios do ML (seller 184060242) e 50 produtos da Nuvemshop (store 6667412) lidos → 0 auto-vínculos, ~100 sugestões em `matching_queue` (regra de 2 sinais fortes), scores CRE calculados, nenhuma escrita externa. Migration 13 (`empty-sku-handling`) corrigiu SKU vazio do Bling colidindo na constraint UNIQUE.
@@ -358,9 +356,13 @@ Testes: 16 suítes / 62 testes (`npm test` na raiz). Typecheck da API e do web a
 | P0.3 Linguagem | **Feito** | Menu: Início, Catálogo, Completude, Código de barras, Classificação fiscal, Qualidade do cadastro, Publicações, Vínculos, Canais, Auditoria. Títulos das páginas deixaram de usar sigla de motor. Sigla continua só no painel “Ver fontes e siglas técnicas” e na Auditoria |
 | P0.4 SKU vazio | **Feito** | Lista, ficha, início, qualidade e publicações mostram “Sem SKU — não sincroniza”. A simulação tira esses produtos da lista de envio (`excludedEmptySku`). `enqueueOrPromotePushJob` recusa variante com SKU vazio (`empty_sku_not_syncable`) |
 | P0.5 Excluir | **Já era assim; conferido** | Não há botão de excluir produto para o operador. Arquivar continua no P1.3 |
-| P0.6 Painéis externos | **Aberto** | A tela Canais avisa quando o Mercado Livre está sem renovação e lembra de manter webhooks de pedido/NF desligados no Bling. O token do ML ainda não tem `refresh_token`: falta habilitar `offline_access` no app e autorizar de novo. A assinatura de pedido/NF no app do Bling continua por desmarcar no painel |
+| P0.6 Integrações | **Feito no código; painel externo continua aberto** | `/integracoes` segue o layout da loja: abas Loja e Meus Apps, pesquisa, categorias com contagem e cards com status. `/canais` segue a lista de canais: pesquisa, bolinha de saúde, provedor e menu do administrador. Mercado Livre sem `offline_access` ou com token vencido fica **Requer Atenção**, com Reautorizar em `/oauth/mercadolivre/authorize`. `/canais` é a lista diária, com bolinha de saúde. O administrador abre Logs de Webhook, Testar Conexão e Configurações da Conta. O operador vê a lista e a loja, sem essas ações. O badge **Modo Catálogo (Webhooks de Pedido Desativados)** fica visível. `ErpConnector` e `MarketplaceConnector` estão na fábrica; Shopee e Amazon aparecem como não instalados. `createListing` e `updateStock` recusam escrita ao vivo. O token do ML e os webhooks de pedido/NF no app do Bling continuam por ajustar nos painéis externos |
 
 Abas **Atributos** e **Problemas** não entram no menu neste P0. Elas nascem no P1.7 e na home do P1.1.
+
+Verificação do webhook do Bling em 06/11/2026: o endereço público é `https://hub.jhshopping.com.br` (registro A em `201.79.39.118`). O Caddy entrega o frontend na raiz e encaminha `/api`, `/auth`, `/oauth`, `/webhooks` e `/health` para a API. `POST /webhooks/bling` sem assinatura responde 401. A tela de login abre no navegador.
+
+A importação completa do Bling gravou 9.926 produtos e 9.930 variações. 76 grades não entraram porque o detalhe veio como formato V sem a lista de variações. A listagem do Bling continua depois desses 10.000 itens; a página seguinte ainda devolve produtos. A continuação a partir dessa página não concluiu: a segunda leitura de detalhe fica parada. O catálogo já importado permanece no banco. A completude desses produtos sai incompleta na leitura, porque ainda não há categoria do HUB nem capa elegível.
 
 **Próximo login:** usar a senha atual do bootstrap e definir uma senha nova em `/conta/senha`. Sem essa troca o restante do HUB responde `403 password_change_required`.
 
@@ -384,7 +386,11 @@ Testes: 17 suítes / 69 testes (`npm test` na raiz), incluindo `p1-catalog.test.
 | P1.8 Fixtures | **Feito** | Mercado Livre `MLB999001` (BRAND e COLOR obrigatórios) e Nuvemshop `ns-cat-lamps`. Sem escrita ao vivo no canal |
 | P1.9 Materialização | **Feito** | `CREATE` e `CONTENT` recebem `attributes` só quando o mapa está verde e completo. Campo manual obrigatório deixa o payload sem atributos |
 
-Escrita ao vivo nos canais continua desligada. `shadow` e `bling_native` não mudaram. P0.6 continua aberto: `offline_access` do Mercado Livre e webhooks de pedido/NF no Bling dependem dos painéis externos.
+Escrita ao vivo nos canais continua desligada. `shadow` e `bling_native` não mudaram. O módulo de Integrações (P0.6) mostra a atenção do Mercado Livre e o modo catálogo; `offline_access` e os webhooks de pedido/NF no Bling continuam dependendo dos painéis externos.
+
+Preparação do P2: a lista de envio entra pela fila `publish_queue` e pelo worker BullMQ. `ENABLE_LIVE_PUBLISHING` só publica quando o valor é exatamente `true`; no restante o worker grava `simulado com sucesso` e não chama `createListing`. A importação e a exportação seguem vazias. A leitura soberana do ERP deve chamar `ErpConnector.syncProduct`, `getStock` e `getPrice`. A lista e a ficha ainda leem o espelho genérico e não passam pela fábrica. Shopee, Amazon e um segundo ERP entram como classe nova; o HUB não precisa de regra desses nomes.
+
+A completude não tem cache. Cada leitura de home e catálogo recalcula o checklist a partir de `product_images` e dos demais dados do produto. `POST /api/catalog/products/:id/cover` grava a capa e a resposta já devolve o score novo. A próxima abertura da home ou da lista vê o mesmo número, sem evento de invalidação, porque não existe valor guardado para invalidar.
 
 Conferência no navegador, já com a sessão do operador: a home mostra 25 produtos, 0 prontos e 25 incompletos; o catálogo em Todos e a tela Completude repetem 25. O filtro do SKU `13621` deixa 1 produto na lista. A tela Atributos lê a fixture do Mercado Livre (marca dinâmica, cor e linha fixas). A ficha não foi aberta pelo clique automatizado.
 
