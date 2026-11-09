@@ -2,6 +2,7 @@ import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { requireRole } from '../auth/middleware.js';
 import { readPublicAppCredentials, saveAppCredentials } from '../connectors/app-credentials.js';
+import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
 
 export const appCredentialsRouter = Router();
 const admin = requireRole('admin');
@@ -12,8 +13,11 @@ const bodySchema = z.object({
   clientSecret: z.string().optional(),
   redirectUri: z.string().optional(),
   webhookSecret: z.string().optional(),
+  accessToken: z.string().optional(),
   isActive: z.boolean().optional(),
 });
+
+const tokenManager = new OAuthTokenManager();
 
 appCredentialsRouter.get(
   '/api/admin/integrations/:provider/credentials',
@@ -52,7 +56,22 @@ async function writeCredentials(req: Request, res: Response, next: NextFunction)
       res.status(400).json({ error: 'invalid_body', message: 'Informe o Client ID.' });
       return;
     }
-    const saved = await saveAppCredentials({ provider, ...parsed.data });
+    const accessToken = parsed.data.accessToken?.trim() ?? '';
+    const clientSecret = parsed.data.clientSecret?.trim()
+      || (provider === 'nuvemshop' && accessToken ? accessToken : undefined);
+    const saved = await saveAppCredentials({
+      provider,
+      ...parsed.data,
+      clientSecret,
+    });
+    if (provider === 'nuvemshop' && accessToken) {
+      await tokenManager.upsertToken({
+        provider: 'nuvemshop',
+        accessToken,
+        refreshToken: null,
+        expiresAt: new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000),
+      });
+    }
     res.status(200).json(saved);
   } catch (error) {
     if (error instanceof Error && error.message === 'client_secret_required') {

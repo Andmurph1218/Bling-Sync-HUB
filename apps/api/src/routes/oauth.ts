@@ -102,7 +102,7 @@ export async function ensureNuvemshopProductWebhooks(
   const listRes = await fetch(`https://api.nuvemshop.com.br/2025-03/${storeId}/webhooks`, {
     headers: {
       Authentication: `bearer ${accessToken}`,
-      'User-Agent': 'BlingSyncHUB (catalog sync)',
+      'User-Agent': 'JH Sync Hub (catalog sync)',
       Accept: 'application/json',
     },
   });
@@ -120,7 +120,7 @@ export async function ensureNuvemshopProductWebhooks(
       method: 'POST',
       headers: {
         Authentication: `bearer ${accessToken}`,
-        'User-Agent': 'BlingSyncHUB (catalog sync)',
+        'User-Agent': 'JH Sync Hub (catalog sync)',
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
@@ -526,6 +526,25 @@ oauthRouter.get(
  * tokens da Nuvemshop não expiram) e registra os webhooks de produto no WIG quando
  * PUBLIC_BASE_URL estiver configurado.
  */
+oauthRouter.get('/oauth/nuvemshop/authorize', async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const credentials = await getNuvemshopCredentials();
+    if (!credentials) {
+      res.status(400).json({
+        error: 'missing_nuvemshop_credentials',
+        message: 'Cadastre o Client ID e o Client Secret da Nuvemshop em Integrações.',
+      });
+      return;
+    }
+    res.status(400).json({
+      error: 'nuvemshop_custom_app',
+      message: 'Aplicativo sob medida não usa esta autorização. Cole o token de acesso em Integrações. O ID da loja não é o ID de um aplicativo.',
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 oauthRouter.get(
   '/oauth/nuvemshop/callback',
   async (req: Request, res: Response, next: NextFunction) => {
@@ -590,11 +609,18 @@ oauthRouter.get(
           ? await ensureNuvemshopProductWebhooks(storeId, tokenJson.access_token)
           : [];
 
+      const base = getPublicBaseUrl();
+      if (base) {
+        const done = new URL('/admin/integracoes', base);
+        done.searchParams.set('nuvemshop', 'conectado');
+        res.redirect(done.toString());
+        return;
+      }
       res.status(200).json({
         status: 'nuvemshop_connected',
         storeId,
         scope: tokenJson.scope ?? null,
-        publicBaseUrl: getPublicBaseUrl(),
+        publicBaseUrl: base,
         webhooksRegistered: webhooks,
       });
     } catch (error) {

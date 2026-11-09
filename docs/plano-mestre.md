@@ -1,4 +1,4 @@
-# Plano Mestre — Bling Sync HUB
+# Plano Mestre — JH Sync Hub
 
 Versão de desenvolvimento. Substitui o briefing `PLANO MESTRE REVISADO`.
 As regras que se contradiziam naquele texto estão unificadas aqui.

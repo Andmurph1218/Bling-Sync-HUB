@@ -1,4 +1,4 @@
-# Hub Sync v2 — Brief de intenção
+# JH Sync Hub — Brief de intenção
 
 Estas notas **não são regras fixas**. O plano detalhado está em [bling_sync_hub_evolucao_dashboard.md](bling_sync_hub_evolucao_dashboard.md).
 

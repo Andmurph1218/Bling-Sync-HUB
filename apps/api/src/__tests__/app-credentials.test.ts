@@ -84,4 +84,20 @@ describe('credenciais de aplicativo no banco', () => {
     expect(String(bling.headers.location)).toContain('client_id=bling-app-do-banco');
     expect(String(bling.headers.location)).not.toContain(secret);
   });
+
+  it('grava o token do aplicativo sob medida da Nuvemshop sem instalação', async () => {
+    const token = 'token-sob-medida-que-nao-volta';
+    const saved = await request(app)
+      .put('/api/admin/integrations/nuvemshop/credentials')
+      .set('Cookie', adminCookie)
+      .send({ clientId: '6667412', accessToken: token });
+    expect(saved.status).toBe(200);
+    expect(JSON.stringify(saved.body)).not.toContain(token);
+
+    const catalog = await request(app).get('/api/admin/integrations').set('Cookie', adminCookie);
+    const nuvemshop = catalog.body.groups
+      .flatMap((group: { apps: Array<{ slug: string; tokenValid: boolean }> }) => group.apps)
+      .find((app: { slug: string }) => app.slug === 'nuvemshop');
+    expect(nuvemshop).toMatchObject({ tokenValid: true, hasToken: true });
+  });
 });

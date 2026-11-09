@@ -10,7 +10,7 @@ if (process.env.VITEST !== 'true') {
 }
 
 app.listen(env.PORT, host, () => {
-  logger.info('Bling Sync HUB API iniciada', {
+  logger.info('JH Sync Hub API iniciada', {
     port: env.PORT,
     host,
     env: env.NODE_ENV,

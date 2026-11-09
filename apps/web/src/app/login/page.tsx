@@ -2,7 +2,7 @@
 
 import React, { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ShieldCheck, Loader2, AlertTriangle } from 'lucide-react';
+import { Loader2, AlertTriangle } from 'lucide-react';
 import { apiFetch, ApiError } from '../../utils/api-client';
 
 function LoginForm() {
@@ -56,11 +56,9 @@ function LoginForm() {
         aria-labelledby="login-title"
       >
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
-            <ShieldCheck className="h-5 w-5" />
-          </div>
+          <img src="/brand/jh-logo.jpg" alt="" className="h-10 w-10 rounded-lg object-cover" />
           <div>
-            <h1 id="login-title" className="text-lg font-bold text-text-primary">Bling Sync HUB</h1>
+            <h1 id="login-title" className="text-lg font-bold text-text-primary">JH Sync Hub</h1>
             <p className="text-xs text-text-muted">Acesso ao Centro de Controle Operacional</p>
           </div>
         </div>

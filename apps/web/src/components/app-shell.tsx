@@ -18,7 +18,6 @@ import {
   FileCheck2,
   ChevronLeft,
   ChevronRight,
-  ShieldCheck,
   AlertTriangle,
   Radio,
   LogOut,
@@ -266,12 +265,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         >
           <div className="flex h-16 items-center justify-between border-b border-border-color/80 px-4">
             <Link href="/" className="flex items-center gap-2.5 overflow-hidden">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
-                <ShieldCheck className="h-5 w-5" />
-              </div>
+              <img src="/brand/jh-logo.jpg" alt="" className="h-9 w-9 shrink-0 rounded-lg object-cover" />
               {!collapsed && (
                 <div className="leading-tight">
-                  <span className="block text-sm font-bold tracking-tight text-text-primary">Bling Sync HUB</span>
+                  <span className="block text-sm font-bold tracking-tight text-text-primary">JH Sync Hub</span>
                   <span className="block text-[11px] text-text-muted">Centro Operacional · Shadow</span>
                 </div>
               )}

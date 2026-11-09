@@ -301,7 +301,7 @@ export class NuvemshopConnector {
   constructor(options: NuvemshopConnectorOptions) {
     this.baseUrl = options.baseUrl ?? 'https://api.tiendanube.com/v1';
     this.storeId = options.storeId;
-    this.userAgent = options.userAgent ?? 'BlingSyncHub/0.1 (suporte@blingsync.local)';
+    this.userAgent = options.userAgent ?? 'JH Sync Hub/0.1 (suporte@blingsync.local)';
     this.tokenManager = options.tokenManager;
     this.transport = options.transport;
   }

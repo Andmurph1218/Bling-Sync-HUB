@@ -167,7 +167,7 @@ async function nsGet<T>(accessToken: string, path: string): Promise<T> {
   const res = await fetch(`${NS_BASE}${path}`, {
     headers: {
       Authentication: `bearer ${accessToken}`,
-      'User-Agent': 'BlingSyncHUB (shadow-sync)',
+      'User-Agent': 'JH Sync Hub (shadow-sync)',
       Accept: 'application/json',
     },
   });

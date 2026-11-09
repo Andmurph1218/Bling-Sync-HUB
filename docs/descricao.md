@@ -2,7 +2,7 @@
 
 ## O Que É
 
-Um **sistema web** que sincroniza produtos entre o **Bling (ERP)** e dois marketplaces: **Mercado Livre** e **Nuvemshop**.
+O **JH Sync Hub** sincroniza produtos entre o **Bling (ERP)** e os marketplaces **Mercado Livre** e **Nuvemshop**.
 
 ## O Problema Que Resolve
 

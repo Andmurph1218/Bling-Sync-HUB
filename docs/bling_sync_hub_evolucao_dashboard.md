@@ -1,4 +1,4 @@
-# Bling Sync HUB — Evolução v2: Catálogo, Atributos e UX Operacional
+# JH Sync Hub — Evolução v2: Catálogo, Atributos e UX Operacional
 
 Data do plano: **5 de novembro de 2026**  
 Estado no ar em 06/11/2026: [status-implantacao.md](status-implantacao.md), seção 11. O painel tem tema claro e escuro, e a lista de envio avisa pendência em toast em vez do banner verde.  
@@ -486,4 +486,4 @@ A evolução anterior (Etapas 0–4 de outubro/2026) entregou login, 8 áreas e 
 
 Plugg.to e Moovin HUB mostram o mesmo desenho vencedor: **catálogo central, mapeamento de atributos por categoria, anúncio como projeção, match sem recriar, home que empurra completude**.
 
-O Bling Sync HUB já tem a espinha técnica. A evolução v2 torna essa espinha usável por quem mexe em estoque e logística: um catálogo claro, atributos regularizados por canal, boas práticas exigidas na UI e zero duplicata no ERP.
+O JH Sync Hub já tem a espinha técnica. A evolução v2 torna essa espinha usável por quem mexe em estoque e logística: um catálogo claro, atributos regularizados por canal, boas práticas exigidas na UI e zero duplicata no ERP.

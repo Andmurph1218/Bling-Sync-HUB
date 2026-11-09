@@ -17,6 +17,7 @@ interface CatalogRow {
   is_installed: boolean;
   is_available: boolean;
   has_credentials: boolean;
+  has_token: boolean;
   token_valid: boolean;
 }
 
@@ -25,7 +26,14 @@ integrationCatalogRouter.get('/api/admin/integrations', admin, async (_req: Requ
     const rows = await query<CatalogRow>(
       `SELECT c.id, c.name, c.slug, c.category, c.logo_url, c.is_installed, c.is_available,
               (cred.client_id IS NOT NULL AND cred.is_active = true) AS has_credentials,
-              (tok.expires_at IS NOT NULL AND tok.expires_at > now()) AS token_valid
+              (tok.provider IS NOT NULL) AS has_token,
+              (
+                tok.provider IS NOT NULL
+                AND (
+                  c.slug = 'nuvemshop'
+                  OR (tok.expires_at IS NOT NULL AND tok.expires_at > now())
+                )
+              ) AS token_valid
        FROM integration_catalog c
        LEFT JOIN channel_app_credentials cred ON cred.provider = c.slug
        LEFT JOIN oauth_tokens tok ON tok.provider = c.slug
@@ -40,6 +48,7 @@ integrationCatalogRouter.get('/api/admin/integrations', admin, async (_req: Requ
       isInstalled: row.has_credentials || row.is_installed,
       isAvailable: row.is_available,
       hasCredentials: row.has_credentials,
+      hasToken: row.has_token,
       tokenValid: row.token_valid,
       health: !row.is_available ? 'soon' : row.has_credentials && row.token_valid ? 'ok' : row.has_credentials ? 'attention' : 'available',
     }));

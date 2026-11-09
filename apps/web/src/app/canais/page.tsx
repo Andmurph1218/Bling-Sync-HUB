@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AlertTriangle, MoreVertical, Plus, Search, Warehouse } from 'lucide-react';
 import { useCurrentRole } from '../../components/app-shell';
 import { API_BASE_URL, apiFetch } from '../../utils/api-client';
+import { BrandLogo } from '../../components/brand-logo';
 
 interface ChannelRow {
   id: string;
@@ -62,13 +63,6 @@ const HEALTH_DOT: Record<ChannelRow['health'], string> = {
   down: 'bg-rose-500',
 };
 
-const MARK: Record<string, string> = {
-  mercadolivre: 'bg-amber-400 text-bg-base',
-  nuvemshop: 'bg-sky-600 text-text-primary',
-  shopee: 'bg-orange-500 text-text-primary',
-  tiktok: 'bg-bg-surface text-text-primary',
-};
-
 const ROLE_LABEL: Record<string, string> = {
   seller: 'Depósito próprio (seller)',
   ml_full: 'Espelho do Full (ml_full)',
@@ -78,7 +72,7 @@ const ROLE_LABEL: Record<string, string> = {
 
 const OWNER_LABEL: Record<string, string> = {
   bling_native: 'Integração nativa do Bling',
-  hub: 'Bling Sync HUB',
+  hub: 'JH Sync Hub',
 };
 
 export default function CanaisConfiguracoesPage() {
@@ -178,9 +172,7 @@ export default function CanaisConfiguracoesPage() {
                 {visible.map((channel) => (
                   <li key={channel.id} className="flex items-center gap-4 border-b border-border-color px-4 py-4 last:border-b-0">
                     <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${HEALTH_DOT[channel.health]}`} title={channel.healthLabel} />
-                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[11px] font-bold ${MARK[channel.id] ?? 'bg-bg-surface text-text-primary'}`}>
-                      {channel.name.slice(0, 2).toUpperCase()}
-                    </span>
+                    <BrandLogo id={channel.id} name={channel.name} size={36} />
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold text-text-primary">{channel.name}</p>
                       <p className="text-xs text-text-muted">

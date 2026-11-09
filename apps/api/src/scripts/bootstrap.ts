@@ -1,5 +1,5 @@
 /**
- * Script de Bootstrap Operacional do Bling Sync HUB
+ * Script de Bootstrap Operacional do JH Sync Hub
  *
  * Executa:
  * 1. As 12 migrations + 70 partições mensais + seeds iniciais no PostgreSQL 16 (DATABASE_URL).
@@ -31,7 +31,7 @@ const INITIAL_USERS: Array<{
 }> = [
   {
     email: 'admin@blingsync.local',
-    name: 'Administrador Bling Sync HUB',
+    name: 'Administrador JH Sync Hub',
     passwordEnvKey: 'BOOTSTRAP_ADMIN_PASSWORD',
     defaultPassword: 'ChangeMe!Admin2026',
     roles: ['admin'],
@@ -60,7 +60,7 @@ const INITIAL_USERS: Array<{
 ];
 
 export async function runBootstrap(): Promise<void> {
-  logger.info('Iniciando bootstrap do Bling Sync HUB...');
+  logger.info('Iniciando bootstrap do JH Sync Hub...');
   const appliedMigrations = await runAllMigrationsUp();
   logger.info('Migrations verificadas/aplicadas', {
     appliedCount: appliedMigrations.length,

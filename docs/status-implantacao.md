@@ -1,4 +1,4 @@
-# Documentação de Implantação — Bling Sync HUB
+# Documentação de Implantação — JH Sync Hub
 
 Data de referência: **6 de novembro de 2026, noite**  
 Estado publicado em `https://hub.jhshopping.com.br`. O detalhe desta noite está na seção 11.  
@@ -246,7 +246,7 @@ Conforme definido nas seções 1, 7, 9.2, 10.6 e 10.8 do Plano Mestre, **não en
 
 ## 5. Roteiro Prático Passo a Passo para Continuar a Implantação em Ambiente Real
 
-Siga esta sequência exata para colocar o **Bling Sync HUB** em operação com o seu catálogo real:
+Siga esta sequência exata para colocar o **JH Sync Hub** em operação com o seu catálogo real:
 
 ### Passo 1 — Subir o PostgreSQL 16 e o Redis 7 (Docker) — **[CONCLUÍDO / ATIVO]**
 1. Containers `bling_sync_postgres` (`postgres:16-alpine`, porta `5432`) e `bling_sync_redis` (`redis:7-alpine`, porta `6379`) iniciados e em estado `healthy`:
@@ -466,6 +466,8 @@ A atualização usa `deploy/update-hub.sh`. Ela copia o código, roda `npm ci` c
 Na noite de 06/11 as migrations 17 a 20 já estavam aplicadas: fila de publicação, credenciais dos canais, vínculos de anúncio e catálogo de integrações. A tabela `pgmigrations` nasceu no bootstrap do HUB, com `id` uuid. Quando várias linhas compartilham o mesmo `run_on`, o `node-pg-migrate` ordena pelo uuid e acusa fora de ordem mesmo com o schema já aplicado. Por isso `migrate:up` e `migrate:down` passam `--no-check-order`. O health da API respondeu com Postgres e Redis ok, e o login do painel abriu.
 
 Os quatro usuários do bootstrap existem, ativos, e ainda exigem troca em `/conta/senha`. A senha de cada um está em `/root/bling-initial-passwords.txt` na Droplet. A senha padrão do repositório não abre sessão em produção.
+
+O produto se chama **JH Sync Hub**. O logo da JH Shopping é a marca do cabeçalho, do login e do favicon. Os cards de canal usam as marcas de Mercado Livre, Nuvemshop, Shopee, Amazon, TikTok Shop, Bling, Omie, Correios e Melhor Envio.
 
 O painel tem tema claro e escuro (`next-themes`), com o botão no cabeçalho ao lado de Sair. A preferência fica no navegador. O escuro usa o marrom `#312c20`, cards `#494d4b` e título `#e2cb92`. O claro mantém o fundo menta, com texto quase preto, borda oliva e cards em degradê do creme para o verde, com sombra leve.
 

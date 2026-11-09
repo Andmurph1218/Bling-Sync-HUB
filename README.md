@@ -1,4 +1,4 @@
-# Bling Sync HUB
+# JH Sync Hub
 
 Hub de sincronização de catálogo entre **Bling ERP v3**, **Mercado Livre** e **Nuvemshop**.
 

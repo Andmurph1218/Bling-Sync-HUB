@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AlertTriangle, Check, LayoutGrid, Search, Store } from 'lucide-react';
 import { useCurrentRole } from '../../components/app-shell';
 import { API_BASE_URL, apiFetch } from '../../utils/api-client';
+import { BrandLogo } from '../../components/brand-logo';
 
 type StoreCategory = 'all' | 'sales' | 'erps' | 'logistics' | 'marketplaces';
 type AppCategory = 'marketplaces' | 'erps' | 'logistics';
@@ -36,15 +37,6 @@ const COPY: Record<string, string> = {
   amazon: 'Marketplace previsto. O conector ainda não está instalado e o HUB não grava nesta plataforma.',
   tiktok: 'Canal previsto para uma próxima etapa. O conector ainda não está instalado.',
   bling: 'ERP soberano do catálogo, do estoque e do preço. O HUB não processa pedidos.',
-};
-
-const MARK: Record<string, string> = {
-  mercadolivre: 'bg-amber-400 text-bg-base',
-  nuvemshop: 'bg-sky-600 text-text-primary',
-  shopee: 'bg-orange-500 text-text-primary',
-  amazon: 'bg-bg-surface text-text-primary',
-  tiktok: 'bg-bg-surface text-text-primary',
-  bling: 'bg-emerald-600 text-text-primary',
 };
 
 function matchesCategory(app: IntegrationAppCard, category: StoreCategory): boolean {
@@ -109,6 +101,7 @@ export default function IntegracoesPage() {
       setHasSavedSecret(saved.hasClientSecret);
       setClientSecret('');
       setWebhookSecret('');
+      setCredentialsFor(null);
       setCredentialNotice('Credenciais salvas. O segredo não volta para a tela.');
     } catch {
       setCredentialNotice(hasSavedSecret ? 'Não foi possível atualizar.' : 'Informe o Client Secret na primeira gravação.');
@@ -226,9 +219,7 @@ export default function IntegracoesPage() {
               {visible.map((app) => (
                 <article key={app.id} className="flex min-h-[180px] flex-col rounded-xl border border-border-color bg-bg-surface p-5 shadow-sm">
                   <div className="flex items-start gap-3">
-                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${MARK[app.id] ?? 'bg-bg-surface text-text-primary'}`}>
-                      {app.name.slice(0, 2).toUpperCase()}
-                    </span>
+                    <BrandLogo id={app.id} name={app.name} />
                     <div>
                       <h3 className="font-semibold text-text-primary">{app.name}</h3>
                       <p className="text-xs text-text-muted">{app.category === 'erps' ? 'ERP' : app.category === 'logistics' ? 'Logística' : 'Marketplaces'}</p>

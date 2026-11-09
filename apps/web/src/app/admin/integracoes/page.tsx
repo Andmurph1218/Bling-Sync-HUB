@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCurrentRole } from '../../../components/app-shell';
 import { apiFetch } from '../../../utils/api-client';
+import { BrandLogo } from '../../../components/brand-logo';
 
 type CategoryFilter = 'todos' | 'Marketplace' | 'ERP' | 'Logística';
 
@@ -16,6 +17,7 @@ interface CatalogApp {
   isInstalled: boolean;
   isAvailable: boolean;
   hasCredentials: boolean;
+  hasToken: boolean;
   tokenValid: boolean;
   health: 'ok' | 'attention' | 'available' | 'soon';
 }
@@ -26,18 +28,6 @@ const FILTERS: Array<{ id: CategoryFilter; label: string }> = [
   { id: 'ERP', label: 'ERP' },
   { id: 'Logística', label: 'Logística' },
 ];
-
-const MARK: Record<string, string> = {
-  mercadolivre: 'bg-amber-400 text-bg-base',
-  nuvemshop: 'bg-sky-600 text-text-primary',
-  shopee: 'bg-orange-500 text-text-primary',
-  amazon: 'bg-bg-surface text-text-primary',
-  tiktok: 'bg-bg-surface text-text-primary',
-  bling: 'bg-emerald-600 text-text-primary',
-  omie: 'bg-blue-700 text-text-primary',
-  correios: 'bg-yellow-500 text-bg-base',
-  melhorenvio: 'bg-bg-surface text-text-primary',
-};
 
 export default function AdminIntegrationsPage() {
   const router = useRouter();
@@ -51,12 +41,19 @@ export default function AdminIntegrationsPage() {
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [webhookSecret, setWebhookSecret] = useState('');
+  const [accessToken, setAccessToken] = useState('');
   const [callbackUrl, setCallbackUrl] = useState('');
 
   useEffect(() => {
     if (!currentUser.id) return;
     if (!isAdmin) router.replace('/?erro=403');
   }, [currentUser.id, isAdmin, router]);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('nuvemshop') === 'conectado') {
+      setNotice('Nuvemshop autorizada. O token da loja não tem prazo de validade.');
+    }
+  }, []);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -75,6 +72,7 @@ export default function AdminIntegrationsPage() {
     setCredentialsFor(app);
     setClientSecret('');
     setWebhookSecret('');
+    setAccessToken('');
     setNotice(null);
     try {
       const saved = await apiFetch<{ clientId: string; callbackUrl: string }>(
@@ -98,10 +96,16 @@ export default function AdminIntegrationsPage() {
           clientId,
           ...(clientSecret.trim() ? { clientSecret: clientSecret.trim() } : {}),
           ...(webhookSecret.trim() ? { webhookSecret: webhookSecret.trim() } : {}),
+          ...(accessToken.trim() ? { accessToken: accessToken.trim() } : {}),
         },
       });
-      setNotice('Credenciais salvas. O segredo não volta para a tela.');
+      setNotice(credentialsFor.slug === 'nuvemshop' && accessToken.trim()
+        ? 'Token da Nuvemshop gravado. A loja fica autorizada sem instalar aplicativo.'
+        : 'Credenciais salvas. O segredo não volta para a tela.');
       setClientSecret('');
+      setWebhookSecret('');
+      setAccessToken('');
+      setCredentialsFor(null);
       const payload = await apiFetch<{ groups: Array<{ apps: CatalogApp[] }> }>('/api/admin/integrations');
       setApps(payload.groups.flatMap((group) => group.apps));
     } catch {
@@ -153,20 +157,31 @@ export default function AdminIntegrationsPage() {
             {visible.map((app) => {
               const soon = !app.isAvailable;
               const healthy = app.hasCredentials && app.tokenValid;
+              const statusText = soon
+                ? 'Em breve'
+                : !app.hasCredentials
+                  ? 'Ainda sem credenciais'
+                  : app.tokenValid
+                    ? app.slug === 'nuvemshop'
+                      ? 'Credenciais salvas. Loja autorizada.'
+                      : 'Credenciais salvas e token válido'
+                    : app.slug === 'nuvemshop'
+                      ? 'Credenciais salvas. Falta autorizar a loja. O token da Nuvemshop não expira.'
+                      : app.hasToken
+                        ? 'Credenciais salvas. Token expirado.'
+                        : 'Credenciais salvas. Falta autorizar a conta.';
               return (
                 <article key={app.id} className={`flex min-h-[180px] flex-col rounded-xl border bg-bg-surface p-5 shadow-sm ${soon ? 'border-border-color opacity-80' : 'border-border-color'}`}>
                   <div className="flex items-start gap-3">
-                    <span className={`flex h-10 w-10 items-center justify-center rounded-lg text-xs font-bold ${MARK[app.slug] ?? 'bg-bg-surface'}`}>
-                      {app.name.slice(0, 2).toUpperCase()}
-                    </span>
+                    <BrandLogo id={app.slug} name={app.name} />
                     <div>
                       <h3 className="font-semibold">{app.name}</h3>
                       <p className="text-xs text-text-muted">{app.category === 'Marketplace' ? 'Canal de venda' : app.category}</p>
                     </div>
-                    <span className={`ml-auto mt-1 h-2.5 w-2.5 rounded-full ${soon ? 'bg-text-muted' : healthy ? 'bg-emerald-500' : app.hasCredentials ? 'bg-amber-400' : 'bg-text-muted'}`} title={healthy ? 'Token válido' : app.hasCredentials ? 'Token expirado' : 'Sem credenciais'} />
+                    <span className={`ml-auto mt-1 h-2.5 w-2.5 rounded-full ${soon ? 'bg-text-muted' : healthy ? 'bg-emerald-500' : app.hasCredentials ? 'bg-amber-400' : 'bg-text-muted'}`} title={statusText} />
                   </div>
                   <p className="mt-3 text-xs text-text-muted">
-                    {soon ? 'Em breve' : healthy ? 'Credenciais salvas e token válido' : app.hasCredentials ? 'Credenciais salvas. Token expirado.' : 'Ainda sem credenciais'}
+                    {statusText}
                   </p>
                   <div className="mt-auto pt-4">
                     {soon ? (
@@ -174,9 +189,14 @@ export default function AdminIntegrationsPage() {
                         Solicitar Integração
                       </button>
                     ) : (
-                      <button type="button" className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-text-primary" onClick={() => void openCredentials(app)}>
-                        Configurar
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-text-primary" onClick={() => void openCredentials(app)}>
+                          Configurar
+                        </button>
+                        {app.slug === 'nuvemshop' && app.hasCredentials && !app.tokenValid && (
+                          <span className="text-xs text-text-muted">Cole o token do aplicativo sob medida em Configurar.</span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </article>
@@ -190,9 +210,12 @@ export default function AdminIntegrationsPage() {
           <div className="w-full max-w-md rounded-xl bg-bg-surface p-5 text-sm">
             <h2 className="font-bold">Credenciais · {credentialsFor.name}</h2>
             <label className="mt-3 block text-xs text-text-muted">
-              Client ID
+              {credentialsFor.slug === 'nuvemshop' ? 'ID da loja' : 'Client ID'}
               <input value={clientId} onChange={(event) => setClientId(event.target.value)} className="mt-1 w-full rounded border border-border-color px-2 py-1.5" />
             </label>
+            {credentialsFor.slug === 'nuvemshop' && (
+              <p className="mt-1 text-[11px] text-text-muted">Use 6667412. Esse número é a loja, não um aplicativo para instalar.</p>
+            )}
             <label className="mt-2 block text-xs text-text-muted">
               Client Secret
               <input type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} className="mt-1 w-full rounded border border-border-color px-2 py-1.5" />
@@ -201,6 +224,13 @@ export default function AdminIntegrationsPage() {
               Segredo do webhook
               <input type="password" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} className="mt-1 w-full rounded border border-border-color px-2 py-1.5" />
             </label>
+            {credentialsFor.slug === 'nuvemshop' && (
+              <label className="mt-2 block text-xs text-text-muted">
+                Token de acesso
+                <input type="password" value={accessToken} onChange={(event) => setAccessToken(event.target.value)} className="mt-1 w-full rounded border border-border-color px-2 py-1.5" autoComplete="off" />
+                <span className="mt-1 block">Copie o token revelado em Aplicativos sob medida. Ele não expira e substitui a instalação.</span>
+              </label>
+            )}
             <p className="mt-2 break-all font-mono text-[11px] text-text-muted">{callbackUrl || 'O callback aparece depois de salvar.'}</p>
             <div className="mt-4 flex gap-2">
               <button type="button" className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-text-primary" onClick={() => void saveCredentials()}>Salvar</button>
