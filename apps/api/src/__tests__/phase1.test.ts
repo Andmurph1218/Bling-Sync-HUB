@@ -54,8 +54,8 @@ describe('Fase 1 â€” Schema Completo (Migrations 1 a 12 sobem e descem, Seeds, Ã
 
   it('1. Sobe as 16 migrations em ordem e popula os seeds iniciais (eixos, aliases, limites, DLM, depÃ³sitos e lojas)', async () => {
     const applied = await runAllMigrationsUp({ stripPartitionClauseForMemDb: true });
-    expect(applied).toHaveLength(20);
-    expect(ALL_MIGRATIONS).toHaveLength(20);
+    expect(applied).toHaveLength(22);
+    expect(ALL_MIGRATIONS).toHaveLength(22);
 
     const axesCount = await query<{ count: number }>(
       `SELECT count(*)::int AS count FROM attribute_axes`
@@ -207,7 +207,7 @@ describe('Fase 1 â€” Schema Completo (Migrations 1 a 12 sobem e descem, Seeds, Ã
 
     // Desce todas as 16 migrations na ordem inversa (16 -> 1)
     const reverted = await runAllMigrationsDown({ stripPartitionClauseForMemDb: true });
-    expect(reverted).toHaveLength(20);
+    expect(reverted).toHaveLength(22);
 
     const remaining = await query<{ count: number }>(
       `SELECT count(*)::int AS count FROM pgmigrations`

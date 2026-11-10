@@ -20,6 +20,7 @@ import * as m018 from './migrations/1729080000018_channel-app-credentials.js';
 import * as m019 from './migrations/1729080000019_channel-listing-links.js';
 import * as m020 from './migrations/1729080000020_integration-catalog.js';
 import * as m021 from './migrations/1729080000021_ops-cache-and-jobs.js';
+import * as m022 from './migrations/1729080000022_problem-dismissals.js';
 
 export interface MigrationStep {
   id: number;
@@ -50,6 +51,7 @@ export const ALL_MIGRATIONS: MigrationStep[] = [
   { id: 19, name: '1729080000019_channel-listing-links', upSql: m019.UP_SQL, downSql: m019.DOWN_SQL },
   { id: 20, name: '1729080000020_integration-catalog', upSql: m020.UP_SQL, downSql: m020.DOWN_SQL },
   { id: 21, name: '1729080000021_ops-cache-and-jobs', upSql: m021.UP_SQL, downSql: m021.DOWN_SQL },
+  { id: 22, name: '1729080000022_problem-dismissals', upSql: m022.UP_SQL, downSql: m022.DOWN_SQL },
 ];
 
 /**

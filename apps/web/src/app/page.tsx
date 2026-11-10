@@ -36,6 +36,8 @@ interface CatalogHome {
   lastSyncError: string | null;
   lastBlingSync?: string | null;
   linkedNuvemshop?: number;
+  fiscal?: { awaitingNcm: number; awaitingEan: number; conflicts: number };
+  readiness?: { averageScore: number; readyToPublish: number };
   livePublishing?: boolean;
   sync?: {
     status: 'idle' | 'running' | 'done' | 'failed';
@@ -49,6 +51,18 @@ interface CatalogHome {
 
 function formatCount(value: number): string {
   return value.toLocaleString('pt-BR');
+}
+
+function formatActivityResult(status: string, reason: string | null): string {
+  const normalized = status.toLowerCase();
+  if (normalized === 'processed' || normalized === 'processado') return 'Sincronizado com sucesso';
+  if (normalized === 'failed' || normalized === 'error' || normalized === 'erro') return 'Falha na sincronização';
+  const detail = (reason ?? '').toLowerCase();
+  if (detail.includes('idêntico_content') || detail.includes('identico_content') || detail.includes('identical')) {
+    return 'Ignorado (sem alteração real)';
+  }
+  if (normalized === 'ignored') return 'Ignorado (sem alteração real)';
+  return status;
 }
 
 function relativeTime(value: string | null | undefined): string {
@@ -128,17 +142,17 @@ export default function HomePage() {
   const upserted = catalogHome?.sync?.upserted ?? 0;
   const syncPercent = syncRunning && seen > 0 ? Math.round((upserted / seen) * 100) : catalogHome?.completenessPct ?? 0;
   const lastTouch = catalogHome?.lastBlingSync ?? catalogHome?.sync?.finishedAt ?? catalogHome?.lastSyncOk ?? null;
-  const fiscalAlerts = state
-    ? state.kpis.actionPendings.breakdown.eanPending +
-      state.kpis.actionPendings.breakdown.ncmPendingFirst +
-      state.kpis.actionPendings.breakdown.ncmPendingSecond
-    : 0;
-  const fiscalValue = fiscalAlerts > 0 ? fiscalAlerts : state?.kpis.actionPendings.breakdown.fiscalBlocks ?? 0;
+  const awaitingNcm = catalogHome?.fiscal?.awaitingNcm ?? state?.kpis.actionPendings.breakdown.ncmPendingFirst ?? 0;
+  const awaitingEan = catalogHome?.fiscal?.awaitingEan ?? state?.kpis.actionPendings.breakdown.eanPending ?? 0;
+  const fiscalConflicts = catalogHome?.fiscal?.conflicts ?? state?.kpis.actionPendings.breakdown.eanDuplicates ?? 0;
+  const fiscalProducts = awaitingNcm + awaitingEan;
+  const averageScore = catalogHome?.readiness?.averageScore ?? 0;
+  const readyToPublish = catalogHome?.readiness?.readyToPublish ?? catalogHome?.cards.ready.value ?? 0;
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
       {shadow && (
-        <div className="sticky top-0 z-20 -mx-6 mb-6 flex items-start gap-2 border-b border-sky-700/20 bg-sky-100/95 px-6 py-2.5 text-sm text-sky-950 backdrop-blur dark:bg-sky-950/80 dark:text-sky-100">
+        <div className="sticky top-16 z-40 -mx-6 mb-6 flex items-start gap-2 border-b border-sky-800/30 bg-sky-200 px-6 py-2.5 text-sm font-medium text-sky-950 shadow-sm dark:border-sky-300/30 dark:bg-sky-900 dark:text-sky-50">
           <Shield className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <p>Modo Simulação (Shadow) Ativo: O HUB está validando os dados, mas nenhuma alteração está sendo enviada aos marketplaces.</p>
         </div>
@@ -152,7 +166,18 @@ export default function HomePage() {
 
       <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-6 lg:flex-row lg:items-center">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-text-primary">Início</h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight text-text-primary">Visão Geral</h1>
+            {hasRole('admin') && (
+              <button
+                type="button"
+                onClick={() => void startSync()}
+                className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white"
+              >
+                Sincronizar ERP
+              </button>
+            )}
+          </div>
           <p className="mt-1 text-sm text-text-muted">O que precisa de ação agora, lido do banco.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
@@ -215,13 +240,22 @@ export default function HomePage() {
                 Nenhuma sincronização em andamento. Clique em Sincronizar para iniciar.
               </p>
             )}
+            {hasRole('admin') && (
+              <button
+                type="button"
+                onClick={() => void startSync()}
+                className="mt-3 rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold text-text-primary"
+              >
+                Sincronizar agora
+              </button>
+            )}
           </KpiCard>
           <KpiCard
-            label="Bloqueios críticos"
-            value={`${formatCount(fiscalValue)} alertas`}
-            hint="EAN / NCM pendentes"
+            label="Pendências fiscais"
+            value={`${formatCount(fiscalProducts)} produtos`}
+            hint={`${formatCount(awaitingNcm)} aguardando NCM | ${formatCount(awaitingEan)} aguardando EAN`}
             href="/fiscal"
-            accent={fiscalValue > 0 ? 'rose' : 'neutral'}
+            accent={fiscalConflicts > 0 ? 'rose' : fiscalProducts > 0 ? 'amber' : 'neutral'}
           />
           <KpiCard
             label="Ações hoje"
@@ -231,15 +265,6 @@ export default function HomePage() {
             accent="amber"
           />
         </div>
-        {!syncRunning && hasRole('admin') && (
-          <button
-            type="button"
-            onClick={() => void startSync()}
-            className="mt-3 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white"
-          >
-            Sincronizar
-          </button>
-        )}
         {syncNotice && <p className="mt-2 text-xs text-text-muted" role="status">{syncNotice}</p>}
       </section>
 
@@ -267,9 +292,9 @@ export default function HomePage() {
             />
             <ActionCenterItem
               icon={<Shield className="h-4 w-4" />}
-              tone="rose"
+              tone={fiscalConflicts > 0 ? 'rose' : 'amber'}
               title="Bloqueio fiscal"
-              count={fiscalValue}
+              count={fiscalProducts}
               href="/fiscal"
               reason="Produtos do Bling estão sem EAN válido ou aguardam a segunda aprovação de NCM."
               impact="Criação e atualização de conteúdo ficam bloqueadas. Estoque e pausa seguem livres."
@@ -303,13 +328,20 @@ export default function HomePage() {
               },
               {
                 title: 'Enriquecer dados',
-                detail: `${catalogHome?.completenessPct ?? 0}% do catálogo pronto`,
-                percent: catalogHome?.completenessPct ?? 0,
-                state: (catalogHome?.completenessPct ?? 0) >= 100 ? 'done' : 'active',
+                detail: readyToPublish === 1
+                  ? '1 produto atingiu o mínimo para publicação'
+                  : `${formatCount(readyToPublish)} produtos atingiram o mínimo para publicação`,
+                metric: `Score médio: ${averageScore}/100`,
+                subtext: readyToPublish === 1
+                  ? '1 produto atingiu o mínimo para publicação'
+                  : `${formatCount(readyToPublish)} produtos atingiram o mínimo para publicação`,
+                percent: averageScore,
+                state: averageScore >= 100 ? 'done' : 'active',
               },
               {
                 title: 'Publicar na Nuvemshop',
-                detail: shadow ? 'Envio real desligado' : `${formatCount(linked)} vínculos`,
+                detail: 'Aguardando aprovação de conteúdo',
+                subtext: 'Aguardando aprovação de conteúdo',
                 percent: shadow ? 0 : coverage,
                 state: shadow ? 'blocked' : coverage >= 100 ? 'done' : 'active',
               },
@@ -352,7 +384,7 @@ export default function HomePage() {
                     <td className="py-2.5 px-4 font-mono text-text-muted">{wh.event_type}</td>
                     <td className="py-2.5 px-4 font-mono text-text-primary">{wh.resource_id}</td>
                     <td className="py-2.5 px-4 text-text-muted">
-                      {wh.status === 'processed' ? 'Processado' : wh.status === 'ignored' ? `Descartado (${wh.ignore_reason ?? 'duplicado'})` : wh.status}
+                      {formatActivityResult(wh.status, wh.ignore_reason)}
                     </td>
                     <td className="py-2.5 pl-4 text-right text-text-muted">
                       {wh.processed_at ? new Date(wh.processed_at).toLocaleString('pt-BR') : 'Na fila'}

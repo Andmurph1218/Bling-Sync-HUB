@@ -3,11 +3,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { AlertTriangle, Archive, Copy, PackageOpen, Pencil, Plus, Search, Warehouse } from 'lucide-react';
+import { AlertTriangle, ImageOff, MoreVertical, PackageOpen, Pencil, Play, Plus, Search, SlidersHorizontal } from 'lucide-react';
 import { ApiError, apiFetch, API_BASE_URL } from '../utils/api-client';
 import { EmptySkuNotice, isBlankSku } from './empty-sku-notice';
-import { BrandLogo } from './brand-logo';
 import { buildBlingProductUrl } from '../utils/matching-signals';
+import { IntegrationStatusBadge, integrationBadgeKind } from './integration-status-badge';
+import { useCurrentRole } from './app-shell';
 import { Toaster, ToastMessage } from './toaster';
 import { MERCADO_LIVRE_ACTIVE } from '../config/channels';
 import useSWR from 'swr';
@@ -63,20 +64,6 @@ interface CatalogItem {
   checklist: { percent: number; ready: boolean; tone: 'green' | 'amber' | 'red'; items: ChecklistItem[] };
   archived: boolean;
 }
-
-const INTEGRATION_RING: Record<ChannelIntegration['visual'], string> = {
-  connected: 'ring-emerald-500',
-  pending: 'ring-amber-400',
-  blocked: 'ring-rose-500',
-  absent: 'ring-zinc-400 opacity-70',
-};
-
-const INTEGRATION_DOT: Record<ChannelIntegration['visual'], string> = {
-  connected: 'bg-emerald-500',
-  pending: 'bg-amber-400',
-  blocked: 'bg-rose-500',
-  absent: 'bg-zinc-400',
-};
 
 interface CatalogPayload {
   items: CatalogItem[];
@@ -177,6 +164,9 @@ const GAP_LABEL: Record<string, string> = {
   price: 'sem preço',
   duplicate: 'com possível duplicata',
   stock: 'sem leitura de estoque',
+  dimensions: 'sem peso e dimensões',
+  description: 'sem descrição',
+  content: 'sem atributos ou descrição',
 };
 
 const CHANNEL_LABEL: Record<string, string> = {
@@ -213,13 +203,33 @@ function checklistReasons(reason: string): string[] {
   return parts.length > 0 ? parts : ['Cadastro incompleto'];
 }
 
-function toneClass(tone: CatalogItem['checklist']['tone']): string {
-  if (tone === 'green') return 'text-emerald-300';
-  if (tone === 'amber') return 'text-amber-300';
-  return 'text-rose-300';
+const MISSING_LABEL: Record<string, string> = {
+  sku: 'SKU',
+  cover: 'Imagem de Capa',
+  hub_category: 'Categoria',
+  channel_category: 'Categoria do canal',
+  attributes: 'Atributos',
+  ean: 'EAN',
+  ncm: 'NCM',
+  price: 'Preço',
+  duplicate: 'Duplicata',
+};
+
+function missingFieldsLabel(item: CatalogItem): string {
+  const missing = item.checklist.items.filter((row) => !row.ok).map((row) => MISSING_LABEL[row.code] ?? row.title);
+  return missing.length > 0 ? `Faltam: ${missing.join(', ')}` : 'Cadastro completo';
+}
+
+function completenessBarClass(item: CatalogItem): string {
+  const fatal = item.checklist.items.some((row) => !row.ok && (row.code === 'sku' || row.code === 'ncm'));
+  if (item.checklist.percent >= 100) return 'bg-emerald-600';
+  if (fatal) return 'bg-rose-500';
+  return item.checklist.percent < 50 ? 'bg-orange-400' : 'bg-sky-500';
 }
 
 export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
+  const { hasRole } = useCurrentRole();
+  const isAdmin = hasRole('admin');
   const search = useSearchParams();
   const initialTab = lockedTab ?? (search.get('status') === 'completude' ? 'completude' : search.get('status') === 'ready' ? 'ready' : 'todos');
   const [tab, setTab] = useState<CatalogTab>(initialTab);
@@ -229,14 +239,14 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
   const [sku, setSku] = useState(initialSku);
   const [name, setName] = useState('');
   const [brand, setBrand] = useState('');
-  const [showMore, setShowMore] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [rowMenu, setRowMenu] = useState<{ id: string; top: number; left: number } | null>(null);
   const [applied, setApplied] = useState({ sku: initialSku, name: '', brand: '' });
   const [page, setPage] = useState(1);
   const [data, setData] = useState<CatalogPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const [bulkAction, setBulkAction] = useState('arquivar');
   const [notice, setNotice] = useState<string | null>(null);
   const [channelFocus, setChannelFocus] = useState<{ item: CatalogItem; platform: ChannelIntegration['platform'] } | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -415,19 +425,6 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
     }
   };
 
-  const recalculateSelected = async (ids: string[]) => {
-    if (ids.length === 0) {
-      setNotice('Selecione ao menos um produto.');
-      return;
-    }
-    const result = await apiFetch<{ items: Array<{ id: string; percent: number }> }>(
-      '/api/catalog/products/recalculate-completeness',
-      { method: 'POST', json: { ids } }
-    );
-    setNotice(`Completude recalculada para ${result.items.length} produto(s).`);
-    await load();
-  };
-
   const simulateIds = async (ids: string[]) => {
     const items = (data?.items ?? []).filter((item) => ids.includes(item.id));
     setSimulation({ loading: true, error: null, entries: [] });
@@ -509,100 +506,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
         </p>
       )}
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-[240px_1fr]">
-        <aside className="space-y-4">
-          <section className="rounded-xl border border-border-color bg-bg-surface/60 p-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-text-muted">Filtros</h2>
-            <label className="mt-3 block text-[11px] text-text-muted">
-              SKU
-              <input
-                value={sku}
-                onChange={(event) => setSku(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
-              />
-            </label>
-            <label className="mt-2 block text-[11px] text-text-muted">
-              Nome
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                className="mt-1 w-full rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
-              />
-            </label>
-            <button type="button" onClick={() => setShowMore((prev) => !prev)} className="mt-2 text-[11px] text-text-muted underline">
-              {showMore ? 'Ver menos' : 'Ver mais'}
-            </button>
-            {showMore && (
-              <label className="mt-2 block text-[11px] text-text-muted">
-                Marca
-                <input
-                  value={brand}
-                  onChange={(event) => setBrand(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
-                />
-              </label>
-            )}
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setPage(1);
-                  setApplied({ sku, name, brand });
-                }}
-                className="rounded-lg bg-text-primary px-2.5 py-1.5 text-[11px] font-semibold text-bg-base"
-              >
-                Filtrar
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSku('');
-                  setName('');
-                  setBrand('');
-                  setApplied({ sku: '', name: '', brand: '' });
-                  setPage(1);
-                }}
-                className="rounded-lg border border-border-color px-2.5 py-1.5 text-[11px] text-text-primary"
-              >
-                Limpar
-              </button>
-            </div>
-          </section>
-
-          <section className="rounded-xl border border-border-color bg-bg-surface/60 p-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-text-muted">Ações em lote</h2>
-            <select
-              value={bulkAction}
-              onChange={(event) => setBulkAction(event.target.value)}
-              className="mt-3 w-full rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
-            >
-              <option value="arquivar">Arquivar</option>
-              <option value="envio">Adicionar à Lista de Envio</option>
-              <option value="completude">Recalcular Completude</option>
-            </select>
-            <button
-              type="button"
-              className="mt-2 w-full rounded-lg border border-border-color px-2.5 py-1.5 text-[11px] font-semibold text-text-primary"
-              onClick={() => {
-                const action = bulkAction === 'arquivar' ? 'arquivar' : bulkAction === 'envio' ? 'envio' : 'completude';
-                void apiFetch<{ batchJobId: string }>('/api/catalog/batch-jobs', {
-                  method: 'POST',
-                  json: { action, ids: selected },
-                }).then((job) => setBatchId(job.batchJobId)).catch(() => setNotice('Não foi possível iniciar o lote.'));
-              }}
-            >
-              Executar
-            </button>
-          </section>
-
-          <section className="rounded-xl border border-border-color bg-bg-surface/60 p-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-text-muted">Importação</h2>
-            <p className="mt-2 text-[11px] text-text-muted">
-              A planilha atualiza a imagem e campos de canal ainda vazios. Nome, descrição, categoria, preço e estoque ficam com o Bling.
-            </p>
-          </section>
-        </aside>
-
+      <div className="mt-6">
         <section>
           <div className="flex flex-wrap gap-2">
             {(
@@ -737,7 +641,16 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
 
           {view === 'produtos' && (
             <>
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFiltersOpen((open) => !open)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold text-text-primary"
+                  aria-expanded={filtersOpen}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  Filtros avançados
+                </button>
                 {(lockedTab ? TABS.filter((item) => item.id === 'completude') : TABS).map((item) => (
                   <button
                     key={item.id}
@@ -761,6 +674,50 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                   </span>
                 )}
               </div>
+              {filtersOpen && (
+                <div className="mt-3 rounded-xl border border-border-color bg-bg-surface p-4">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <label className="block text-[11px] text-text-muted">
+                      SKU
+                      <input value={sku} onChange={(event) => setSku(event.target.value)} className="mt-1 w-full rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary" />
+                    </label>
+                    <label className="block text-[11px] text-text-muted">
+                      Nome
+                      <input value={name} onChange={(event) => setName(event.target.value)} className="mt-1 w-full rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary" />
+                    </label>
+                    <label className="block text-[11px] text-text-muted">
+                      Marca
+                      <input value={brand} onChange={(event) => setBrand(event.target.value)} className="mt-1 w-full rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary" />
+                    </label>
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPage(1);
+                        setApplied({ sku, name, brand });
+                        setFiltersOpen(false);
+                      }}
+                      className="rounded-lg bg-text-primary px-2.5 py-1.5 text-[11px] font-semibold text-bg-base"
+                    >
+                      Filtrar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSku('');
+                        setName('');
+                        setBrand('');
+                        setApplied({ sku: '', name: '', brand: '' });
+                        setPage(1);
+                      }}
+                      className="rounded-lg border border-border-color px-2.5 py-1.5 text-[11px] text-text-primary"
+                    >
+                      Limpar
+                    </button>
+                  </div>
+                </div>
+              )}
               {gap && (
                 <p className="mt-3 text-xs text-amber-200">
                   Filtro de pendência: {GAP_LABEL[gap] ?? gap}.{' '}
@@ -774,7 +731,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                 <table className="w-full text-left text-xs">
                   <thead className="bg-bg-surface text-[11px] uppercase tracking-wider text-text-muted">
                     <tr>
-                      <th className="px-3 py-3">
+                      <th className="px-2 py-1.5">
                         <input
                           type="checkbox"
                           checked={allPageSelected}
@@ -788,38 +745,37 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                           aria-label="Selecionar os produtos desta página"
                         />
                       </th>
-                      <th className="px-3 py-3">Imagem</th>
-                      <th className="px-3 py-3">Nome</th>
-                      <th className="px-3 py-3">Tipo</th>
-                      <th className="px-3 py-3">SKU</th>
-                      <th className="px-3 py-3">Estoque</th>
-                      <th className="px-3 py-3">Preço</th>
-                      <th className="px-3 py-3">Promo</th>
-                      <th className="px-3 py-3">Integrado</th>
-                      <th className="px-3 py-3">Completude</th>
-                      <th className="px-3 py-3">Ações</th>
+                      <th className="px-2 py-1.5">Imagem</th>
+                      <th className="px-2 py-1.5">Nome</th>
+                      <th className="px-2 py-1.5">Tipo</th>
+                      <th className="px-2 py-1.5">Estoque</th>
+                      <th className="px-2 py-1.5">Preço</th>
+                      <th className="px-2 py-1.5">Promo</th>
+                      <th className="px-2 py-1.5">Integrado</th>
+                      <th className="px-2 py-1.5">Completude</th>
+                      <th className="px-2 py-1.5">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border-color bg-bg-base/40">
                     {loading && (
                       <tr>
-                        <td colSpan={11} className="px-3 py-6 text-text-muted">Lendo o catálogo...</td>
+                        <td colSpan={10} className="px-3 py-6 text-text-muted">Lendo o catálogo...</td>
                       </tr>
                     )}
                     {!loading && error && (
                       <tr>
-                        <td colSpan={11} className="px-3 py-6 text-rose-200" role="alert">{error}</td>
+                        <td colSpan={10} className="px-3 py-6 text-rose-200" role="alert">{error}</td>
                       </tr>
                     )}
                     {!loading && !error && data && data.items.length === 0 && (
                       <tr>
-                        <td colSpan={11} className="px-3 py-6 text-text-muted">Nenhum produto nesta lista.</td>
+                        <td colSpan={10} className="px-3 py-6 text-text-muted">Nenhum produto nesta lista.</td>
                       </tr>
                     )}
                     {data?.items.map((item) => (
                       <React.Fragment key={item.id}>
-                        <tr>
-                          <td className="px-3 py-3">
+                        <tr className="h-14 max-h-14">
+                          <td className="px-2 py-1">
                             <input
                               type="checkbox"
                               checked={selected.includes(item.id)}
@@ -831,78 +787,73 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                               aria-label={`Selecionar ${item.sku || item.blingId}`}
                             />
                           </td>
-                          <td className="px-3 py-3">
+                          <td className="px-2 py-1">
                             {item.coverUrl ? (
-                              <img src={item.coverUrl} alt="" className="h-10 w-10 rounded object-cover" />
+                              <img src={item.coverUrl} alt="" className="h-10 w-10 rounded-md object-cover" />
                             ) : (
-                              <span className="inline-flex h-10 w-10 items-center justify-center rounded bg-bg-surface text-[10px] text-text-muted">sem</span>
+                              <span className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-bg-surface text-text-muted">
+                                <ImageOff className="h-4 w-4" aria-hidden="true" />
+                              </span>
                             )}
-                            <button type="button" onClick={() => void toggleVariants(item)} className="mt-1 block text-[10px] text-sky-300">
-                              Variações
-                            </button>
                           </td>
-                          <td className="px-3 py-3 text-text-primary">{item.name || 'Sem nome no ERP'}</td>
-                          <td className="px-3 py-3 text-text-muted">{item.typeLabel}</td>
-                          <td className="px-3 py-3">
-                            {isBlankSku(item.sku) ? <EmptySkuNotice /> : <span className="font-mono text-emerald-300">{item.sku}</span>}
+                          <td className="max-w-[240px] px-2 py-1">
+                            <p className="truncate font-medium text-text-primary">{item.name || 'Sem nome no ERP'}</p>
+                            {isBlankSku(item.sku) ? <EmptySkuNotice /> : <p className="truncate font-mono text-xs text-text-muted">{item.sku}</p>}
                           </td>
-                          <td className="px-3 py-3">{item.stock === null ? '—' : item.stock}</td>
-                          <td className="px-3 py-3">{money(item.price)}</td>
-                          <td className="px-3 py-3">{item.promotionalPrice === null ? '—' : money(item.promotionalPrice)}</td>
-                          <td className="px-3 py-3">
-                            <div className="flex gap-2">
+                          <td className="px-2 py-1 text-text-muted">{item.typeLabel}</td>
+                          <td className="px-2 py-1">{item.stock === null ? '—' : item.stock}</td>
+                          <td className="px-2 py-1">{money(item.price)}</td>
+                          <td className="px-2 py-1">{item.promotionalPrice === null ? '—' : money(item.promotionalPrice)}</td>
+                          <td className="px-2 py-1">
+                            <div className="flex flex-wrap gap-1">
                               {(item.integrations ?? [])
                                 .filter((channel) => MERCADO_LIVRE_ACTIVE || channel.platform !== 'mercadolivre')
                                 .map((channel) => (
-                                  <button
+                                  <IntegrationStatusBadge
                                     key={channel.platform}
-                                    type="button"
-                                    title={`${CHANNEL_LABEL[channel.platform]} · ${channel.label}. ${channel.tooltip}`}
-                                    aria-label={`${CHANNEL_LABEL[channel.platform]}: ${channel.tooltip}`}
+                                    platform={channel.platform}
+                                    kind={integrationBadgeKind(channel)}
                                     onClick={() => setChannelFocus({ item, platform: channel.platform })}
-                                    className={`relative rounded-md ring-2 ring-offset-1 ring-offset-bg-base ${INTEGRATION_RING[channel.visual]}`}
-                                  >
-                                    <BrandLogo id={channel.platform} name={CHANNEL_LABEL[channel.platform]} size={28} />
-                                    <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-bg-base ${INTEGRATION_DOT[channel.visual]}`} />
-                                  </button>
+                                  />
                                 ))}
                             </div>
                           </td>
-                          <td className={`px-3 py-3 font-semibold ${toneClass(item.checklist.tone)}`} title={item.checklist.items.filter((row) => !row.ok).map((row) => row.title).join(' · ')}>
-                            {item.checklist.percent}%
+                          <td className="px-2 py-1" title={missingFieldsLabel(item)}>
+                            <div className="w-16">
+                              <p className="text-[11px] font-semibold text-text-primary">{item.checklist.percent}%</p>
+                              <div className="mt-1 h-1 overflow-hidden rounded-full bg-bg-surface">
+                                <div className={`h-full ${completenessBarClass(item)}`} style={{ width: `${item.checklist.percent}%` }} />
+                              </div>
+                            </div>
                           </td>
-                          <td className="px-3 py-3">
-                            <div className="flex gap-1">
+                          <td className="px-2 py-1">
+                            <div className="flex items-center gap-1">
                               <Link href={`/catalogo/${item.blingId}?aba=geral`} title="Editar" className="rounded border border-border-color p-1 text-text-primary">
                                 <Pencil className="h-3.5 w-3.5" />
                               </Link>
-                              <button type="button" title="Duplicar não cria SKU no ERP" onClick={() => { setDraftFor(item); setDraftSku(''); setDraftResult(null); }} className="rounded border border-border-color p-1 text-text-primary">
-                                <Copy className="h-3.5 w-3.5" />
-                              </button>
-                              <Link href={`/catalogo/${item.blingId}?aba=variacoes`} title="Depósitos lidos do ERP" className="rounded border border-border-color p-1 text-text-primary">
-                                <Warehouse className="h-3.5 w-3.5" />
-                              </Link>
+                              {(isAdmin || item.checklist.ready || (item.integrations ?? []).some((channel) => channel.ready)) && (
+                                <button type="button" title="Simular envio" className="rounded border border-border-color p-1 text-text-primary" onClick={() => void simulateIds([item.id])}>
+                                  <Play className="h-3.5 w-3.5" />
+                                </button>
+                              )}
                               <button
                                 type="button"
-                                title={item.archived ? 'Desarquivar' : 'Arquivar'}
-                                onClick={() => void archiveIds([item.id], !item.archived).catch(() => setNotice('Não foi possível alterar o arquivamento.'))}
+                                title="Mais ações"
+                                aria-label="Mais ações"
                                 className="rounded border border-border-color p-1 text-text-primary"
+                                onClick={(event) => {
+                                  const rect = event.currentTarget.getBoundingClientRect();
+                                  setRowMenu((current) => current?.id === item.id ? null : { id: item.id, top: rect.bottom + 4, left: rect.right });
+                                }}
                               >
-                                <Archive className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                className="rounded border border-sky-700 px-1.5 py-1 text-[10px] font-semibold text-sky-200"
-                                onClick={() => void simulateIds([item.id])}
-                              >
-                                Simular envio
+                                <MoreVertical className="h-3.5 w-3.5" />
                               </button>
                             </div>
                           </td>
                         </tr>
                         {openVariants[item.blingId] && (
                           <tr>
-                            <td colSpan={11} className="bg-bg-surface/70 px-6 py-3 text-[11px] text-text-muted">
+                            <td colSpan={10} className="bg-bg-surface/70 px-6 py-3 text-[11px] text-text-muted">
                               {openVariants[item.blingId] === 'loading' && 'Lendo variações...'}
                               {Array.isArray(openVariants[item.blingId]) && (openVariants[item.blingId] as VariantRow[]).length === 0 && 'Nenhuma variação no banco.'}
                               {Array.isArray(openVariants[item.blingId]) &&
@@ -1046,21 +997,64 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
 
       {selected.length > 0 && view === 'produtos' && (
         <div className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 flex-wrap items-center gap-2 rounded-full border border-border-color bg-bg-base px-4 py-2 text-xs text-text-primary shadow-2xl">
-          <span>{selected.length} selecionado(s)</span>
-          <button type="button" className="rounded-full border border-sky-500 px-3 py-1 font-semibold text-sky-200" onClick={() => void simulateIds(selected)}>
-            Simular
+          <span>{selected.length} {selected.length === 1 ? 'item selecionado' : 'itens selecionados'}.</span>
+          <button
+            type="button"
+            className="rounded-full border border-border-color px-3 py-1 font-semibold"
+            onClick={() => {
+              void apiFetch<{ batchJobId: string }>('/api/catalog/batch-jobs', { method: 'POST', json: { action: 'arquivar', ids: selected } })
+                .then((job) => setBatchId(job.batchJobId))
+                .catch(() => setNotice('Não foi possível arquivar.'));
+            }}
+          >
+            Arquivar
           </button>
-          <button type="button" className="rounded-full bg-emerald-600 px-3 py-1 font-semibold" onClick={() => void addToSendList(selected).catch(() => setNotice('Não foi possível adicionar à lista de envio.'))}>
-            Adicionar à Lista de Envio
+          <button
+            type="button"
+            className="rounded-full border border-border-color px-3 py-1 font-semibold"
+            onClick={() => {
+              void apiFetch<{ batchJobId: string }>('/api/catalog/batch-jobs', { method: 'POST', json: { action: 'completude', ids: selected } })
+                .then((job) => setBatchId(job.batchJobId))
+                .catch(() => setNotice('Não foi possível recalcular.'));
+            }}
+          >
+            Recalcular
           </button>
-          <button type="button" className="rounded-full border border-border-color px-3 py-1" onClick={() => void recalculateSelected(selected).catch(() => setNotice('Não foi possível recalcular a completude.'))}>
-            Recalcular Completude
+          <button type="button" className="rounded-full bg-emerald-700 px-3 py-1 font-semibold text-white" onClick={() => void simulateIds(selected)}>
+            Simular Envio
           </button>
           <button type="button" className="text-text-muted underline" onClick={() => setSelected([])}>
             Limpar
           </button>
         </div>
       )}
+
+      {rowMenu && (() => {
+        const menuItem = data?.items.find((row) => row.id === rowMenu.id);
+        if (!menuItem) return null;
+        return (
+          <div className="fixed inset-0 z-50" onClick={() => setRowMenu(null)}>
+            <div
+              className="absolute w-44 rounded-lg border border-border-color bg-bg-surface py-1 text-xs shadow-xl"
+              style={{ top: rowMenu.top, left: rowMenu.left, transform: 'translateX(-100%)' }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-bg-base" onClick={() => { setDraftFor(menuItem); setDraftSku(''); setDraftResult(null); setRowMenu(null); }}>
+                Duplicar produto
+              </button>
+              <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-bg-base" onClick={() => { void archiveIds([menuItem.id], !menuItem.archived).catch(() => setNotice('Não foi possível alterar o arquivamento.')); setRowMenu(null); }}>
+                {menuItem.archived ? 'Desarquivar' : 'Arquivar'}
+              </button>
+              <a href={buildBlingProductUrl(menuItem.blingId)} target="_blank" rel="noreferrer" className="block px-3 py-1.5 hover:bg-bg-base" onClick={() => setRowMenu(null)}>
+                Ver no Bling
+              </a>
+              <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-bg-base" onClick={() => { void toggleVariants(menuItem); setRowMenu(null); }}>
+                Variações
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {lookupOpen && (
         <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 p-4">

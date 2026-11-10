@@ -143,6 +143,22 @@ const GAP_SQL: Record<string, string> = {
   stock: NO_STOCK,
 };
 
+const NO_DIMENSIONS = `mp.id NOT IN (
+  SELECT master_product_id FROM product_variants
+  WHERE is_default = true
+    AND (gross_weight > 0 OR net_weight > 0)
+    AND width > 0 AND height > 0 AND depth > 0
+)`;
+const NO_DESCRIPTION = `(mp.description IS NULL OR mp.description = '')`;
+
+export const QUALITY_SCOPE_SQL = NOT_ARCHIVED;
+export const QUALITY_GAP_SQL: Record<string, string> = {
+  ...GAP_SQL,
+  dimensions: NO_DIMENSIONS,
+  description: NO_DESCRIPTION,
+  content: `(${MISSING_CHANNEL} OR ${NO_DESCRIPTION})`,
+};
+
 function tabSql(tab: CatalogTab): string {
   if (tab === 'arquivados') return `${ACTIVE} AND mp.archived_at IS NOT NULL`;
   if (tab === 'publicados') return `${NOT_ARCHIVED} AND ${LINKED}`;
@@ -223,7 +239,7 @@ export async function listCatalog(input: {
   if (sku) clauses.push(`lower(mp.bling_sku) LIKE ${bind(`%${sku}%`)}`);
   if (name) clauses.push(`lower(COALESCE(mp.name, '')) LIKE ${bind(`%${name}%`)}`);
   if (brand) clauses.push(`lower(COALESCE(mp.brand, '')) LIKE ${bind(`%${brand}%`)}`);
-  if (input.gap && GAP_SQL[input.gap]) clauses.push(GAP_SQL[input.gap]);
+  if (input.gap && QUALITY_GAP_SQL[input.gap]) clauses.push(QUALITY_GAP_SQL[input.gap]);
   const where = clauses.join(' AND ');
 
   const countRow = await query<{ count: number }>(

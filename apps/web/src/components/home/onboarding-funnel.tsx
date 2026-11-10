@@ -5,6 +5,8 @@ export interface FunnelStep {
   detail: string;
   percent: number;
   state: 'done' | 'active' | 'blocked';
+  metric?: string;
+  subtext?: string;
 }
 
 const STATE_LABEL = {
@@ -25,14 +27,21 @@ export function OnboardingFunnel({ steps }: { steps: FunnelStep[] }) {
             </p>
           </div>
           <p className="mt-2 text-sm font-bold text-text-primary">{step.title}</p>
-          <p className="mt-1 text-xs text-text-muted">{step.detail}</p>
+          <p className="mt-1 text-xs font-semibold text-text-primary">{step.metric ?? step.detail}</p>
+          {step.metric && step.detail && step.detail !== step.subtext && (
+            <p className="mt-1 text-xs text-text-muted">{step.detail}</p>
+          )}
           <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-bg-base">
             <div
               className={`h-full ${step.state === 'blocked' ? 'bg-rose-400' : step.state === 'done' ? 'bg-emerald-600' : 'bg-amber-500'}`}
               style={{ width: `${Math.max(0, Math.min(100, step.percent))}%` }}
             />
           </div>
-          <p className="mt-1 text-xs font-bold text-text-primary">{step.percent}%</p>
+          {step.subtext ? (
+            <p className="mt-1 text-xs text-text-muted">{step.subtext}</p>
+          ) : (
+            <p className="mt-1 text-xs font-bold text-text-primary">{step.percent}%</p>
+          )}
         </li>
       ))}
     </ol>

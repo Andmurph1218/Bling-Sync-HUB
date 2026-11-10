@@ -6,6 +6,15 @@ import { query, withTransaction } from '../db/pool.js';
 import { lookupChannelAttributeSpecs } from '../catalog/channel-attributes.js';
 import { listCatalog, CatalogTab } from '../catalog/list.js';
 import { listProblems } from '../catalog/problems.js';
+import {
+  buildProblemsCsv,
+  dismissProblems,
+  expandSelection,
+  listGroupItems,
+  listProblemGroups,
+  readProblemLog,
+} from '../catalog/problem-panel.js';
+import { buildQualityCsv, isQualityMetricCode, loadQualitySummary } from '../catalog/quality.js';
 import { buildPublishPreview, recalculateCompleteness, PublishChannel } from '../catalog/publish-preview.js';
 import { enqueueReadyProducts, isLivePublishingEnabled } from '../queues/publish-queue.js';
 import { buildCatalogWorkbook, importCatalogWorkbook } from '../catalog/spreadsheet.js';
@@ -32,12 +41,110 @@ catalogRouter.get('/api/problems', requireAuth, async (_req: Request, res: Respo
   }
 });
 
+const problemSelection = z.object({
+  groupKeys: z.array(z.string().max(4000)).max(500).default([]),
+  itemIds: z.array(z.string().max(200)).max(5000).default([]),
+});
+
+catalogRouter.get('/api/problems/panel', requireAuth, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const groups = await listProblemGroups();
+    const counts = { todos: 0, estoque: 0, preco: 0, anuncio: 0, cadastro: 0 };
+    for (const group of groups) {
+      counts.todos += group.count;
+      counts[group.type] += group.count;
+    }
+    res.status(200).json({ groups, counts });
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.get('/api/problems/groups/:key/items', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const pageSize = Math.min(Math.max(Number(req.query.pageSize) || 25, 1), 100);
+    const result = await listGroupItems(req.params.key, page, pageSize);
+    if (!result) {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+    res.status(200).json({ ...result, page, pageSize });
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.get('/api/problems/items/:id/log', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const log = await readProblemLog(req.params.id);
+    if (!log) {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+    res.status(200).json(log);
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.post('/api/problems/reprocess', requireRole('operator', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = problemSelection.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_payload' });
+      return;
+    }
+    const ids = await expandSelection(parsed.data.groupKeys, parsed.data.itemIds);
+    if (ids.length === 0) {
+      res.status(400).json({ error: 'empty_selection' });
+      return;
+    }
+    const batchJobId = await createBatchJob(req.user?.id ?? null, 'problemas', ids, {
+      allowErpSync: req.user?.roles.includes('admin') ?? false,
+    });
+    res.status(202).json({ batchJobId, total: ids.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.post('/api/problems/dismiss', requireRole('operator', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = problemSelection.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_payload' });
+      return;
+    }
+    const dismissed = await dismissProblems(parsed.data.groupKeys, parsed.data.itemIds, req.user?.id ?? null);
+    res.status(200).json({ dismissed });
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.post('/api/problems/export.csv', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = problemSelection.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_payload' });
+      return;
+    }
+    const csv = await buildProblemsCsv(parsed.data.groupKeys, parsed.data.itemIds);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="erros-integracao.csv"');
+    res.status(200).send(csv);
+  } catch (error) {
+    next(error);
+  }
+});
+
 catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const listed = await listCatalog({ tab: 'todos', sku: '', name: '', brand: '', page: 1, pageSize: 1 });
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
-    const [unlinked, sentToday, failedToday, queued, problems, oauth, lastOk, lastError, linkedNs, lastBling] = await Promise.all([
+    const [unlinked, sentToday, failedToday, queued, problems, oauth, lastOk, lastError, linkedNs, lastBling, awaitingNcm, awaitingEan, fiscalConflicts, readiness] = await Promise.all([
       query<{ count: number }>(`SELECT count(*)::int AS count FROM matching_queue WHERE status = 'pending'`),
       query<{ count: number }>(
         `SELECT count(*)::int AS count FROM push_jobs WHERE status = 'completed' AND created_at >= $1`,
@@ -69,6 +176,36 @@ catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: R
       query<{ last_sync: Date | string | null }>(
         `SELECT max(last_bling_sync) AS last_sync FROM master_products`
       ),
+      query<{ count: number }>(
+        `SELECT count(*)::int AS count
+         FROM master_products
+         WHERE catalog_status = 'active' AND archived_at IS NULL
+           AND ncm_fiscal_risk = false
+           AND ncm_status IN ('unknown', 'invalid', 'divergent', 'pending_approval')`
+      ),
+      query<{ count: number }>(
+        `SELECT count(DISTINCT mp.id)::int AS count
+         FROM master_products mp
+         INNER JOIN product_variants pv
+           ON pv.master_product_id = mp.id AND pv.is_default = true AND pv.is_active = true
+         WHERE mp.catalog_status = 'active' AND mp.archived_at IS NULL
+           AND pv.ean_status IN ('unknown', 'invalid', 'pending_validation', 'divergent')`
+      ),
+      query<{ count: number }>(
+        `SELECT (
+           (SELECT count(*)::int FROM master_products
+            WHERE catalog_status = 'active' AND archived_at IS NULL
+              AND (ncm_status = 'conflict' OR ncm_fiscal_risk = true))
+           +
+           (SELECT count(DISTINCT master_product_id)::int FROM product_variants
+            WHERE is_active = true AND ean_status = 'duplicate')
+         ) AS count`
+      ),
+      query<{ average: number | null; ready: number }>(
+        `SELECT avg(score_ns) AS average,
+                sum(CASE WHEN publishable_ns THEN 1 ELSE 0 END)::int AS ready
+         FROM channel_readiness_scores`
+      ),
     ]);
     const sync = getFullSyncStatus();
     const publicationsToday =
@@ -99,6 +236,15 @@ catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: R
       lastSyncError: lastError.rows[0]?.last_error ?? null,
       lastBlingSync: lastBling.rows[0]?.last_sync ?? null,
       linkedNuvemshop: linkedNs.rows[0]?.count ?? 0,
+      fiscal: {
+        awaitingNcm: awaitingNcm.rows[0]?.count ?? 0,
+        awaitingEan: awaitingEan.rows[0]?.count ?? 0,
+        conflicts: fiscalConflicts.rows[0]?.count ?? 0,
+      },
+      readiness: {
+        averageScore: Math.round(Number(readiness.rows[0]?.average ?? 0)),
+        readyToPublish: Number(readiness.rows[0]?.ready ?? 0),
+      },
       livePublishing: isLivePublishingEnabled(),
       sync: {
         status: sync.status,
@@ -582,6 +728,31 @@ catalogRouter.get('/api/catalog/export', requireAuth, async (_req: Request, res:
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="catalogo.xlsx"');
     res.status(200).send(file);
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.get('/api/catalog/quality', requireAuth, async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.status(200).json(await loadQualitySummary());
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.get('/api/catalog/quality/export.csv', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const gap = req.query.gap;
+    if (gap !== undefined && !isQualityMetricCode(gap)) {
+      res.status(400).json({ error: 'invalid_gap' });
+      return;
+    }
+    const csv = await buildQualityCsv(gap);
+    const fileName = gap ? `qualidade-${gap}.csv` : 'relatorio-qualidade.csv';
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.status(200).send(csv);
   } catch (error) {
     next(error);
   }
