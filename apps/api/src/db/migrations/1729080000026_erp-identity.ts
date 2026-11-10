@@ -6,6 +6,10 @@ ALTER TABLE master_products DROP CONSTRAINT IF EXISTS master_products_constraint
 ALTER TABLE master_products DROP CONSTRAINT IF EXISTS master_products_bling_id_key;
 ALTER TABLE product_variants DROP CONSTRAINT IF EXISTS product_variants_bling_formato_check;
 ALTER TABLE product_variants DROP CONSTRAINT IF EXISTS product_variants_check;
+ALTER TABLE product_variants DROP CONSTRAINT IF EXISTS product_variants_ean_status_check;
+ALTER TABLE product_variants DROP CONSTRAINT IF EXISTS product_variants_variant_status_check;
+ALTER TABLE product_variants DROP CONSTRAINT IF EXISTS product_variants_stock_mode_check;
+ALTER TABLE product_variants DROP CONSTRAINT IF EXISTS product_variants_stock_values_check;
 ALTER TABLE product_variants DROP CONSTRAINT IF EXISTS product_variants_constraint_1;
 ALTER TABLE product_variants DROP CONSTRAINT IF EXISTS product_variants_constraint_2;
 ALTER TABLE product_variants DROP CONSTRAINT IF EXISTS product_variants_constraint_3;
