@@ -3,8 +3,10 @@ import dotenv from 'dotenv';
 import { z } from 'zod';
 
 if (!process.env.VITEST) {
-  dotenv.config({ path: path.resolve(process.cwd(), '.env') });
-  dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
+  const envFiles = ['.env', '.env.local', '../../.env', '../../.env.local'];
+  for (const file of envFiles) {
+    dotenv.config({ path: path.resolve(process.cwd(), file) });
+  }
 }
 
 /**

@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import { listCatalog } from './list.js';
 import { query } from '../db/pool.js';
+import { MERCADO_LIVRE_ACTIVE } from '../config/channels.js';
 
 const HEADERS = ['SKU', 'Nome', 'Categoria', 'Status de Completude', 'Preço', 'Estoque', 'Canais Vinculados'] as const;
 
@@ -103,7 +104,9 @@ export async function importCatalogWorkbook(file: Buffer): Promise<{ lines: Impo
   }
 
   const ignoredPrice = ['preco', 'estoque', 'price', 'stock'].some((key) => columns.has(key));
-  const ignoresBlingText = ['nome', 'name', 'descricao', 'description', 'categoria', 'category'].some((key) => columns.has(key));
+  const nameColumn = columns.get('nome') ?? columns.get('name');
+  const descriptionColumn = columns.get('descricao') ?? columns.get('description');
+  const categoryColumn = columns.get('categoria') ?? columns.get('category');
   const imageColumn = columns.get('url da imagem') ?? columns.get('imagem') ?? columns.get('image_url');
   const channelColumnDefs: Array<{ key: string; platform: 'mercadolivre' | 'nuvemshop'; field: 'title' | 'description' }> = [
     { key: 'titulo mercadolivre', platform: 'mercadolivre', field: 'title' },
@@ -134,20 +137,40 @@ export async function importCatalogWorkbook(file: Buffer): Promise<{ lines: Impo
       continue;
     }
     if (imageUrl) await applyCover(productId, imageUrl);
-    await applyEmptyChannelFields(productId, row, columns, channelColumns);
+    await applyBlingFields(productId, row, { nameColumn, descriptionColumn, categoryColumn });
+    const activeChannels = channelColumns.filter((column) => MERCADO_LIVRE_ACTIVE || column.platform === 'nuvemshop');
+    await applyEmptyChannelFields(productId, row, columns, activeChannels);
     const notes = [
       ignoredPrice ? 'Preço e estoque ignorados.' : '',
-      ignoresBlingText ? 'Aviso: Descrição e Categoria são gerenciadas pelo Bling e foram ignoradas.' : '',
     ].filter(Boolean);
     lines.push({ line, sku, status: 'sucesso', message: `Linha ${line}: Sucesso.${notes.length ? ` ${notes.join(' ')}` : ''}` });
   }
   return {
     lines,
-    ignoredSovereignColumns: [
-      ...(ignoresBlingText ? ['nome', 'descricao', 'categoria'] : []),
-      ...(ignoredPrice ? ['preco', 'estoque'] : []),
-    ],
+    ignoredSovereignColumns: ignoredPrice ? ['preco', 'estoque'] : [],
   };
+}
+
+async function applyBlingFields(
+  productId: string,
+  row: ExcelJS.Row,
+  columns: { nameColumn?: number; descriptionColumn?: number; categoryColumn?: number }
+): Promise<void> {
+  const name = columns.nameColumn ? cellText(row.getCell(columns.nameColumn).value) : '';
+  const description = columns.descriptionColumn ? cellText(row.getCell(columns.descriptionColumn).value) : '';
+  const category = columns.categoryColumn ? cellText(row.getCell(columns.categoryColumn).value) : '';
+  if (name) await query(`UPDATE master_products SET name = $2, updated_at = now() WHERE id = $1`, [productId, name]);
+  if (description) await query(`UPDATE master_products SET description = $2, updated_at = now() WHERE id = $1`, [productId, description]);
+  if (category) {
+    await query(`UPDATE master_products SET category = $2, updated_at = now() WHERE id = $1`, [productId, category]);
+    const found = await query<{ id: string }>(
+      `SELECT id FROM hub_categories WHERE lower(name) = lower($1) LIMIT 1`,
+      [category]
+    );
+    if (found.rows[0]) {
+      await query(`UPDATE master_products SET hub_category_id = $2 WHERE id = $1`, [productId, found.rows[0].id]);
+    }
+  }
 }
 
 async function applyEmptyChannelFields(

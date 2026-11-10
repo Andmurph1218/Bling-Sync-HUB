@@ -61,6 +61,11 @@ export function resolveInstallStatus(
     return { status: 'available', label: 'Não instalado', reason: null };
   }
   const expired = new Date(token.expiresAt).getTime() < now.getTime();
+  // O access token do Bling dura ~6h e é renovado com o refresh. Isso não é desconexão.
+  const renewsItself = app.id === 'nuvemshop' || (app.id === 'bling' && token.hasRefresh);
+  if (renewsItself) {
+    return { status: 'installed', label: 'Instalado', reason: null };
+  }
   const needsOfflineAccess = app.id === 'mercadolivre' && !token.hasRefresh;
   if (needsOfflineAccess || expired) {
     const reason = needsOfflineAccess

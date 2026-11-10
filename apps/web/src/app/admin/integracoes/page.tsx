@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useCurrentRole } from '../../../components/app-shell';
 import { apiFetch } from '../../../utils/api-client';
 import { BrandLogo } from '../../../components/brand-logo';
+import { MERCADO_LIVRE_ACTIVE } from '../../../config/channels';
 
 type CategoryFilter = 'todos' | 'Marketplace' | 'ERP' | 'Logística';
 
@@ -106,11 +107,33 @@ export default function AdminIntegrationsPage() {
       setWebhookSecret('');
       setAccessToken('');
       setCredentialsFor(null);
-      const payload = await apiFetch<{ groups: Array<{ apps: CatalogApp[] }> }>('/api/admin/integrations');
-      setApps(payload.groups.flatMap((group) => group.apps));
+      await reloadApps();
     } catch {
       setNotice('Informe o Client ID e o Client Secret na primeira gravação.');
     }
+  };
+
+  const reloadApps = async () => {
+    const payload = await apiFetch<{ groups: Array<{ apps: CatalogApp[] }> }>('/api/admin/integrations');
+    setApps(payload.groups.flatMap((group) => group.apps));
+  };
+
+  const disconnectApp = async (app: CatalogApp) => {
+    try {
+      await apiFetch(`/api/admin/integrations/${app.slug}/disconnect`, { method: 'POST' });
+      setNotice(`${app.name} desconectado. As credenciais do aplicativo continuam salvas.`);
+      await reloadApps();
+    } catch {
+      setNotice('Não foi possível desconectar.');
+    }
+  };
+
+  const connectApp = (app: CatalogApp) => {
+    if (app.slug === 'nuvemshop' || !app.hasCredentials) {
+      void openCredentials(app);
+      return;
+    }
+    window.location.href = `/oauth/${app.slug}/authorize`;
   };
 
   const requestApp = async (app: CatalogApp) => {
@@ -156,15 +179,21 @@ export default function AdminIntegrationsPage() {
           <section className="grid content-start gap-4 sm:grid-cols-2">
             {visible.map((app) => {
               const soon = !app.isAvailable;
-              const healthy = app.hasCredentials && app.tokenValid;
+              const paused = app.slug === 'mercadolivre' && !MERCADO_LIVRE_ACTIVE;
+              const connected = app.tokenValid && !paused;
+              const healthy = connected;
               const statusText = soon
                 ? 'Em breve'
-                : !app.hasCredentials
+                  : paused
+                  ? 'Conector no código. Desativado até nova autorização.'
+                  : !app.hasCredentials
                   ? 'Ainda sem credenciais'
                   : app.tokenValid
                     ? app.slug === 'nuvemshop'
                       ? 'Credenciais salvas. Loja autorizada.'
-                      : 'Credenciais salvas e token válido'
+                      : app.slug === 'bling'
+                        ? 'Credenciais salvas. Conta do Bling autorizada.'
+                        : 'Credenciais salvas e token válido'
                     : app.slug === 'nuvemshop'
                       ? 'Credenciais salvas. Falta autorizar a loja. O token da Nuvemshop não expira.'
                       : app.hasToken
@@ -186,15 +215,22 @@ export default function AdminIntegrationsPage() {
                   <div className="mt-auto pt-4">
                     {soon ? (
                       <button type="button" className="rounded-lg bg-bg-surface px-3 py-1.5 text-xs font-semibold text-text-muted" onClick={() => void requestApp(app)}>
-                        Solicitar Integração
+                        Em breve
                       </button>
                     ) : (
                       <div className="flex flex-wrap gap-2">
-                        <button type="button" className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-text-primary" onClick={() => void openCredentials(app)}>
+                        {!paused && !connected && (
+                          <button type="button" className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white" onClick={() => connectApp(app)}>
+                            Conectar
+                          </button>
+                        )}
+                        <button type="button" className="rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold" onClick={() => void openCredentials(app)}>
                           Configurar
                         </button>
-                        {app.slug === 'nuvemshop' && app.hasCredentials && !app.tokenValid && (
-                          <span className="text-xs text-text-muted">Cole o token do aplicativo sob medida em Configurar.</span>
+                        {app.hasToken && !paused && (
+                          <button type="button" className="rounded-lg px-3 py-1.5 text-xs font-semibold text-rose-700" onClick={() => void disconnectApp(app)}>
+                            Desconectar
+                          </button>
                         )}
                       </div>
                     )}

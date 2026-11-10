@@ -101,4 +101,22 @@ describe('loja de integrações do administrador', () => {
       .set('Cookie', operatorCookie);
     expect(operatorRequest.status).toBe(403);
   });
+
+  it('trata o Bling com refresh token como autorizado mesmo com o access token vencido', async () => {
+    await query(
+      `INSERT INTO channel_app_credentials (provider, client_id, client_secret, redirect_uri, is_active)
+       VALUES ('bling', 'bling-client', 'bling-secret', 'https://hub.exemplo/oauth/bling/callback', true)`
+    );
+    await query(
+      `INSERT INTO oauth_tokens (provider, access_token_enc, refresh_token_enc, expires_at)
+       VALUES ('bling', $1, $2, $3)`,
+      [Buffer.from('access'), Buffer.from('refresh'), '2000-01-01T00:00:00.000Z']
+    );
+
+    const catalog = await request(app).get('/api/admin/integrations').set('Cookie', adminCookie);
+    const bling = catalog.body.groups
+      .flatMap((group: { apps: Array<{ slug: string; health: string; tokenValid: boolean }> }) => group.apps)
+      .find((app: { slug: string }) => app.slug === 'bling');
+    expect(bling).toMatchObject({ health: 'ok', tokenValid: true });
+  });
 });

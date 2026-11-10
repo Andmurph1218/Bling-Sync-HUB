@@ -6,7 +6,11 @@ import { useSearchParams } from 'next/navigation';
 import { AlertTriangle, Archive, Copy, PackageOpen, Pencil, Plus, Search, Warehouse } from 'lucide-react';
 import { ApiError, apiFetch, API_BASE_URL } from '../utils/api-client';
 import { EmptySkuNotice, isBlankSku } from './empty-sku-notice';
+import { BrandLogo } from './brand-logo';
+import { buildBlingProductUrl } from '../utils/matching-signals';
 import { Toaster, ToastMessage } from './toaster';
+import { MERCADO_LIVRE_ACTIVE } from '../config/channels';
+import useSWR from 'swr';
 
 type CatalogTab = 'todos' | 'publicados' | 'completude' | 'rejeitados' | 'arquivados' | 'ready';
 type TopView = 'produtos' | 'envio' | 'importacoes' | 'exportacoes';
@@ -33,6 +37,16 @@ interface ChecklistItem {
   fixHref: string;
 }
 
+interface ChannelIntegration {
+  platform: 'mercadolivre' | 'nuvemshop';
+  visual: 'connected' | 'pending' | 'blocked' | 'absent';
+  label: string;
+  tooltip: string;
+  percent: number;
+  ready: boolean;
+  blockers: Array<{ code: string; title: string; fixHref: string; where: 'bling' | 'hub' }>;
+}
+
 interface CatalogItem {
   id: string;
   blingId: string;
@@ -45,9 +59,24 @@ interface CatalogItem {
   promotionalPrice: number | null;
   coverUrl: string | null;
   channels: Array<{ platform: 'mercadolivre' | 'nuvemshop'; state: 'published' | 'pending' | 'rejected' | 'absent' }>;
+  integrations?: ChannelIntegration[];
   checklist: { percent: number; ready: boolean; tone: 'green' | 'amber' | 'red'; items: ChecklistItem[] };
   archived: boolean;
 }
+
+const INTEGRATION_RING: Record<ChannelIntegration['visual'], string> = {
+  connected: 'ring-emerald-500',
+  pending: 'ring-amber-400',
+  blocked: 'ring-rose-500',
+  absent: 'ring-zinc-400 opacity-70',
+};
+
+const INTEGRATION_DOT: Record<ChannelIntegration['visual'], string> = {
+  connected: 'bg-emerald-500',
+  pending: 'bg-amber-400',
+  blocked: 'bg-rose-500',
+  absent: 'bg-zinc-400',
+};
 
 interface CatalogPayload {
   items: CatalogItem[];
@@ -155,13 +184,6 @@ const CHANNEL_LABEL: Record<string, string> = {
   nuvemshop: 'Nuvemshop',
 };
 
-const STATE_LABEL: Record<string, string> = {
-  published: 'publicado',
-  pending: 'aguardando',
-  rejected: 'rejeitado',
-  absent: 'não está no canal',
-};
-
 function money(value: number | null): string {
   if (value === null) return '—';
   return value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -197,13 +219,6 @@ function toneClass(tone: CatalogItem['checklist']['tone']): string {
   return 'text-rose-300';
 }
 
-function channelClass(state: string): string {
-  if (state === 'published') return 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200';
-  if (state === 'rejected') return 'border-rose-500/40 bg-rose-500/15 text-rose-200';
-  if (state === 'pending') return 'border-border-color bg-bg-surface text-text-muted';
-  return 'border-border-color bg-transparent text-text-muted';
-}
-
 export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
   const search = useSearchParams();
   const initialTab = lockedTab ?? (search.get('status') === 'completude' ? 'completude' : search.get('status') === 'ready' ? 'ready' : 'todos');
@@ -223,6 +238,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkAction, setBulkAction] = useState('arquivar');
   const [notice, setNotice] = useState<string | null>(null);
+  const [channelFocus, setChannelFocus] = useState<{ item: CatalogItem; platform: ChannelIntegration['platform'] } | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [openVariants, setOpenVariants] = useState<Record<string, VariantRow[] | 'loading'>>({});
   const [lookupOpen, setLookupOpen] = useState(false);
@@ -240,6 +256,13 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
   const [draftFor, setDraftFor] = useState<CatalogItem | null>(null);
   const [draftSku, setDraftSku] = useState('');
   const [draftResult, setDraftResult] = useState<string | null>(null);
+  const [existingProduct, setExistingProduct] = useState<{ bling_id: string } | null>(null);
+  const [batchId, setBatchId] = useState<string | null>(null);
+  const { data: batch } = useSWR<{ status: string; processed: number; total: number; rows_error: number }>(
+    batchId ? `/api/catalog/batch-jobs/${batchId}` : null,
+    (path: string) => apiFetch(path),
+    { refreshInterval: 2000 }
+  );
   const [sendItems, setSendItems] = useState<SendListItem[]>([]);
   const [simulation, setSimulation] = useState<{
     loading: boolean;
@@ -345,6 +368,15 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
 
+  useEffect(() => {
+    if (batch?.status !== 'done') return;
+    pushToast({
+      variant: 'success',
+      title: 'Lote concluído',
+      description: `${batch.processed} processados, ${batch.rows_error} erro(s).`,
+    });
+  }, [batch?.status, batch?.processed, batch?.rows_error, pushToast]);
+
   const addToSendList = async (ids: string[]) => {
     if (ids.length === 0) {
       setNotice('Selecione ao menos um produto.');
@@ -352,7 +384,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
     }
     const result = await apiFetch<{ queued: string[]; skipped: Array<{ id: string; sku: string; reason: string }> }>(
       '/api/catalog/products/send-list',
-      { method: 'POST', json: { ids, channel: 'mercadolivre' } }
+      { method: 'POST', json: { ids, channel: MERCADO_LIVRE_ACTIVE ? 'mercadolivre' : 'nuvemshop' } }
     );
     const catalogItems = data?.items ?? [];
     setNotice(null);
@@ -552,15 +584,11 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
               type="button"
               className="mt-2 w-full rounded-lg border border-border-color px-2.5 py-1.5 text-[11px] font-semibold text-text-primary"
               onClick={() => {
-                if (bulkAction === 'arquivar') {
-                  void archiveIds(selected, true).catch(() => setNotice('Não foi possível arquivar a seleção.'));
-                  return;
-                }
-                if (bulkAction === 'envio') {
-                  void addToSendList(selected).catch(() => setNotice('Não foi possível adicionar à lista de envio.'));
-                  return;
-                }
-                void recalculateSelected(selected).catch(() => setNotice('Não foi possível recalcular a completude.'));
+                const action = bulkAction === 'arquivar' ? 'arquivar' : bulkAction === 'envio' ? 'envio' : 'completude';
+                void apiFetch<{ batchJobId: string }>('/api/catalog/batch-jobs', {
+                  method: 'POST',
+                  json: { action, ids: selected },
+                }).then((job) => setBatchId(job.batchJobId)).catch(() => setNotice('Não foi possível iniciar o lote.'));
               }}
             >
               Executar
@@ -767,7 +795,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                       <th className="px-3 py-3">Estoque</th>
                       <th className="px-3 py-3">Preço</th>
                       <th className="px-3 py-3">Promo</th>
-                      <th className="px-3 py-3">Canais</th>
+                      <th className="px-3 py-3">Integrado</th>
                       <th className="px-3 py-3">Completude</th>
                       <th className="px-3 py-3">Ações</th>
                     </tr>
@@ -822,17 +850,21 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                           <td className="px-3 py-3">{money(item.price)}</td>
                           <td className="px-3 py-3">{item.promotionalPrice === null ? '—' : money(item.promotionalPrice)}</td>
                           <td className="px-3 py-3">
-                            <div className="flex gap-1">
-                              {item.channels
-                                .filter((channel) => channel.state !== 'absent')
+                            <div className="flex gap-2">
+                              {(item.integrations ?? [])
+                                .filter((channel) => MERCADO_LIVRE_ACTIVE || channel.platform !== 'mercadolivre')
                                 .map((channel) => (
-                                  <span
+                                  <button
                                     key={channel.platform}
-                                    title={`${CHANNEL_LABEL[channel.platform]} — ${STATE_LABEL[channel.state]}`}
-                                    className={`rounded border px-1.5 py-0.5 text-[10px] ${channelClass(channel.state)}`}
+                                    type="button"
+                                    title={`${CHANNEL_LABEL[channel.platform]} · ${channel.label}. ${channel.tooltip}`}
+                                    aria-label={`${CHANNEL_LABEL[channel.platform]}: ${channel.tooltip}`}
+                                    onClick={() => setChannelFocus({ item, platform: channel.platform })}
+                                    className={`relative rounded-md ring-2 ring-offset-1 ring-offset-bg-base ${INTEGRATION_RING[channel.visual]}`}
                                   >
-                                    {channel.platform === 'mercadolivre' ? 'ML' : 'NS'}
-                                  </span>
+                                    <BrandLogo id={channel.platform} name={CHANNEL_LABEL[channel.platform]} size={28} />
+                                    <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-bg-base ${INTEGRATION_DOT[channel.visual]}`} />
+                                  </button>
                                 ))}
                             </div>
                           </td>
@@ -912,10 +944,68 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
         </section>
       </div>
 
+      {channelFocus && (() => {
+        const focus = channelFocus.item.integrations?.find((channel) => channel.platform === channelFocus.platform);
+        const channelName = CHANNEL_LABEL[channelFocus.platform] ?? channelFocus.platform;
+        return (
+          <div className="fixed inset-0 z-40 flex justify-end bg-black/40" role="presentation" onClick={() => setChannelFocus(null)}>
+            <aside
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="channel-focus-title"
+              className="h-full w-full max-w-md overflow-auto border-l border-border-color bg-bg-surface p-5 text-text-primary shadow-xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-wider text-text-muted">Status de integração</p>
+                  <h2 id="channel-focus-title" className="mt-1 text-base font-bold">{channelFocus.item.name || 'Sem nome no ERP'}</h2>
+                  <p className="text-xs text-text-muted">{channelName} · {focus?.label ?? 'Sem leitura'}</p>
+                </div>
+                <button type="button" className="text-xs text-text-muted underline" onClick={() => setChannelFocus(null)}>Fechar</button>
+              </div>
+              <p className="mt-4 text-sm font-semibold">{focus?.percent ?? 0}% pronto</p>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-bg-base">
+                <div className="h-full bg-emerald-600" style={{ width: `${focus?.percent ?? 0}%` }} />
+              </div>
+              <h3 className="mt-5 text-xs font-semibold uppercase tracking-wider text-text-muted">Lista de prontidão</h3>
+              {(focus?.blockers.length ?? 0) === 0 ? (
+                <p className="mt-2 text-sm text-emerald-700 dark:text-emerald-300">Nada pendente neste canal.</p>
+              ) : (
+                <ul className="mt-2 space-y-2">
+                  {focus?.blockers.map((blocker) => (
+                    <li key={blocker.code} className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-800 dark:text-rose-200">
+                      <p>{blocker.title}</p>
+                      {blocker.where === 'bling' ? (
+                        <a href={buildBlingProductUrl(channelFocus.item.blingId)} target="_blank" rel="noreferrer" className="mt-1 inline-block font-semibold underline">
+                          Corrigir no Bling
+                        </a>
+                      ) : (
+                        <Link href={blocker.fixHref} className="mt-1 inline-block font-semibold underline">Resolver no HUB</Link>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {focus?.ready && (
+                <button
+                  type="button"
+                  className="mt-5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white"
+                  onClick={() => void addToSendList([channelFocus.item.id])}
+                >
+                  Enviar para {channelName}
+                </button>
+              )}
+              <p className="mt-3 text-[11px] text-text-muted">O envio entra na fila. Com a publicação ao vivo desligada, o HUB só simula.</p>
+            </aside>
+          </div>
+        );
+      })()}
+
       {simulation && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="simulate-title">
           <div className="max-h-[80vh] w-full max-w-2xl overflow-auto rounded-xl border border-border-color bg-bg-base p-5">
-            <h2 id="simulate-title" className="text-sm font-bold text-text-primary">Simulação de envio — Mercado Livre</h2>
+            <h2 id="simulate-title" className="text-sm font-bold text-text-primary">Simulação de envio — {MERCADO_LIVRE_ACTIVE ? 'Mercado Livre' : 'Nuvemshop'}</h2>
             <p className="mt-1 text-xs text-text-muted">Nada foi publicado no marketplace.</p>
             {simulation.loading && <p className="mt-4 text-sm text-text-muted">Montando o JSON...</p>}
             {simulation.error && <p className="mt-4 text-sm text-rose-200" role="alert">{simulation.error}</p>}
@@ -934,6 +1024,21 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
               Fechar
             </button>
           </div>
+        </div>
+      )}
+
+      {batch && (
+        <div className="fixed bottom-24 right-5 z-40 w-72 rounded-xl border border-border-color bg-bg-surface p-3 text-xs text-text-primary shadow-xl">
+          <p className="font-semibold">Processando {batch.processed}/{batch.total}...</p>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-bg-base">
+            <div className="h-full bg-emerald-600" style={{ width: `${batch.total ? Math.round((batch.processed / batch.total) * 100) : 0}%` }} />
+          </div>
+          {batch.status === 'done' && (
+            <div className="mt-2 flex flex-col gap-1">
+              <p>Lote concluído. {batch.rows_error} erro(s).</p>
+              <a className="font-semibold underline" href={`${API_BASE_URL}/api/catalog/batch-jobs/${batchId}/errors.csv`}>Baixar Log de Erros (CSV)</a>
+            </div>
+          )}
         </div>
       )}
 
@@ -1094,10 +1199,10 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
         <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-md rounded-xl border border-border-color bg-bg-base p-5">
             <h2 className="text-sm font-bold text-text-primary">Duplicar não cria SKU no ERP</h2>
-            <p className="mt-2 text-xs text-text-muted">Informe um SKU novo. Se ele já existir, o HUB abre o produto existente.</p>
+            <p className="mt-2 text-xs text-text-muted">Informe um SKU. Se ele já existir, escolha abrir o produto ou vincular um anúncio da Nuvemshop.</p>
             <input
               value={draftSku}
-              onChange={(event) => setDraftSku(event.target.value)}
+              onChange={(event) => { setDraftSku(event.target.value); setExistingProduct(null); setDraftResult(null); }}
               className="mt-3 w-full rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-xs text-text-primary"
             />
             <button
@@ -1107,17 +1212,29 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                 void apiFetch<{ found: boolean; product?: { bling_id: string } }>(
                   `/api/catalog/lookup?sku=${encodeURIComponent(draftSku.trim())}`
                 ).then((result) => {
-                  setDraftResult(
-                    result.found
-                      ? `SKU já existe. Use a ficha /catalogo/${result.product?.bling_id}. Nada foi criado no ERP.`
-                      : 'SKU livre no catálogo. O rascunho não foi gravado no Bling.'
-                  );
+                  if (result.found && result.product?.bling_id) {
+                    setExistingProduct({ bling_id: result.product.bling_id });
+                    setDraftResult('SKU já existe no Bling.');
+                    return;
+                  }
+                  setExistingProduct(null);
+                  setDraftResult('SKU livre no catálogo. O rascunho não foi gravado no Bling.');
                 }).catch(() => setDraftResult('Não foi possível consultar o SKU.'));
               }}
             >
               Conferir SKU
             </button>
-            {draftResult && <p className="mt-3 text-xs text-text-primary">{draftResult}</p>}
+            {draftResult && <p className="mt-3 text-xs font-semibold text-text-primary">{draftResult}</p>}
+            {existingProduct && (
+              <div className="mt-3 flex flex-col gap-2">
+                <Link href={`/catalogo/${existingProduct.bling_id}`} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-center text-xs font-semibold text-text-primary">
+                  Ir para o produto existente
+                </Link>
+                <Link href={`/matching?sku=${encodeURIComponent(draftSku.trim())}&platform=nuvemshop`} className="rounded-lg border border-border-color px-3 py-1.5 text-center text-xs font-semibold text-text-primary">
+                  Vincular um anúncio Nuvemshop existente a este SKU
+                </Link>
+              </div>
+            )}
             <button type="button" onClick={() => setDraftFor(null)} className="mt-4 text-xs text-text-muted underline">Fechar</button>
           </div>
         </div>

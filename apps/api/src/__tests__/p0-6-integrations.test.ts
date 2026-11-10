@@ -21,6 +21,9 @@ describe('P0.6 — fábrica de conectores', () => {
       status: 'installed',
       label: 'Instalado',
     });
+    const bling = { id: 'bling', name: 'Bling', category: 'erps' as const, implemented: true, authorizePath: '/oauth/bling/authorize' };
+    expect(resolveInstallStatus(bling, { expiresAt: '2000-01-01T00:00:00.000Z', hasRefresh: true }).status).toBe('installed');
+    expect(resolveInstallStatus(bling, { expiresAt: '2000-01-01T00:00:00.000Z', hasRefresh: false }).status).toBe('attention');
   });
 
   it('pedido e nota fiscal ficam fora do modo catálogo', async () => {

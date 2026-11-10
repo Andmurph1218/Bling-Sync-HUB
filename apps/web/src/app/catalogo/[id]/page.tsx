@@ -19,6 +19,7 @@ import { buildBlingProductUrl } from '../../../utils/matching-signals';
 import { translateBlockerToPlainPortuguese } from '../../../utils/operational-state';
 import { apiFetch, ApiError } from '../../../utils/api-client';
 import { EmptySkuNotice, isBlankSku } from '../../../components/empty-sku-notice';
+import { MERCADO_LIVRE_ACTIVE } from '../../../config/channels';
 
 interface PushAttemptRow {
   id: string;
@@ -49,6 +50,13 @@ interface CatalogSheet {
     name: string | null;
     brand: string | null;
     checklist: { percent: number; items: Array<{ code: string; ok: boolean; title: string; fixHref: string }> };
+    integrations?: Array<{
+      platform: string;
+      label: string;
+      percent: number;
+      ready: boolean;
+      blockers: Array<{ code: string; title: string; fixHref: string; where: 'bling' | 'hub' }>;
+    }>;
   };
   images: Array<{ url_normalized: string; is_cover_eligible: boolean; rights_status: string; position_ml: number | null; position_ns: number | null }>;
   storePrices: Array<{ platform: string; store_price: string | null; store_promotional_price: string | null }>;
@@ -310,7 +318,7 @@ function FichaUnicaProdutoPage({
       <section className="mt-6">
         {activeTab === 'geral' && (
           <div className="space-y-6">
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className={`grid gap-4 ${MERCADO_LIVRE_ACTIVE ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
               <div className="rounded-xl border border-emerald-500/30 bg-bg-surface/60 p-5">
                 <span className="text-xs font-semibold uppercase text-emerald-400">
                   Bling ERP v3 (Soberano)
@@ -330,6 +338,7 @@ function FichaUnicaProdutoPage({
                 </p>
               </div>
 
+              {MERCADO_LIVRE_ACTIVE && (
               <div className="rounded-xl border border-amber-500/30 bg-bg-surface/60 p-5">
                 <span className="text-xs font-semibold uppercase text-amber-400">
                   Mercado Livre (JHS SHOPPING)
@@ -343,6 +352,7 @@ function FichaUnicaProdutoPage({
                     : 'Pendente de categoria verificada ou expansão de descrição técnica.'}
                 </p>
               </div>
+              )}
 
               <div className="rounded-xl border border-amber-500/30 bg-bg-surface/60 p-5">
                 <span className="text-xs font-semibold uppercase text-amber-400">
@@ -358,6 +368,41 @@ function FichaUnicaProdutoPage({
                 </p>
               </div>
             </div>
+
+            <section className="rounded-xl border border-border-color bg-bg-surface/50 p-5">
+              <h2 className="text-sm font-bold text-text-primary">Prontidão para Canais</h2>
+              <p className="mt-1 text-xs text-text-muted">Só entram os canais ativos. O Mercado Livre permanece desligado.</p>
+              <div className="mt-4 space-y-4">
+                {(sheet?.item.integrations ?? []).filter((channel) => MERCADO_LIVRE_ACTIVE || channel.platform !== 'mercadolivre').map((channel) => (
+                  <div key={channel.platform}>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold">{channel.platform === 'nuvemshop' ? 'Nuvemshop' : channel.platform}</span>
+                      <span>{channel.percent}% pronto</span>
+                    </div>
+                    <div className="mt-1 h-2 overflow-hidden rounded-full bg-bg-base">
+                      <div className="h-full bg-emerald-600" style={{ width: `${channel.percent}%` }} />
+                    </div>
+                    {channel.blockers.length > 0 && (
+                      <ul className="mt-2 space-y-1">
+                        {channel.blockers.map((blocker) => (
+                          <li key={blocker.code} className="text-xs text-rose-700 dark:text-rose-300">
+                            {blocker.title}
+                            {blocker.where === 'bling' ? (
+                              <a href={buildBlingProductUrl(prod.bling_id)} target="_blank" rel="noreferrer" className="ml-2 font-semibold underline">Corrigir no Bling</a>
+                            ) : (
+                              <Link href={blocker.fixHref} className="ml-2 font-semibold underline">Resolver no HUB</Link>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+                {(sheet?.item.integrations ?? []).length === 0 && (
+                  <p className="text-xs text-text-muted">A prontidão aparece depois da leitura do catálogo.</p>
+                )}
+              </div>
+            </section>
 
             {mainReadiness?.blockers && mainReadiness.blockers.length > 0 && (
               <div className="rounded-xl border border-border-color bg-bg-surface/50 p-5">

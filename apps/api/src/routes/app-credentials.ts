@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireRole } from '../auth/middleware.js';
 import { readPublicAppCredentials, saveAppCredentials } from '../connectors/app-credentials.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
+import { query } from '../db/pool.js';
 
 export const appCredentialsRouter = Router();
 const admin = requireRole('admin');
@@ -45,6 +46,23 @@ appCredentialsRouter.put(
   admin,
   async (req: Request, res: Response, next: NextFunction) => {
     await writeCredentials(req, res, next);
+  }
+);
+
+appCredentialsRouter.post(
+  '/api/admin/integrations/:provider/disconnect',
+  admin,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const provider = providerSchema.parse(req.params.provider);
+      const removed = await query(
+        `DELETE FROM oauth_tokens WHERE provider = $1`,
+        [provider]
+      );
+      res.status(200).json({ disconnected: (removed.rowCount ?? 0) > 0, provider });
+    } catch (error) {
+      next(error);
+    }
   }
 );
 

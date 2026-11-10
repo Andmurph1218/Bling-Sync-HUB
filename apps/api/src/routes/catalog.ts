@@ -9,6 +9,7 @@ import { listProblems } from '../catalog/problems.js';
 import { buildPublishPreview, recalculateCompleteness, PublishChannel } from '../catalog/publish-preview.js';
 import { enqueueReadyProducts } from '../queues/publish-queue.js';
 import { buildCatalogWorkbook, importCatalogWorkbook } from '../catalog/spreadsheet.js';
+import { createBatchJob, readBatchJob } from '../catalog/batch-jobs.js';
 import { createErpConnector } from '../connectors/strategy/factory.js';
 import { STOCK_LAUNCH_WARNING } from '../connectors/strategy/bling-erp.js';
 import { ErpRejectedError } from '../connectors/strategy/types.js';
@@ -578,12 +579,81 @@ catalogRouter.post(
         return;
       }
       const report = await importCatalogWorkbook(file);
+      const rowsError = report.lines.filter((line) => line.status === 'erro').length;
+      await query(
+        `INSERT INTO import_jobs (user_id, file_name, status, rows_processed, rows_error, error_log)
+         VALUES ($1, $2, 'done', $3, $4, $5::jsonb)`,
+        [
+          req.user?.id ?? null,
+          'catalogo.xlsx',
+          report.lines.length,
+          rowsError,
+          JSON.stringify(report.lines.filter((line) => line.status === 'erro')),
+        ]
+      ).catch(() => undefined);
       res.status(200).json(report);
     } catch (error) {
       next(error);
     }
   }
 );
+
+catalogRouter.get('/api/catalog/imports', requireRole('admin'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rows = await query(
+      `SELECT id, file_name, status, rows_processed, rows_error, created_at
+       FROM import_jobs ORDER BY created_at DESC LIMIT 100`
+    );
+    res.status(200).json({ jobs: rows.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.post('/api/catalog/batch-jobs', requireRole('operator', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = z.object({
+      action: z.enum(['arquivar', 'completude', 'envio']),
+      ids: z.array(z.string().uuid()).min(1).max(100),
+    }).safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_payload' });
+      return;
+    }
+    const batchJobId = await createBatchJob(req.user?.id ?? null, parsed.data.action, parsed.data.ids);
+    res.status(202).json({ batchJobId });
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.get('/api/catalog/batch-jobs/:id', requireRole('operator', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const job = await readBatchJob(req.params.id);
+    if (!job) {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+    res.status(200).json(job);
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.get('/api/catalog/batch-jobs/:id/errors.csv', requireRole('operator', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const job = await readBatchJob(req.params.id);
+    if (!job) {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+    const lines = ['id,message', ...job.errors.map((row) => `${row.id},"${String(row.message).replace(/"/g, '""')}"`)];
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.status(200).send(lines.join('\n'));
+  } catch (error) {
+    next(error);
+  }
+});
 
 catalogRouter.get('/api/catalog/categories', requireAuth, async (_req: Request, res: Response, next: NextFunction) => {
   try {

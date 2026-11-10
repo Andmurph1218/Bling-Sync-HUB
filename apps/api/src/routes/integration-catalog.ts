@@ -31,6 +31,7 @@ integrationCatalogRouter.get('/api/admin/integrations', admin, async (_req: Requ
                 tok.provider IS NOT NULL
                 AND (
                   c.slug = 'nuvemshop'
+                  OR (c.slug = 'bling' AND tok.refresh_token_enc IS NOT NULL)
                   OR (tok.expires_at IS NOT NULL AND tok.expires_at > now())
                 )
               ) AS token_valid

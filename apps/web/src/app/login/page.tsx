@@ -5,11 +5,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, AlertTriangle } from 'lucide-react';
 import { apiFetch, ApiError } from '../../utils/api-client';
 
+const DEV_LOGIN = process.env.NODE_ENV === 'development';
+
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState(DEV_LOGIN ? 'admin@jhshopping.local' : '');
+  const [password, setPassword] = useState(DEV_LOGIN ? 'admin' : '');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -108,6 +110,11 @@ function LoginForm() {
         <p className="text-[11px] leading-relaxed text-text-muted">
           Sessão protegida por cookie HttpOnly. Os papéis (Operador, Revisor Fiscal, Administrador) definem as áreas visíveis e as ações permitidas.
         </p>
+        {DEV_LOGIN && (
+          <p className="text-[11px] leading-relaxed text-text-muted">
+            Ambiente local. O acesso é o usuário do HUB, sem OAuth do Bling ou da Nuvemshop. Use admin@jhshopping.local e a senha admin.
+          </p>
+        )}
       </form>
     </main>
   );

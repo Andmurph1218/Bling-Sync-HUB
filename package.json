@@ -17,6 +17,7 @@
     "typecheck": "npm --workspaces run typecheck",
     "test": "npm --workspace=@bling-sync/api run test",
     "bootstrap": "npm --workspace=@bling-sync/api run bootstrap",
+    "seed:admin": "npm --workspace=@bling-sync/api run seed:admin",
     "migrate:up": "npm --workspace=@bling-sync/api run migrate:up",
     "migrate:down": "npm --workspace=@bling-sync/api run migrate:down"
   }

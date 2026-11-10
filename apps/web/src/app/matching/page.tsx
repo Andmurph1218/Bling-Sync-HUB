@@ -17,6 +17,7 @@ import {
   MatchingComparisonItem,
 } from '../../components/match-details-drawer';
 import { Toaster, ToastMessage } from '../../components/toaster';
+import { MERCADO_LIVRE_ACTIVE } from '../../config/channels';
 import {
   buildBlingProductUrl,
   buildChannelAnnouncementUrl,
@@ -98,6 +99,7 @@ export default function MatchingPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [activeDrawerItemId, setActiveDrawerItemId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [platformFilter, setPlatformFilter] = useState<'nuvemshop' | 'mercadolivre'>('nuvemshop');
 
   const pushToast = useCallback(
     (variant: 'success' | 'warning', title: string, description?: string) => {
@@ -300,6 +302,24 @@ export default function MatchingPage() {
         </div>
       )}
 
+      <div className="mt-4 flex items-center gap-2 text-xs">
+        <label htmlFor="platform-filter" className="text-text-muted">Canal</label>
+        <select
+          id="platform-filter"
+          value={platformFilter}
+          onChange={(event) => setPlatformFilter(event.target.value as 'nuvemshop' | 'mercadolivre')}
+          className="rounded-lg border border-border-color bg-bg-surface px-2 py-1 text-text-primary"
+        >
+          <option value="nuvemshop">Nuvemshop</option>
+          <option value="mercadolivre">Mercado Livre</option>
+        </select>
+      </div>
+      {platformFilter === 'mercadolivre' && !MERCADO_LIVRE_ACTIVE && (
+        <p className="mt-4 rounded-lg border border-border-color bg-bg-surface px-4 py-6 text-sm text-text-muted" role="status">
+          Mercado Livre não configurado. Conecte para ver itens.
+        </p>
+      )}
+
       {loadError && (
         <div role="alert" className="mt-6 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">
           {loadError}
@@ -308,7 +328,7 @@ export default function MatchingPage() {
       {loading && rows.length === 0 && (
         <p className="mt-6 text-sm text-text-muted" role="status">Carregando fila de correspondências...</p>
       )}
-      {!loading && !loadError && rows.length === 0 && (
+      {!loading && !loadError && rows.length === 0 && !(platformFilter === 'mercadolivre' && !MERCADO_LIVRE_ACTIVE) && (
         <div className="mt-6 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-200">
           <CheckCircle2 className="h-5 w-5 text-emerald-400" />
           <span>Nenhum anúncio aguardando decisão de vínculo.</span>
@@ -316,7 +336,7 @@ export default function MatchingPage() {
       )}
 
       {/* DataTable Explicável */}
-      <section className="mt-6 overflow-hidden rounded-xl border border-border-color bg-bg-surface/50">
+      {!(platformFilter === 'mercadolivre' && !MERCADO_LIVRE_ACTIVE) && <section className="mt-6 overflow-hidden rounded-xl border border-border-color bg-bg-surface/50">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border-color bg-bg-surface/90 text-xs uppercase tracking-wider text-text-muted">
@@ -341,7 +361,7 @@ export default function MatchingPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border-color/80">
-              {rows.map((row) => {
+              {rows.filter((row) => platformFilter === 'mercadolivre' ? row.platformKey === 'mercadolivre' : row.platformKey !== 'mercadolivre').map((row) => {
                 const isQuarantine = row.status === 'Quarentena';
                 const isSelected = selectedIds.includes(row.id);
                 const blingUrl = buildBlingProductUrl(row.blingId);
@@ -544,7 +564,7 @@ export default function MatchingPage() {
             </tbody>
           </table>
         </div>
-      </section>
+      </section>}
 
       {/* Drawer Lateral de Comparação Lado a Lado */}
       <MatchDetailsDrawer

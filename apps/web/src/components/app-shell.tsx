@@ -22,9 +22,11 @@ import {
   Radio,
   LogOut,
   Loader2,
+  Settings,
 } from 'lucide-react';
 import { apiFetch } from '../utils/api-client';
 import { ThemeToggle } from './theme-toggle';
+import { MERCADO_LIVRE_ACTIVE } from '../config/channels';
 
 export type UserRole = 'admin' | 'fiscal_approver' | 'operator';
 
@@ -120,7 +122,9 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/completude', label: 'Completude', shortLabel: 'Completude', icon: ClipboardList, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
   { href: '/problemas', label: 'Problemas', shortLabel: 'Problemas', icon: AlertTriangle, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
   { href: '/atributos', label: 'Atributos', shortLabel: 'Atributos', icon: Tags, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { href: '/fiscal', label: 'Fiscal', shortLabel: 'Fiscal', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'] },
   { href: '/fiscal/ean', label: 'Código de barras', shortLabel: 'EAN', icon: Barcode, allowedRoles: ['admin', 'fiscal_approver'], isSubItem: true },
+  { href: '/admin/imports', label: 'Importações', shortLabel: 'Imports', icon: ClipboardList, allowedRoles: ['admin'], isSubItem: true },
   { href: '/fiscal/ncm', label: 'Classificação fiscal', shortLabel: 'NCM', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'], isSubItem: true },
   { href: '/qualidade-margem', label: 'Qualidade do cadastro', shortLabel: 'Qualidade', icon: TrendingUp, allowedRoles: ['admin', 'fiscal_approver', 'operator'], isSubItem: true },
   { href: '/publicacoes', label: 'Publicações', shortLabel: 'Publicar', icon: Send, allowedRoles: ['admin', 'operator'] },
@@ -134,6 +138,7 @@ const NAV_ITEMS: NavItem[] = [
 interface OauthRow {
   provider: string;
   expires_at: string;
+  has_refresh?: boolean | string;
 }
 
 const CHANNEL_META: Array<{ provider: string; name: string; detail: string }> = [
@@ -240,20 +245,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   const now = Date.now();
-  const channels = CHANNEL_META.map((meta) => {
-    if (oauthRows === null) {
-      return { ...meta, state: 'unknown' as const, label: 'Estado não verificado' };
-    }
+  const channels = CHANNEL_META.flatMap((meta) => {
+    if (meta.provider === 'mercadolivre' && !MERCADO_LIVRE_ACTIVE) return [];
+    if (oauthRows === null) return [];
     const row = oauthRows.find((o) => o.provider === meta.provider);
-    if (!row) return { ...meta, state: 'offline' as const, label: 'Desconectado' };
-    const expired = new Date(row.expires_at).getTime() < now;
-    return expired
-      ? { ...meta, state: 'expired' as const, label: 'Token expirado' }
-      : { ...meta, state: 'online' as const, label: 'Conectado' };
+    if (!row) return [];
+    const refresh = row.has_refresh;
+    const canRenew =
+      row.provider === 'nuvemshop' ||
+      (row.provider === 'bling' && (refresh === true || refresh === 't' || refresh === 'true'));
+    const expired = new Date(row.expires_at).getTime() < now && !canRenew;
+    if (expired) return [];
+    return [{ ...meta, state: 'online' as const, label: 'Conectado' }];
   });
-
-  const dotClass = (state: 'online' | 'offline' | 'expired' | 'unknown') =>
-    state === 'online' ? 'bg-emerald-500' : state === 'unknown' ? 'bg-text-muted' : state === 'expired' ? 'bg-amber-500' : 'bg-rose-500';
 
   return (
     <RoleContext.Provider value={{ currentUser: user, hasRole, acknowledgePasswordChange }}>
@@ -330,22 +334,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className="flex flex-1 flex-col min-w-0 pb-16 md:pb-0">
           <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-4 border-b border-border-color/80 bg-bg-base/90 px-6 py-3 backdrop-blur">
-            <div className="flex flex-wrap items-center gap-2" aria-label="Estado das integrações">
-              <span className="mr-1 text-xs font-medium uppercase tracking-wider text-text-muted">Integrações:</span>
+            <div className="flex flex-wrap items-center gap-2" aria-label="Integrações ativas">
               {channels.map((ch) => (
                 <div
                   key={ch.provider}
                   title={`${ch.detail} · ${ch.label}`}
-                  className="flex items-center gap-2 rounded-full border border-border-color bg-bg-surface/90 px-3 py-1 text-xs"
+                  className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
+                    ch.provider === 'nuvemshop'
+                      ? 'border-sky-600/40 bg-sky-500/10 text-sky-800 dark:text-sky-200'
+                      : 'border-emerald-600/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200'
+                  }`}
                 >
-                  <span className="relative flex h-2 w-2" aria-hidden="true">
-                    {ch.state === 'online' && (
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                    )}
-                    <span className={`relative inline-flex h-2 w-2 rounded-full ${dotClass(ch.state)}`} />
-                  </span>
-                  <span className="font-medium text-text-primary">{ch.name}</span>
-                  <span className="text-[11px] text-text-muted">{ch.label}</span>
+                  <span className={`h-2 w-2 rounded-full ${ch.provider === 'nuvemshop' ? 'bg-sky-500' : 'bg-emerald-500'}`} />
+                  <span className="font-medium">{ch.name}</span>
+                  <span className="text-[11px] opacity-80">{ch.label}</span>
                 </div>
               ))}
             </div>
@@ -365,6 +367,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <span className="block text-[11px] text-text-muted">{user.email}</span>
                 </div>
               </div>
+              {hasRole('admin') && (
+                <Link
+                  href="/admin/integracoes"
+                  title="Gerenciar integrações"
+                  aria-label="Gerenciar integrações"
+                  className="inline-flex items-center justify-center rounded-lg border border-border-color bg-bg-surface p-1.5 text-text-muted hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                >
+                  <Settings className="h-4 w-4" />
+                </Link>
+              )}
               <ThemeToggle />
               <button
                 type="button"

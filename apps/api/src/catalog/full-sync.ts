@@ -98,7 +98,13 @@ async function hydrateVariations(erp: ErpConnector, payload: BlingProductPayload
   const childIds = await erp.listChildIds(String(payload.id));
   const variations: BlingVariacaoPayload[] = [];
   for (const childId of childIds) {
-    const child = asProduct(await erp.pullCatalogProduct(childId));
+    let child: BlingProductPayload | null = null;
+    try {
+      child = asProduct(await erp.pullCatalogProduct(childId));
+    } catch (error) {
+      await recordSyncFailure(childId, error);
+      continue;
+    }
     if (!child || child.tipo !== 'P') continue;
     const named = child as BlingProductPayload & { variacao?: { nome?: string; ordem?: number } };
     variations.push({
@@ -172,7 +178,7 @@ async function defaultScore(masterProductId: string): Promise<boolean> {
   );
   const row = found.rows[0];
   if (!row) return false;
-  return evaluateCatalogChecklist({
+  const checklist = evaluateCatalogChecklist({
     blingId: row.bling_id,
     sku: row.bling_sku,
     hasCoverImage: row.has_cover,
@@ -185,7 +191,36 @@ async function defaultScore(masterProductId: string): Promise<boolean> {
     ncmFiscalRisk: row.ncm_fiscal_risk,
     price: row.price === null ? null : Number(row.price),
     hasDuplicateCandidate: false,
-  }).ready;
+    channels: ['nuvemshop'],
+  });
+  await query(
+    `UPDATE master_products
+     SET worst_score = $2, has_fiscal_risk = $3, updated_at = now()
+     WHERE id = $1`,
+    [masterProductId, checklist.percent, row.ncm_fiscal_risk || row.ncm_status !== 'valid']
+  ).catch(() => undefined);
+  return checklist.ready;
+}
+
+async function recordSyncFailure(externalId: string, error: unknown): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  try {
+    const product = await query<{ id: string }>(
+      `SELECT id FROM master_products WHERE bling_id = $1 LIMIT 1`,
+      [externalId]
+    );
+    const productId = product.rows[0]?.id ?? null;
+    if (productId) {
+      await query(`UPDATE master_products SET needs_review = true, updated_at = now() WHERE id = $1`, [productId]);
+    }
+    await query(
+      `INSERT INTO sync_logs (product_id, platform, direction, status, error_detail, idempotency_key)
+       VALUES ($1, 'bling', 'pull', 'failed', $2, $3)`,
+      [productId, message.slice(0, 500), `bling-detail:${externalId}:${Date.now()}`]
+    );
+  } catch {
+    // A falha de log não pode interromper o cursor da sync.
+  }
 }
 
 async function stockForBatch(
@@ -278,6 +313,7 @@ export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks
           await hydrateVariations(erp, payload);
           batch.push(payload);
         } catch (error) {
+          await recordSyncFailure(externalId, error);
           note(report, `${externalId}: ${error instanceof Error ? error.message : String(error)}`, true);
         }
       }

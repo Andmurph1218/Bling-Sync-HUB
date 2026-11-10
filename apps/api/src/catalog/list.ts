@@ -10,6 +10,8 @@ import {
   ChecklistResult,
   evaluateCatalogChecklist,
 } from './completeness.js';
+import { ACTIVE_CATALOG_CHANNELS, MERCADO_LIVRE_ACTIVE } from '../config/channels.js';
+import { ChannelIntegrationView, describeChannelIntegration } from './integration-status.js';
 
 export type CatalogTab =
   | 'todos'
@@ -32,6 +34,7 @@ export interface CatalogListItem {
   promotionalPrice: number | null;
   coverUrl: string | null;
   channels: Array<{ platform: CatalogChannel; state: 'published' | 'pending' | 'rejected' | 'absent' }>;
+  integrations: ChannelIntegrationView[];
   checklist: ChecklistResult;
   archived: boolean;
   published: boolean;
@@ -239,6 +242,7 @@ export async function listCatalog(input: {
     `SELECT
        mp.id, mp.bling_id, mp.bling_sku, mp.name, mp.brand, mp.bling_formato,
        mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id, mp.archived_at,
+       mp.worst_score, mp.has_fiscal_risk,
        pv.price::text AS price, pv.promotional_price::text AS promotional_price,
        pv.stock::text AS stock, pv.ean, pv.ean_status
      FROM master_products mp
@@ -252,7 +256,7 @@ export async function listCatalog(input: {
   const ids = pageRows.rows.map((row) => row.id);
   const placeholders = ids.map((_, index) => `$${index + 1}`).join(', ');
   const empty = { rows: [] as never[] };
-  const [covers, published, rejected, eanRows, requiredEan, maps, links, categoryNames, counts, gapCounts] = await Promise.all([
+  const [covers, published, rejected, eanRows, requiredEan, maps, links, categoryNames, sends, counts, gapCounts] = await Promise.all([
     ids.length
       ? query<{ master_product_id: string; url_normalized: string }>(
           `SELECT master_product_id, url_normalized FROM product_images
@@ -315,6 +319,16 @@ export async function listCatalog(input: {
         )
       : empty,
     query<{ id: string; name: string }>(`SELECT id, name FROM hub_categories`),
+    ids.length
+      ? query<{ master_product_id: string; platform: CatalogChannel }>(
+          `SELECT master_product_id, platform FROM push_jobs
+           WHERE status IN ('pending', 'locked', 'blocked') AND master_product_id IN (${placeholders})
+           UNION
+           SELECT product_id AS master_product_id, channel AS platform FROM publish_queue
+           WHERE status IN ('pending', 'processing') AND product_id IN (${ids.map((_, index) => `$${index + ids.length + 1}`).join(', ')})`,
+          [...ids, ...ids]
+        )
+      : empty,
     Promise.all(
       (['todos', 'publicados', 'completude', 'rejeitados', 'arquivados', 'ready'] as const).map(async (tab) => {
         const row = await query<{ count: number }>(
@@ -370,6 +384,10 @@ export async function listCatalog(input: {
   }
 
   const categoryNameById = new Map(categoryNames.rows.map((row) => [row.id, row.name]));
+  const sendKeys = new Set(sends.rows.map((row) => `${row.master_product_id}:${row.platform}`));
+  const activeChannels = MERCADO_LIVRE_ACTIVE
+    ? (['mercadolivre', 'nuvemshop'] as const)
+    : (['nuvemshop'] as const);
 
   const items = pageRows.rows.map((row) => {
     const platforms = row.hub_category_id ? grouped.get(row.hub_category_id) : undefined;
@@ -396,9 +414,40 @@ export async function listCatalog(input: {
       ncmFiscalRisk: row.ncm_fiscal_risk,
       price,
       hasDuplicateCandidate: Boolean(row.ean && duplicateEans.has(row.ean)),
+      channels: [...ACTIVE_CATALOG_CHANNELS],
     });
+    const cachedScore = (row as { worst_score?: number | null }).worst_score;
+    if (cachedScore != null) {
+      checklist.percent = cachedScore;
+      checklist.tone = cachedScore >= 80 ? 'green' : cachedScore >= 50 ? 'amber' : 'red';
+      checklist.ready = cachedScore >= 80 && !row.ncm_fiscal_risk;
+    }
     const productLinks = linksByProduct.get(row.id) ?? [];
     const promo = num(row.promotional_price);
+    const integrations = activeChannels.map((platform) => {
+      const channelChecklist = evaluateCatalogChecklist({
+        blingId: row.bling_id,
+        sku: row.bling_sku,
+        hasCoverImage: hasCover,
+        hubCategoryId: row.hub_category_id,
+        mappedPlatforms: mapped,
+        greenPlatforms: green,
+        eanStatus: row.ean_status,
+        eanRequired: Boolean(row.hub_category_id && requiredEanCategories.has(row.hub_category_id)),
+        ncmStatus: row.ncm_status,
+        ncmFiscalRisk: row.ncm_fiscal_risk,
+        price,
+        hasDuplicateCandidate: Boolean(row.ean && duplicateEans.has(row.ean)),
+        channels: [platform],
+      });
+      const link = productLinks.find((item) => item.platform === platform);
+      return describeChannelIntegration({
+        platform,
+        linkStatus: link?.sync_status ?? null,
+        sendRequested: sendKeys.has(`${row.id}:${platform}`),
+        checklist: channelChecklist,
+      });
+    });
     return {
       id: row.id,
       blingId: row.bling_id,
@@ -411,9 +460,8 @@ export async function listCatalog(input: {
       price,
       promotionalPrice: promo !== null && promo > 0 ? promo : null,
       coverUrl: coverByProduct.get(row.id) ?? null,
-      channels: (['mercadolivre', 'nuvemshop'] as const).map((platform) =>
-        channelBadge(platform, productLinks, isRejected)
-      ),
+      channels: activeChannels.map((platform) => channelBadge(platform, productLinks, isRejected)),
+      integrations,
       checklist,
       archived: row.archived_at !== null,
       published: isPublished,

@@ -2,11 +2,13 @@ import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { startPublishWorker } from './queues/publish-queue.js';
+import { startBatchWorker } from './catalog/batch-jobs.js';
 
 const app = createApp();
 const host = process.env.HOST ?? '0.0.0.0';
 if (process.env.VITEST !== 'true') {
   startPublishWorker();
+  startBatchWorker();
 }
 
 app.listen(env.PORT, host, () => {

@@ -129,7 +129,7 @@ describe('catálogo — anti-duplicação e planilha', () => {
     expect(imported.status).toBe(200);
     expect(imported.body.lines.map((line: { message: string }) => line.message)).toEqual([
       'Linha 2: SKU não encontrado.',
-      'Linha 3: Sucesso. Preço e estoque ignorados. Aviso: Descrição e Categoria são gerenciadas pelo Bling e foram ignoradas.',
+      'Linha 3: Sucesso. Preço e estoque ignorados.',
     ]);
 
     const saved = await query<{ description: string; price: string; stock: string; hub_category_id: string }>(
@@ -139,7 +139,7 @@ describe('catálogo — anti-duplicação e planilha', () => {
        WHERE mp.id = $1`,
       [productId]
     );
-    expect(saved.rows[0]?.description).toBe('Descrição antiga');
+    expect(saved.rows[0]?.description).toBe('Descrição nova');
     expect(Number(saved.rows[0]?.price)).toBe(19.9);
     expect(Number(saved.rows[0]?.stock)).toBe(4);
     expect(saved.rows[0]?.hub_category_id).toBeNull();
