@@ -50,6 +50,7 @@ export default function ProblemasPage() {
   const [filter, setFilter] = useState<Filter>('todos');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [importFilter, setImportFilter] = useState<{ sku: string; file: string } | null>(null);
   const [selectedGroups, setSelectedGroups] = useState<Set<string>>(new Set());
   const [selectedItems, setSelectedItems] = useState<Map<string, string>>(new Map());
   const [drawer, setDrawer] = useState<{ itemId: string | null; group: ProblemGroup | null } | null>(null);
@@ -68,6 +69,10 @@ export default function ProblemasPage() {
   }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sku = params.get('q');
+    const file = params.get('importacao');
+    if (sku || file) setImportFilter({ sku: sku ?? '', file: file ?? '' });
     void load();
   }, [load]);
 
@@ -197,6 +202,12 @@ export default function ProblemasPage() {
         </button>
       </header>
 
+      {importFilter && (
+        <p className="mt-4 rounded-lg border border-border-color bg-bg-surface px-3 py-2 text-sm text-text-muted">
+          Filtro da importação{importFilter.file ? ` ${importFilter.file}` : ''}
+          {importFilter.sku ? `: SKU ${importFilter.sku}` : ''}. Os grupos abaixo reúnem o mesmo tipo de falha. Abra o grupo e procure esse SKU.
+        </p>
+      )}
       {error && <p className="mt-4 text-sm text-rose-600 dark:text-rose-200" role="alert">{error}</p>}
       {notice && <p className="mt-4 text-sm text-text-muted" role="status">{notice}</p>}
 

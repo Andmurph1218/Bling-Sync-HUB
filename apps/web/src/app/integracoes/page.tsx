@@ -2,13 +2,15 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, Check, LayoutGrid, Search, Store } from 'lucide-react';
+import { Search } from 'lucide-react';
 import { useCurrentRole } from '../../components/app-shell';
 import { API_BASE_URL, apiFetch } from '../../utils/api-client';
-import { BrandLogo } from '../../components/brand-logo';
+import { IntegrationCard, type CardStatus } from '../../components/integrations/integration-card';
+import { ExplorarIntegracoes } from '../../components/integrations/explorar-integracoes';
+import { MinhasConexoes } from '../../components/integrations/minhas-conexoes';
 
-type StoreCategory = 'all' | 'sales' | 'erps' | 'logistics' | 'marketplaces';
 type AppCategory = 'marketplaces' | 'erps' | 'logistics';
+type FilterId = 'all' | 'erps' | 'marketplaces';
 
 interface IntegrationAppCard {
   id: string;
@@ -22,56 +24,124 @@ interface IntegrationAppCard {
 }
 
 interface IntegrationsPayload {
-  categories: Array<{ id: StoreCategory; label: string }>;
   apps: IntegrationAppCard[];
-  publicWebhooks?: {
-    base: string | null;
-    bling: string | null;
-  };
+  publicWebhooks?: { bling: string | null };
 }
 
 const COPY: Record<string, string> = {
-  mercadolivre: 'Marketplace de anúncios. O HUB cuida do catálogo. Pedido e nota fiscal ficam na integração nativa.',
-  nuvemshop: 'Loja virtual. O conteúdo pode ser enriquecido em simulação, sem escrita ao vivo.',
-  shopee: 'Marketplace previsto. O conector ainda não está instalado e o HUB não grava nesta plataforma.',
-  amazon: 'Marketplace previsto. O conector ainda não está instalado e o HUB não grava nesta plataforma.',
-  tiktok: 'Canal previsto para uma próxima etapa. O conector ainda não está instalado.',
-  bling: 'ERP soberano do catálogo, do estoque e do preço. O HUB não processa pedidos.',
+  mercadolivre: 'Sincronize catálogo e estoque para o Mercado Livre. Requer autorização OAuth.',
+  nuvemshop: 'Publique catálogo e estoque na loja. A escrita ao vivo continua desligada.',
+  shopee: 'Marketplace previsto. O conector ainda não recebe catálogo.',
+  amazon: 'Marketplace previsto. O conector ainda não recebe catálogo.',
+  tiktok: 'Canal previsto. O conector ainda não está instalado.',
+  bling: 'ERP do catálogo, do estoque e do preço. O HUB não processa pedidos.',
 };
 
-function matchesCategory(app: IntegrationAppCard, category: StoreCategory): boolean {
-  if (category === 'all') return true;
-  if (category === 'sales') return app.category === 'marketplaces' && app.implemented;
-  return app.category === category;
+const FILTERS: Array<{ id: FilterId; label: string }> = [
+  { id: 'all', label: 'Todos' },
+  { id: 'erps', label: 'ERP (Bling)' },
+  { id: 'marketplaces', label: 'Marketplaces' },
+];
+
+function cardStatus(app: IntegrationAppCard): CardStatus {
+  if (!app.implemented) return 'coming_soon';
+  if (app.status === 'installed') return 'connected';
+  if (app.status === 'attention') return 'attention';
+  return 'disconnected';
+}
+
+function categoryLabel(category: AppCategory): string {
+  if (category === 'erps') return 'ERP';
+  if (category === 'logistics') return 'Logística';
+  return 'Marketplace';
+}
+
+function AppGrid({
+  apps,
+  canManage,
+  onConfigure,
+  onDisconnect,
+}: {
+  apps: IntegrationAppCard[];
+  canManage: boolean;
+  onConfigure: (app: IntegrationAppCard) => void;
+  onDisconnect: (app: IntegrationAppCard) => void;
+}) {
+  if (apps.length === 0) return <p className="text-sm text-text-muted">Nenhuma integração neste filtro.</p>;
+  return (
+    <div className="grid content-start gap-4 sm:grid-cols-2">
+      {apps.map((app) => {
+        const status = cardStatus(app);
+        return (
+          <IntegrationCard
+            key={app.id}
+            id={app.id}
+            name={app.name}
+            categoryLabel={categoryLabel(app.category)}
+            description={COPY[app.id] ?? 'Integração do catálogo.'}
+            status={status}
+            canManage={canManage}
+            onConfigure={() => onConfigure(app)}
+            onDisconnect={() => onDisconnect(app)}
+            onConnect={app.authorizePath ? () => { window.location.href = `${API_BASE_URL}${app.authorizePath}`; } : undefined}
+          />
+        );
+      })}
+    </div>
+  );
 }
 
 export default function IntegracoesPage() {
-  const [data, setData] = useState<IntegrationsPayload | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'store' | 'mine'>('store');
-  const [category, setCategory] = useState<StoreCategory>('marketplaces');
-  const [search, setSearch] = useState('');
   const { hasRole } = useCurrentRole();
   const isAdmin = hasRole('admin');
+  const [data, setData] = useState<IntegrationsPayload | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [tab, setTab] = useState<'mine' | 'explore'>('mine');
+  const [filter, setFilter] = useState<FilterId>('all');
+  const [search, setSearch] = useState('');
   const [credentialsFor, setCredentialsFor] = useState<IntegrationAppCard | null>(null);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const [webhookSecret, setWebhookSecret] = useState('');
   const [callbackUrl, setCallbackUrl] = useState('');
-  const [credentialNotice, setCredentialNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [hasSavedSecret, setHasSavedSecret] = useState(false);
+
+  const load = async () => {
+    try {
+      setData(await apiFetch<IntegrationsPayload>('/api/integrations'));
+      setLoadError(null);
+    } catch {
+      setLoadError('Não foi possível carregar a loja de integrações.');
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const mine = useMemo(
+    () => (data?.apps ?? []).filter((app) => app.implemented && app.status !== 'available'),
+    [data]
+  );
+  const pool = tab === 'mine' ? mine : (data?.apps ?? []);
+  const visible = pool.filter((app) => {
+    if (filter === 'erps' && app.category !== 'erps') return false;
+    if (filter === 'marketplaces' && app.category !== 'marketplaces') return false;
+    const term = search.trim().toLowerCase();
+    if (!term) return true;
+    return app.name.toLowerCase().includes(term) || categoryLabel(app.category).toLowerCase().includes(term);
+  });
 
   const openCredentials = async (app: IntegrationAppCard) => {
     setCredentialsFor(app);
-    setCredentialNotice(null);
+    setNotice(null);
     setClientSecret('');
     setWebhookSecret('');
     try {
-      const saved = await apiFetch<{
-        clientId: string;
-        callbackUrl: string;
-        hasClientSecret: boolean;
-      }>(`/api/admin/integrations/${app.id}/credentials`);
+      const saved = await apiFetch<{ clientId: string; callbackUrl: string; hasClientSecret: boolean }>(
+        `/api/admin/integrations/${app.id}/credentials`
+      );
       setClientId(saved.clientId);
       setCallbackUrl(saved.callbackUrl);
       setHasSavedSecret(saved.hasClientSecret);
@@ -79,7 +149,7 @@ export default function IntegracoesPage() {
       setClientId('');
       setCallbackUrl('');
       setHasSavedSecret(false);
-      setCredentialNotice('Não foi possível ler as credenciais.');
+      setNotice('Não foi possível ler as credenciais.');
     }
   };
 
@@ -102,190 +172,131 @@ export default function IntegracoesPage() {
       setClientSecret('');
       setWebhookSecret('');
       setCredentialsFor(null);
-      setCredentialNotice('Credenciais salvas. O segredo não volta para a tela.');
+      setNotice('Credenciais salvas. O segredo não volta para a tela.');
+      await load();
     } catch {
-      setCredentialNotice(hasSavedSecret ? 'Não foi possível atualizar.' : 'Informe o Client Secret na primeira gravação.');
+      setNotice(hasSavedSecret ? 'Não foi possível atualizar.' : 'Informe o Client Secret na primeira gravação.');
     }
   };
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        setData(await apiFetch<IntegrationsPayload>('/api/integrations'));
-      } catch {
-        setLoadError('Não foi possível carregar a loja de integrações.');
-      }
-    })();
-  }, []);
-
-  const pool = useMemo(() => {
-    const apps = data?.apps ?? [];
-    return tab === 'mine' ? apps.filter((app) => app.status !== 'available') : apps;
-  }, [data, tab]);
-
-  const visible = pool.filter((app) => {
-    if (!matchesCategory(app, category)) return false;
-    const term = search.trim().toLowerCase();
-    return term.length === 0 || app.name.toLowerCase().includes(term);
-  });
+  const disconnect = async (app: IntegrationAppCard) => {
+    try {
+      await apiFetch(`/api/admin/integrations/${app.id}/disconnect`, { method: 'POST' });
+      setNotice(`${app.name} desconectado. Nada foi apagado na loja.`);
+      await load();
+    } catch {
+      setNotice('Não foi possível desconectar.');
+    }
+  };
 
   return (
-    <main className="min-h-full bg-bg-base px-6 py-8 text-text-primary">
-      <div className="mx-auto max-w-6xl">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="inline-flex rounded-full bg-bg-surface p-1 shadow-sm">
-            <button
-              type="button"
-              onClick={() => setTab('store')}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ${
-                tab === 'store' ? 'bg-emerald-600 text-text-primary' : 'text-text-muted'
-              }`}
-            >
-              <Store className="h-4 w-4" />
-              Loja
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab('mine')}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ${
-                tab === 'mine' ? 'bg-emerald-600 text-text-primary' : 'text-text-muted'
-              }`}
-            >
-              <LayoutGrid className="h-4 w-4" />
-              Meus Apps
-            </button>
-          </div>
-          <label className="relative min-w-[220px] flex-1">
-            <span className="sr-only">Pesquisar aplicativos</span>
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Pesquisar aplicativos..."
-              className="w-full rounded-lg border border-border-color bg-bg-surface py-2 pl-9 pr-3 text-sm outline-none focus:border-emerald-500"
-            />
-          </label>
-          <p className="text-sm text-text-muted">{visible.length} registros</p>
-          <Link href="/canais" className="text-sm font-semibold text-emerald-700">
-            Canais de venda
-          </Link>
+    <main className="mx-auto max-w-6xl px-6 py-8">
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-text-primary">Loja de integrações</h1>
+          <p className="mt-1 text-sm text-text-muted">O que já está ligado e o que o HUB ainda pode conectar.</p>
         </div>
+        <Link href="/canais" className="text-sm font-semibold text-emerald-700">Canais de venda</Link>
+      </header>
 
-        {data && (
-          <p className="mt-4 rounded-lg border border-border-color bg-bg-surface px-4 py-3 text-sm text-text-muted">
-            {data.publicWebhooks?.bling
-              ? <>Endereço fixo do Bling: <span className="font-mono text-text-primary">{data.publicWebhooks.bling}</span></>
-              : 'O endereço público ainda não está definido. Grave PUBLIC_BASE_URL com o seu domínio e reinicie a API.'}
-          </p>
-        )}
-
-        {loadError && (
-          <div role="alert" className="mt-6 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{loadError}</div>
-        )}
-        {!data && !loadError && <p className="mt-6 text-sm text-text-muted" role="status">Carregando integrações...</p>}
-
-        {data && (
-          <div className="mt-6 grid gap-6 md:grid-cols-[220px_1fr]">
-            <nav aria-label="Categorias">
-              <h2 className="px-3 text-lg font-semibold text-text-primary">Categorias</h2>
-              <ul className="mt-3">
-                {data.categories.map((item) => {
-                  const count = pool.filter((app) => matchesCategory(app, item.id)).length;
-                  const selected = category === item.id;
-                  return (
-                    <li key={item.id}>
-                      <button
-                        type="button"
-                        onClick={() => setCategory(item.id)}
-                        className={`flex w-full items-center justify-between border-l-2 px-3 py-2 text-left text-sm ${
-                          selected
-                            ? 'border-emerald-600 bg-emerald-50 font-semibold text-emerald-800'
-                            : 'border-transparent text-text-muted hover:bg-bg-surface'
-                        }`}
-                      >
-                        <span>{item.label}</span>
-                        <span className="text-text-muted">{count}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            </nav>
-
-            <section className="grid content-start gap-4 sm:grid-cols-2">
-              {visible.length === 0 && (
-                <p className="text-sm text-text-muted">Nenhum aplicativo nesta categoria.</p>
-              )}
-              {visible.map((app) => (
-                <article key={app.id} className="flex min-h-[180px] flex-col rounded-xl border border-border-color bg-bg-surface p-5 shadow-sm">
-                  <div className="flex items-start gap-3">
-                    <BrandLogo id={app.id} name={app.name} />
-                    <div>
-                      <h3 className="font-semibold text-text-primary">{app.name}</h3>
-                      <p className="text-xs text-text-muted">{app.category === 'erps' ? 'ERP' : app.category === 'logistics' ? 'Logística' : 'Marketplaces'}</p>
-                    </div>
-                  </div>
-                  <p className="mt-3 line-clamp-3 flex-1 text-sm text-text-muted">{COPY[app.id] ?? app.reason ?? 'Integração do catálogo.'}</p>
-                  {app.reason && <p className="mt-2 text-xs text-amber-700">{app.reason}</p>}
-                  <div className="mt-4 flex items-center justify-between border-t border-border-color pt-3 text-sm">
-                    <span className={`inline-flex items-center gap-1.5 font-medium ${app.status === 'attention' ? 'text-amber-600' : app.status === 'installed' ? 'text-emerald-600' : 'text-text-muted'}`}>
-                      {app.status === 'installed' && <Check className="h-4 w-4" />}
-                      {app.status === 'attention' && <AlertTriangle className="h-4 w-4" />}
-                      {app.statusLabel}
-                    </span>
-                    <div className="flex items-center gap-3">
-                      {isAdmin && app.status === 'attention' && app.authorizePath && (
-                        <a href={`${API_BASE_URL}${app.authorizePath}`} className="font-semibold text-amber-700">
-                          Reautorizar
-                        </a>
-                      )}
-                      {isAdmin && (
-                        <button type="button" className="font-semibold text-text-muted" onClick={() => void openCredentials(app)}>
-                          Credenciais
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </section>
-          </div>
-        )}
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <div className="inline-flex rounded-full border border-border-color p-1" role="tablist">
+          {([['mine', 'Minhas conexões'], ['explore', 'Explorar integrações']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              onClick={() => setTab(id)}
+              className={`rounded-full px-3 py-1.5 text-sm font-semibold ${tab === id ? 'bg-emerald-700 text-white' : 'text-text-muted'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <label className="relative min-w-[220px] flex-1">
+          <span className="sr-only">Buscar integração</span>
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome ou categoria" className="w-full rounded-lg border border-border-color bg-bg-surface py-2 pl-9 pr-3 text-sm" />
+        </label>
       </div>
+
+      {loadError && <p role="alert" className="mt-4 text-sm text-rose-600">{loadError}</p>}
+      {notice && <p role="status" className="mt-4 text-sm text-text-muted">{notice}</p>}
+      {!data && !loadError && <p className="mt-6 text-sm text-text-muted">Carregando integrações...</p>}
+
+      {data && (
+        <div className="mt-6 grid gap-6 md:grid-cols-[200px_1fr]">
+          <nav aria-label="Categorias">
+            <ul>
+              {FILTERS.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    onClick={() => setFilter(item.id)}
+                    className={`flex w-full border-l-2 px-3 py-2 text-left text-sm ${filter === item.id ? 'border-emerald-600 font-semibold text-text-primary' : 'border-transparent text-text-muted'}`}
+                  >
+                    {item.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+          <section>
+            {tab === 'mine' ? (
+              <MinhasConexoes>
+                <AppGrid apps={visible} canManage={isAdmin} onConfigure={(app) => void openCredentials(app)} onDisconnect={(app) => void disconnect(app)} />
+              </MinhasConexoes>
+            ) : (
+              <ExplorarIntegracoes>
+                <AppGrid apps={visible} canManage={isAdmin} onConfigure={(app) => void openCredentials(app)} onDisconnect={(app) => void disconnect(app)} />
+              </ExplorarIntegracoes>
+            )}
+          </section>
+        </div>
+      )}
+
       {credentialsFor && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-lg rounded-xl bg-bg-surface p-5 shadow-xl">
-            <h2 className="text-lg font-semibold text-text-primary">Credenciais — {credentialsFor.name}</h2>
-            <p className="mt-1 text-sm text-text-muted">O segredo fica criptografado no banco. Cole no painel do aplicativo a URL de callback abaixo.</p>
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label={`Configurar ${credentialsFor.name}`}>
+          <div className="w-full max-w-lg rounded-xl border border-border-color bg-bg-surface p-5">
+            <h2 className="text-lg font-semibold">Configurar {credentialsFor.name}</h2>
             <label className="mt-4 block text-sm text-text-muted">
               Client ID
-              <input value={clientId} onChange={(event) => setClientId(event.target.value)} className="mt-1 w-full rounded-lg border border-border-color px-3 py-2 text-sm" />
+              <input value={clientId} onChange={(event) => setClientId(event.target.value)} className="mt-1 w-full rounded-lg border border-border-color bg-bg-base px-3 py-2 text-sm" />
             </label>
             <label className="mt-3 block text-sm text-text-muted">
               Client Secret {hasSavedSecret ? '(em branco mantém o atual)' : ''}
-              <input type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} className="mt-1 w-full rounded-lg border border-border-color px-3 py-2 text-sm" autoComplete="off" />
+              <input type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} className="mt-1 w-full rounded-lg border border-border-color bg-bg-base px-3 py-2 text-sm" autoComplete="off" />
             </label>
             <label className="mt-3 block text-sm text-text-muted">
               Segredo do webhook
-              <input type="password" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} className="mt-1 w-full rounded-lg border border-border-color px-3 py-2 text-sm" autoComplete="off" />
+              <input type="password" value={webhookSecret} onChange={(event) => setWebhookSecret(event.target.value)} className="mt-1 w-full rounded-lg border border-border-color bg-bg-base px-3 py-2 text-sm" autoComplete="off" />
             </label>
             <label className="mt-3 block text-sm text-text-muted">
               URL de callback
               <div className="mt-1 flex gap-2">
-                <input readOnly value={callbackUrl} className="w-full rounded-lg border border-border-color bg-bg-surface px-3 py-2 font-mono text-xs" />
-                <button
-                  type="button"
-                  className="shrink-0 rounded-lg border border-border-color px-3 text-sm font-semibold"
-                  onClick={() => void navigator.clipboard.writeText(callbackUrl)}
-                >
-                  Copiar
-                </button>
+                <input readOnly value={callbackUrl} className="w-full rounded-lg border border-border-color bg-bg-base px-3 py-2 font-mono text-xs" />
+                <button type="button" className="rounded-lg border border-border-color px-3 text-sm font-semibold" onClick={() => void navigator.clipboard.writeText(callbackUrl)}>Copiar</button>
               </div>
             </label>
-            {credentialNotice && <p className="mt-3 text-sm text-text-muted" role="status">{credentialNotice}</p>}
+            {credentialsFor.id === 'bling' && (
+              <label className="mt-3 block text-sm text-text-muted">
+                Endereço do webhook no Bling
+                <div className="mt-1 flex gap-2">
+                  <input readOnly value={data?.publicWebhooks?.bling ?? 'PUBLIC_BASE_URL ainda não definido'} className="w-full rounded-lg border border-border-color bg-bg-base px-3 py-2 font-mono text-xs" />
+                  <button
+                    type="button"
+                    className="rounded-lg border border-border-color px-3 text-sm font-semibold"
+                    onClick={() => void navigator.clipboard.writeText(data?.publicWebhooks?.bling ?? '')}
+                  >
+                    Copiar
+                  </button>
+                </div>
+              </label>
+            )}
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" className="rounded-lg px-3 py-2 text-sm text-text-muted" onClick={() => setCredentialsFor(null)}>Fechar</button>
-              <button type="button" className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-text-primary" onClick={() => void saveCredentials()}>Salvar</button>
+              <button type="button" className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white" onClick={() => void saveCredentials()}>Salvar</button>
             </div>
           </div>
         </div>

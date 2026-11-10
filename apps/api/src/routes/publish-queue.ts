@@ -1,11 +1,11 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
-import { requireRole } from '../auth/middleware.js';
+import { requirePermission } from '../auth/middleware.js';
 import { enqueueCheckedJobs, isLivePublishingEnabled } from '../queues/publish-queue.js';
 import { query } from '../db/pool.js';
 
 export const publishQueueRouter = Router();
-const admin = requireRole('admin');
+const executePush = requirePermission('push:execute');
 
 const bodySchema = z.object({
   jobs: z
@@ -25,7 +25,7 @@ const bodySchema = z.object({
     .max(20),
 });
 
-publishQueueRouter.post('/api/admin/publish-queue', admin, async (req: Request, res: Response, next: NextFunction) => {
+publishQueueRouter.post('/api/admin/publish-queue', executePush, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const parsed = bodySchema.safeParse(req.body);
     if (!parsed.success) {

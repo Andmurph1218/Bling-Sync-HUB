@@ -2,205 +2,203 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { History, ShieldCheck, Lock, Cpu, ArrowRight } from 'lucide-react';
-import { apiFetch, ApiError } from '../../utils/api-client';
+import { Download, Lock, X } from 'lucide-react';
+import { API_BASE_URL, ApiError, apiFetch } from '../../utils/api-client';
+import { AuditEmptyState, AuditLogTable, AuditRecord } from '../../components/audit/audit-log-table';
+import { EngineHealthStrip, MotorStatus } from '../../components/audit/engine-health-strip';
 
-interface AuditRecord {
-  id: string;
-  when: string;
-  whatChanged: string;
-  previousValue: string;
-  newValue: string;
-  originActor: string;
-  result: string;
-  table: string;
+type Range = 'hoje' | '7d' | 'tudo' | 'custom';
+
+interface AuditPayload {
+  records: AuditRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
-interface MotorEnvelope {
-  motor: string;
-  motorNamePlain: string;
-  resultState: 'healthy' | 'attention_required' | 'blocked';
-  operationalExplanation: string;
-  evidencesUsed: string[];
-  ruleApplied: string;
-  affectedCount: number;
-  affectedTargetLabel: string;
-  recommendedNextAction: string;
-  actionHref: string;
-  approvalMode: string;
-  executionId: string;
+function localDay(value: string): Date | undefined {
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return undefined;
+  return new Date(year, month - 1, day);
+}
+
+function rangeBounds(range: Range, from: string, to: string): { from?: string; to?: string } {
+  const now = new Date();
+  if (range === 'hoje') {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    return { from: start.toISOString() };
+  }
+  if (range === '7d') return { from: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString() };
+  if (range === 'custom') {
+    const start = localDay(from);
+    const end = localDay(to);
+    if (end) end.setDate(end.getDate() + 1);
+    return {
+      from: start?.toISOString(),
+      to: end?.toISOString(),
+    };
+  }
+  return {};
 }
 
 export default function AuditoriaPage() {
   const [records, setRecords] = useState<AuditRecord[]>([]);
-  const [motors, setMotors] = useState<MotorEnvelope[]>([]);
-  const [liveFromDb, setLiveFromDb] = useState<boolean>(false);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [motors, setMotors] = useState<MotorStatus[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [range, setRange] = useState<Range>('tudo');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [actor, setActor] = useState('');
+  const [motor, setMotor] = useState('');
+  const [open, setOpen] = useState<AuditRecord | null>(null);
+  const pageSize = 50;
+
+  const params = () => {
+    const search = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    if (debouncedQuery.trim()) search.set('q', debouncedQuery.trim());
+    if (actor.trim()) search.set('actor', actor.trim());
+    if (motor) search.set('motor', motor);
+    const bounds = rangeBounds(range, from, to);
+    if (bounds.from) search.set('from', bounds.from);
+    if (bounds.to) search.set('to', bounds.to);
+    return search;
+  };
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const [aj, mj] = await Promise.all([
-          apiFetch<{ records?: AuditRecord[] }>('/api/dashboard/audit-trail'),
-          apiFetch<{ motors?: MotorEnvelope[] }>('/api/dashboard/motors-diagnostic'),
-        ]);
-        setRecords(aj.records ?? []);
-        setMotors(mj.motors ?? []);
-        setLiveFromDb(true);
-      } catch (err) {
-        setLiveFromDb(false);
-        setLoadError(
-          err instanceof ApiError && err.status === 403
-            ? 'Seu papel não tem acesso à trilha de auditoria (restrita a Administrador e Revisor Fiscal).'
-            : 'Não foi possível carregar a auditoria da API local.'
-        );
-      }
-    })();
+    const timer = window.setTimeout(() => setDebouncedQuery(query), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
+    void apiFetch<{ motors?: MotorStatus[] }>('/api/dashboard/motors-diagnostic')
+      .then((payload) => setMotors(payload.motors ?? []))
+      .catch(() => setMotors([]));
   }, []);
+
+  useEffect(() => {
+    const search = params();
+    setLoading(true);
+    void apiFetch<AuditPayload>(`/api/dashboard/audit-trail?${search.toString()}`)
+      .then((payload) => {
+        setRecords(payload.records ?? []);
+        setTotal(payload.total ?? payload.records.length);
+        setLoadError(null);
+      })
+      .catch((err) => {
+        setLoadError(err instanceof ApiError && err.status === 403
+          ? 'Seu papel não tem acesso à trilha de auditoria.'
+          : 'Não foi possível carregar a auditoria.');
+      })
+      .finally(() => setLoading(false));
+  }, [page, debouncedQuery, range, from, to, actor, motor]);
+
+  const exportCsv = () => {
+    const search = params();
+    search.set('format', 'csv');
+    search.delete('page');
+    void fetch(`${API_BASE_URL}/api/dashboard/audit-trail?${search.toString()}`, { credentials: 'include' }).then(async (response) => {
+      if (!response.ok) return;
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'auditoria.csv';
+      anchor.click();
+      URL.revokeObjectURL(url);
+    });
+  };
+
+  const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, total);
+  const actors = [...new Set(records.map((record) => record.originActor))].filter(Boolean);
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
-      {loadError && (
-        <div role="alert" className="mb-6 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">{loadError}</div>
-      )}
-      <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-6 sm:flex-row sm:items-center">
+      <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-5 sm:flex-row sm:items-center">
         <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <History className="h-6 w-6 text-emerald-400" />
-            <h1 className="text-2xl font-bold text-text-primary">
-              Auditoria
-            </h1>
-            <span
-              className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${
-                liveFromDb
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                  : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-              }`}
-            >
-              {liveFromDb ? 'Trilha lida do banco' : 'Sem leitura do banco'}
-            </span>
-          </div>
-          <p className="mt-1 text-sm text-text-muted">
-            Cada registro responde: O que mudou? Qual era o valor anterior? Qual é o valor novo? Quem originou? Qual foi o resultado?
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-text-primary">Centro de auditoria e compliance</h1>
+          <p className="mt-1 text-sm text-text-muted">O que mudou, quem fez e qual foi o resultado.</p>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
           <Lock className="h-3.5 w-3.5" />
-          Tabelas Imutáveis · Retenção Fiscal 5 Anos
+          Tabelas imutáveis · Retenção fiscal 5 anos
         </span>
       </header>
 
-      {/* Seção 6: Evolução dos 10 Motores (Estrutura Consistente) */}
-      {motors.length > 0 && (
-        <section className="mt-6">
-          <div className="mb-3 flex items-center gap-2">
-            <Cpu className="h-4 w-4 text-emerald-400" />
-            <h2 className="text-sm font-bold uppercase tracking-wider text-text-muted">
-              Diagnóstico Padronizado dos 10 Motores (Seção 6 — Resultado, Evidências, Regra e Próxima Ação)
-            </h2>
+      {motors.length > 0 && <div className="mt-4"><EngineHealthStrip motors={motors} /></div>}
+      {loadError && <p role="alert" className="mt-4 text-sm text-rose-600">{loadError}</p>}
+
+      <section className="mt-6">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-semibold text-text-primary">O que mudou</h2>
+            <Link href="/auditoria/configuracoes" className="text-xs font-semibold text-text-muted underline">Configurações</Link>
           </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            {motors.map((m) => {
-              const badgeColor =
-                m.resultState === 'healthy'
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                  : m.resultState === 'blocked'
-                  ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
-                  : 'border-amber-500/30 bg-amber-500/10 text-amber-300';
-
-              const stateLabel =
-                m.resultState === 'healthy'
-                  ? 'Operacional'
-                  : m.resultState === 'blocked'
-                  ? 'Com Bloqueio'
-                  : 'Exige Atenção';
-
-              return (
-                <div
-                  key={m.motor}
-                  className="flex flex-col justify-between rounded-xl border border-border-color bg-bg-surface/60 p-4 text-xs"
-                >
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-bold text-text-primary">
-                        {m.motor} — {m.motorNamePlain}
-                      </span>
-                      <span className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${badgeColor}`}>
-                        {stateLabel} ({m.affectedCount})
-                      </span>
-                    </div>
-                    <p className="text-text-primary">{m.operationalExplanation}</p>
-                    <p className="text-[11px] text-text-muted">
-                      <strong>Regra aplicada:</strong> {m.ruleApplied}
-                    </p>
-                    <p className="text-[11px] text-text-muted">
-                      <strong>Evidências:</strong> {m.evidencesUsed.join(' · ')}
-                    </p>
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-between border-t border-border-color pt-2.5">
-                    <span className="font-mono text-[10px] text-text-muted">
-                      Exec: {m.executionId}
-                    </span>
-                    <Link
-                      href={m.actionHref}
-                      className="inline-flex items-center gap-1 font-semibold text-emerald-400 hover:underline"
-                    >
-                      <span>{m.recommendedNextAction}</span>
-                      <ArrowRight className="h-3.5 w-3.5" />
-                    </Link>
-                  </div>
-                </div>
-              );
-            })}
+          <button type="button" onClick={exportCsv} className="inline-flex items-center gap-1.5 rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold">
+            <Download className="h-3.5 w-3.5" />
+            Exportar logs (CSV)
+          </button>
+        </div>
+        <div className="mb-3 grid gap-2 md:grid-cols-4">
+          <input value={query} onChange={(event) => { setPage(1); setQuery(event.target.value); }} placeholder="SKU ou nome do produto" className="rounded-lg border border-border-color bg-bg-surface px-3 py-2 text-sm" />
+          <select value={range} onChange={(event) => { setPage(1); setRange(event.target.value as Range); }} className="rounded-lg border border-border-color bg-bg-surface px-3 py-2 text-sm">
+            <option value="tudo">Qualquer data</option>
+            <option value="hoje">Hoje</option>
+            <option value="7d">Últimos 7 dias</option>
+            <option value="custom">Personalizado</option>
+          </select>
+          <input
+            value={actor}
+            list="audit-actors"
+            onChange={(event) => { setPage(1); setActor(event.target.value); }}
+            placeholder="Origem ou usuário"
+            className="rounded-lg border border-border-color bg-bg-surface px-3 py-2 text-sm"
+          />
+          <datalist id="audit-actors">
+            <option value="Sistema (Auto)" />
+            <option value="Revisor fiscal" />
+            {actors.map((name) => <option key={name} value={name} />)}
+          </datalist>
+          <select value={motor} onChange={(event) => { setPage(1); setMotor(event.target.value); }} className="rounded-lg border border-border-color bg-bg-surface px-3 py-2 text-sm">
+            <option value="">Qualquer motor</option>
+            <option value="GVE">Apenas GVE</option>
+            <option value="NVE">Apenas NVE</option>
+            <option value="Sistema">Apenas Sistema</option>
+          </select>
+        </div>
+        {range === 'custom' && (
+          <div className="mb-3 flex gap-2">
+            <input type="date" value={from} onChange={(event) => { setPage(1); setFrom(event.target.value); }} className="rounded-lg border border-border-color bg-bg-surface px-3 py-2 text-sm" />
+            <input type="date" value={to} onChange={(event) => { setPage(1); setTo(event.target.value); }} className="rounded-lg border border-border-color bg-bg-surface px-3 py-2 text-sm" />
           </div>
-        </section>
-      )}
-
-      {/* Seção 5.7: Tabela de Auditoria */}
-      <section className="mt-8 overflow-hidden rounded-xl border border-border-color bg-bg-surface/50">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-border-color bg-bg-surface/90 text-[11px] uppercase tracking-wider text-text-muted">
-              <tr>
-                <th className="px-4 py-3.5">1. O que mudou?</th>
-                <th className="px-4 py-3.5">2. Valor Anterior</th>
-                <th className="px-4 py-3.5">3. Valor Novo / Proposto</th>
-                <th className="px-4 py-3.5">4. Quem / Qual processo originou?</th>
-                <th className="px-4 py-3.5">5. Qual foi o resultado?</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-color/80">
-              {records.map((rec) => (
-                <tr key={rec.id} className="hover:bg-bg-surface/80">
-                  <td className="px-4 py-4">
-                    <div className="font-semibold text-text-primary">
-                      {rec.whatChanged}
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-text-muted">
-                      {rec.when} · Tabela: <code>{rec.table}</code>
-                    </div>
-                  </td>
-                  <td className="px-4 py-4 font-mono text-text-muted">
-                    {rec.previousValue}
-                  </td>
-                  <td className="px-4 py-4 font-mono font-semibold text-emerald-300">
-                    {rec.newValue}
-                  </td>
-                  <td className="px-4 py-4 text-text-primary">{rec.originActor}</td>
-                  <td className="px-4 py-4">
-                    <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
-                      <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
-                      {rec.result}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        )}
+        {loading ? <p className="py-8 text-sm text-text-muted">Carregando registros…</p> : records.length === 0 && !loadError ? <AuditEmptyState /> : <AuditLogTable records={records} onOpen={setOpen} />}
+        <div className="mt-3 flex items-center justify-between text-xs text-text-muted">
+          <p>Mostrando {start}-{end} de {total.toLocaleString('pt-BR')} registros</p>
+          <div className="flex gap-2">
+            <button type="button" disabled={page <= 1} onClick={() => setPage((current) => current - 1)} className="rounded border border-border-color px-2 py-1 disabled:opacity-40">Anterior</button>
+            <button type="button" disabled={end >= total} onClick={() => setPage((current) => current + 1)} className="rounded border border-border-color px-2 py-1 disabled:opacity-40">Próxima</button>
+          </div>
         </div>
       </section>
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="fixed inset-0 bg-black/60" onClick={() => setOpen(null)} />
+          <aside role="dialog" aria-label="Detalhe do log" className="relative z-10 flex h-full w-full max-w-lg flex-col border-l border-border-color bg-bg-base shadow-2xl">
+            <header className="flex items-center justify-between border-b border-border-color px-5 py-4">
+              <h2 className="text-base font-semibold">Detalhe da alteração</h2>
+              <button type="button" onClick={() => setOpen(null)} aria-label="Fechar"><X className="h-4 w-4" /></button>
+            </header>
+            <pre className="flex-1 overflow-auto p-5 font-mono text-[11px] leading-relaxed">{JSON.stringify(open, null, 2)}</pre>
+          </aside>
+        </div>
+      )}
     </main>
   );
 }

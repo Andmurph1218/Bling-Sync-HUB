@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { AlertCircle, AlertOctagon, AlertTriangle, ChevronDown, ChevronRight, ExternalLink, FileJson, RotateCw } from 'lucide-react';
 import { apiFetch } from '../../utils/api-client';
 import { buildBlingProductUrl } from '../../utils/matching-signals';
@@ -122,7 +123,14 @@ export function ProblemDataGrid({
     const syncBlocked = !canWrite || (isErpSyncTarget(item?.id ?? group.key) && !canSyncErp);
     return (
       <div className="flex items-center justify-end gap-1.5">
-        {group.action === 'bling' ? (
+        {group.action === 'fiscal' ? (
+          <Link
+            href={`/fiscal?aba=${group.key === 'gap:ean' ? 'ean' : 'ncm'}${item?.sku && item.sku !== 'Sem SKU' ? `&q=${encodeURIComponent(item.sku)}` : ''}`}
+            className={ACTION_OUTLINE}
+          >
+            Resolver no Fiscal
+          </Link>
+        ) : group.action === 'bling' ? (
           <a href={blingHref} target="_blank" rel="noreferrer" className={ACTION_OUTLINE}>
             Corrigir no Bling
             <ExternalLink className="h-3 w-3" aria-hidden="true" />

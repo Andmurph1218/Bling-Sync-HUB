@@ -1,10 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
-import { Check, X, Lock, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
+import { Check, X, Lock, CheckCircle2, XCircle, RefreshCw, ShieldCheck, Download } from 'lucide-react';
 import { useCurrentRole } from '../../../components/app-shell';
-import { apiFetch, ApiError } from '../../../utils/api-client';
+import { API_BASE_URL, apiFetch, ApiError } from '../../../utils/api-client';
 
 interface EanItem {
   id: string;
@@ -64,20 +63,25 @@ function gs1Badge(item: EanItem): { label: string; className: string; detail: st
 }
 
 export default function FiscalEanPage() {
-  const { currentUser, hasRole } = useCurrentRole();
+  const { currentUser, hasPermission } = useCurrentRole();
   const [items, setItems] = useState<EanItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const canReviewFiscal = hasRole('fiscal_approver');
+  const canReviewFiscal = hasPermission('fiscal:approve_ean');
+  const [metrics, setMetrics] = useState<{ valid: number; pending: number; invalid: number } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const json = await apiFetch<{ items: EanItem[] }>('/api/fiscal/ean/pending');
+      const [json, summary] = await Promise.all([
+        apiFetch<{ items: EanItem[] }>('/api/fiscal/ean/pending'),
+        apiFetch<{ valid: number; pending: number; invalid: number }>('/api/fiscal/ean/summary'),
+      ]);
       setItems(json.items);
+      setMetrics(summary);
       setLoadError(null);
     } catch (err) {
       setLoadError(
@@ -142,9 +146,24 @@ export default function FiscalEanPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-300">
-            Aprovação exige papel Revisor Fiscal
-          </span>
+          <button
+            type="button"
+            onClick={() => {
+              void fetch(`${API_BASE_URL}/api/fiscal/ean/history.csv`, { credentials: 'include' }).then(async (response) => {
+                if (!response.ok) return;
+                const url = URL.createObjectURL(await response.blob());
+                const anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = 'historico-ean.csv';
+                anchor.click();
+                URL.revokeObjectURL(url);
+              });
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold text-text-primary"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Exportar Histórico de EANs
+          </button>
           <button
             type="button"
             onClick={() => void load()}
@@ -156,12 +175,28 @@ export default function FiscalEanPage() {
         </div>
       </header>
 
+      {metrics && (
+        <div className="mt-6 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-emerald-600/30 bg-emerald-500/10 px-4 py-3">
+            <p className="text-2xl font-bold tabular-nums text-emerald-700 dark:text-emerald-300">{metrics.valid.toLocaleString('pt-BR')}</p>
+            <p className="mt-1 text-xs text-text-muted">EANs válidos no ERP</p>
+          </div>
+          <div className="rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3">
+            <p className="text-2xl font-bold tabular-nums text-orange-700 dark:text-orange-300">{metrics.pending.toLocaleString('pt-BR')}</p>
+            <p className="mt-1 text-xs text-text-muted">Sugestões pendentes</p>
+          </div>
+          <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3">
+            <p className="text-2xl font-bold tabular-nums text-rose-700 dark:text-rose-300">{metrics.invalid.toLocaleString('pt-BR')}</p>
+            <p className="mt-1 text-xs text-text-muted">EANs inválidos/conflitos</p>
+          </div>
+        </div>
+      )}
+
       {!canReviewFiscal && (
         <div className="mt-6 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
           <Lock className="h-4 w-4 text-amber-400" />
           <span>
-            Seu papel atual (<strong>{currentUser.roleLabel}</strong>) tem acesso somente leitura. Apenas usuários com papel{' '}
-            <strong>Revisor Fiscal</strong> podem aprovar ou rejeitar EAN.
+            Seu acesso atual (<strong>{currentUser.roleLabel}</strong>) não inclui a permissão de aprovar EAN.
           </span>
         </div>
       )}
@@ -191,12 +226,9 @@ export default function FiscalEanPage() {
         <p className="mt-6 text-sm text-text-muted" role="status">Carregando propostas de EAN...</p>
       )}
       {!loading && !loadError && items.length === 0 && (
-        <div className="mt-6 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-200">
-          <CheckCircle2 className="h-5 w-5 text-emerald-400" />
-          <span>
-            Nenhuma proposta de EAN externo aguardando revisão. Variantes sem EAN no Bling aparecem na{' '}
-            <Link href="/pendencias" className="underline">Central de Pendências</Link>.
-          </span>
+        <div className="mt-6 flex flex-col items-center rounded-xl border border-border-color bg-bg-surface px-6 py-10 text-center">
+          <ShieldCheck className="h-14 w-14 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+          <p className="mt-4 text-base font-semibold text-text-primary">Tudo em conformidade. Nenhuma sugestão de EAN aguardando revisão.</p>
         </div>
       )}
 
@@ -207,11 +239,10 @@ export default function FiscalEanPage() {
               <caption className="sr-only">Propostas de EAN aguardando revisão fiscal</caption>
               <thead className="border-b border-border-color bg-bg-surface/90 text-xs uppercase tracking-wider text-text-muted">
                 <tr>
-                  <th scope="col" className="px-4 py-3.5">SKU / Produto</th>
-                  <th scope="col" className="px-4 py-3.5">EAN atual (Bling)</th>
-                  <th scope="col" className="px-4 py-3.5">EAN proposto</th>
-                  <th scope="col" className="px-4 py-3.5">Validação GS1</th>
+                  <th scope="col" className="px-4 py-3.5">Produto / SKU</th>
+                  <th scope="col" className="px-4 py-3.5">EAN sugerido</th>
                   <th scope="col" className="px-4 py-3.5">Origem</th>
+                  <th scope="col" className="px-4 py-3.5">Validação</th>
                   <th scope="col" className="px-4 py-3.5 text-right">Ações</th>
                 </tr>
               </thead>
@@ -221,27 +252,22 @@ export default function FiscalEanPage() {
                   return (
                     <tr key={item.id} className="hover:bg-bg-surface/80">
                       <td className="px-4 py-4">
-                        <div className="font-mono text-xs font-semibold text-emerald-400">{item.variantSku || '(Sem SKU)'}</div>
-                        {item.blingId ? (
-                          <Link href={`/catalogo/${item.blingId}`} className="mt-0.5 block text-xs text-text-primary hover:underline">
-                            {item.productName ?? `Produto #${item.blingId}`}
-                          </Link>
-                        ) : (
-                          <span className="text-xs text-text-muted">Produto não localizado</span>
-                        )}
+                        <p className="max-w-xs truncate text-sm font-medium text-text-primary" title={item.productName ?? ''}>
+                          {item.productName || 'Produto sem nome'}
+                        </p>
+                        <p className="font-mono text-[11px] text-text-muted">{item.variantSku || 'Sem SKU'}</p>
                       </td>
-                      <td className="px-4 py-4 font-mono text-xs text-text-muted">{item.currentEan || 'Ausente'}</td>
                       <td className="px-4 py-4 font-mono text-xs font-bold text-text-primary">{item.proposedEan}</td>
-                      <td className="px-4 py-4">
-                        <span className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold ${badge.className}`}>
-                          {badge.label}
-                        </span>
-                        <div className="mt-1 text-[11px] text-text-muted">{badge.detail}</div>
-                      </td>
                       <td className="px-4 py-4">
                         <span className="rounded border border-border-color bg-bg-surface px-2 py-0.5 text-xs text-text-muted">
                           {item.sourcePlatform === 'mercadolivre' ? 'Mercado Livre' : 'Nuvemshop'}
                         </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold ${badge.className}`}>
+                          {item.gs1.valid ? 'Dígito GS1 OK' : 'Dígito GS1 falhou'}
+                        </span>
+                        <div className="mt-1 text-[11px] text-text-muted">{badge.detail}</div>
                       </td>
                       <td className="px-4 py-4 text-right">
                         {item.decision === 'approved' ? (

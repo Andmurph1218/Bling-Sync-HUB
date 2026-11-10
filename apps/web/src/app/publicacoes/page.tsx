@@ -1,17 +1,12 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import {
-  Send,
-  Play,
-  ShieldCheck,
-  Lock,
-  RotateCcw,
-  CheckCircle2,
-  AlertTriangle,
-  Clock,
-} from 'lucide-react';
+import Link from 'next/link';
+import { HelpCircle, Loader2, Play, RotateCcw, Shield } from 'lucide-react';
 import { apiFetch, ApiError } from '../../utils/api-client';
+import { useCurrentRole } from '../../components/app-shell';
+import { MERCADO_LIVRE_ACTIVE } from '../../config/channels';
+import { classifyPublication, fiscalQueue, SovereigntyLock, StatusBadge } from '../../components/publications/status-badge';
 
 interface PushAttempt {
   id: string;
@@ -35,6 +30,15 @@ interface PushAttemptsPayload {
   attempts: PushAttempt[];
 }
 
+interface PlannedDiff {
+  productId: string;
+  blingId: string;
+  sku: string;
+  name: string;
+  stockPriceAction: string;
+  contentAction: string;
+}
+
 interface SimulationResult {
   simulatedAt: string;
   externalWritesPerformed: number;
@@ -46,23 +50,19 @@ interface SimulationResult {
     ignoredStockPriceByNativeOwner: number;
     excludedEmptySku: number;
   };
-  syncOwners: Array<{ platform: string; stock_price: string; content: string }>;
   protectedBlingFields: string[];
-  plannedProductDiffs: Array<{
-    blingId: string;
-    sku: string;
-    name: string;
-    stockPriceAction: string;
-    contentAction: string;
-  }>;
+  plannedProductDiffs: PlannedDiff[];
 }
 
 export default function PublicacoesPage() {
+  const { hasPermission } = useCurrentRole();
+  const canSimulate = hasPermission('push:simulate');
   const [simResult, setSimResult] = useState<SimulationResult | null>(null);
   const [simError, setSimError] = useState<string | null>(null);
-  const [runningSim, setRunningSim] = useState<boolean>(false);
+  const [runningSim, setRunningSim] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [showTechnical, setShowTechnical] = useState(false);
   const [push, setPush] = useState<PushAttemptsPayload | null>(null);
-  const [pushError, setPushError] = useState<string | null>(null);
 
   const runDryRunSimulation = async () => {
     setRunningSim(true);
@@ -72,8 +72,8 @@ export default function PublicacoesPage() {
     } catch (err) {
       setSimError(
         err instanceof ApiError && err.status === 403
-          ? 'Seu papel não pode executar a simulação (restrita a Operador e Administrador).'
-          : 'Não foi possível executar a simulação na API local.'
+          ? 'Seu papel não pode executar a simulação.'
+          : 'Não foi possível executar a simulação.'
       );
     } finally {
       setRunningSim(false);
@@ -82,239 +82,152 @@ export default function PublicacoesPage() {
 
   useEffect(() => {
     void runDryRunSimulation();
-    void (async () => {
-      try {
-        setPush(await apiFetch<PushAttemptsPayload>('/api/dashboard/push-attempts'));
-      } catch {
-        setPushError('Não foi possível carregar o histórico de publicações.');
-      }
-    })();
+    void apiFetch<PushAttemptsPayload>('/api/dashboard/push-attempts').then(setPush).catch(() => setPush(null));
   }, []);
 
-  const [today, setToday] = useState<{ value: number; sent: number; failed: number; queued: number } | null>(null);
+  const simulateOne = async (productId: string) => {
+    setNotice(null);
+    try {
+      const channel = MERCADO_LIVRE_ACTIVE ? 'mercadolivre' : 'nuvemshop';
+      await apiFetch(`/api/catalog/${productId}/simulate?channel=${channel}`, { method: 'POST' });
+      setNotice('Simulação deste produto concluída. Nenhuma escrita saiu para a loja.');
+    } catch {
+      setNotice('Não foi possível simular o envio deste produto.');
+    }
+  };
 
-  useEffect(() => {
-    void apiFetch<{ cards: { publicationsToday: { value: number; sent: number; failed: number; queued: number } } }>(
-      '/api/catalog/home'
-    )
-      .then((home) => setToday(home.cards.publicationsToday))
-      .catch(() => setToday(null));
-  }, []);
-
-  const s = simResult?.summary;
+  const summary = simResult?.summary;
+  const totalLabel = summary?.totalProductsAnalyzed.toLocaleString('pt-BR') ?? '…';
+  const funnel = [
+    { label: 'Total no catálogo', value: summary?.totalProductsAnalyzed, className: 'border-border-color bg-bg-surface', valueClass: 'text-text-primary' },
+    { label: 'Em análise / aguardando', value: summary?.awaitingContentOrCategory, className: 'border-sky-500/40 bg-sky-500/10', valueClass: 'text-sky-800 dark:text-sky-100' },
+    { label: 'Prontos para envio (Shadow)', value: summary?.aptToPublishContent, className: 'border-emerald-500/40 bg-emerald-500/10', valueClass: 'text-emerald-800 dark:text-emerald-100' },
+    { label: 'Bloqueados por regra', value: summary?.blockedByFiscalRule, className: 'border-rose-500/40 bg-rose-500/10', valueClass: 'text-rose-800 dark:text-rose-100', tip: 'Produtos bloqueados não serão enviados. Corrija as pendências na aba Fiscal.' },
+  ];
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
-      <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-6 sm:flex-row sm:items-center">
+      <div className="flex items-start gap-2 rounded-xl border border-sky-500/40 bg-sky-500/10 px-4 py-3 text-sm text-sky-950 dark:text-sky-50">
+        <Shield className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <p>
+          Modo Shadow ativo: o HUB está calculando o que seria enviado, mas não fará escrita real na Nuvemshop. Preço e estoque estão sendo gerenciados pela integração nativa do Bling e não serão enviados.{' '}
+          <button type="button" className="font-semibold underline" onClick={() => setShowTechnical((current) => !current)}>
+            {showTechnical ? 'Ocultar detalhes técnicos' : 'Ver detalhes técnicos'}
+          </button>
+        </p>
+      </div>
+      {showTechnical && (
+        <ul className="mt-2 list-disc rounded-xl border border-border-color bg-bg-surface px-8 py-3 text-xs text-text-muted">
+          {(simResult?.protectedBlingFields ?? ['Preço, estoque, SKU e dados fiscais do Bling']).map((field) => <li key={field}>{field}</li>)}
+        </ul>
+      )}
+
+      <header className="mt-6 flex flex-col justify-between gap-4 border-b border-border-color pb-6 sm:flex-row sm:items-center">
         <div>
-          <div className="flex items-center gap-2">
-            <Send className="h-6 w-6 text-emerald-400" />
-            <h1 className="text-2xl font-bold text-text-primary">
-              Publicações
-            </h1>
-          </div>
-          <p className="mt-1 text-sm text-text-muted">
-            Simule o impacto sobre os produtos reais do banco antes de qualquer escrita nos canais e acompanhe cada tentativa por passo.
-          </p>
-          {today && (
-            <p className="mt-2 text-sm text-text-primary" role="status">
-              Publicações hoje: {today.value} ({today.sent} enviadas, {today.failed} falhas, {today.queued} na fila)
+          <h1 className="text-2xl font-bold tracking-tight text-text-primary">Pipeline de distribuição</h1>
+          <p className="mt-1 text-sm text-text-muted">O que está pronto, o que espera enriquecimento e o que a regra fiscal segura.</p>
+        </div>
+        <div className="flex flex-col items-start gap-1 sm:items-end">
+          <button
+            type="button"
+            onClick={() => void runDryRunSimulation()}
+            disabled={runningSim || !canSimulate}
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+          >
+            {runningSim ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            {runningSim ? `Simulando ${totalLabel} produtos...` : 'Re-executar simulação'}
+          </button>
+          {simResult && (
+            <p className="text-[11px] text-text-muted">
+              Última simulação: {new Date(simResult.simulatedAt).toLocaleString('pt-BR')}
             </p>
           )}
         </div>
-
-        <button
-          type="button"
-          onClick={() => void runDryRunSimulation()}
-          disabled={runningSim}
-          className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-xs font-semibold text-text-primary hover:bg-emerald-500 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
-        >
-          <Play className="h-4 w-4" />
-          <span>{runningSim ? 'Calculando simulação...' : 'Recalcular simulação (sem escrita externa)'}</span>
-        </button>
       </header>
 
-      {/* 5.3 Simulador de Sincronização */}
-      <section className="mt-6 rounded-xl border border-emerald-500/30 bg-bg-surface/60 p-6">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-base font-bold text-text-primary">Resultado da simulação (estado conhecido neste instante)</h2>
-          {simResult && (
-            <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-0.5 text-xs font-semibold text-emerald-300">
-              Escritas externas executadas: {simResult.externalWritesPerformed} · {new Date(simResult.simulatedAt).toLocaleTimeString('pt-BR')}
-            </span>
-          )}
-        </div>
+      {simError && <p role="alert" className="mt-4 text-sm text-rose-600">{simError}</p>}
+      {notice && <p role="status" className="mt-4 text-sm text-text-muted">{notice}</p>}
+      {summary && summary.excludedEmptySku > 0 && (
+        <p className="mt-4 text-sm text-text-muted">{summary.excludedEmptySku.toLocaleString('pt-BR')} produtos sem SKU ficaram fora do envio.</p>
+      )}
 
-        {simError && (
-          <div role="alert" className="mt-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">{simError}</div>
-        )}
-        {!simResult && !simError && <p className="mt-4 text-sm text-text-muted" role="status">Calculando...</p>}
-
-        {s && (
-          <>
-            {s.excludedEmptySku > 0 && (
-              <p className="mt-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-100" role="status">
-                {s.excludedEmptySku} produto(s) sem SKU ficaram fora da lista de envio. Eles não sincronizam até o SKU ser preenchido no Bling.
-              </p>
-            )}
-            <div className="mt-4 grid gap-3 sm:grid-cols-4">
-              <div className="rounded-lg border border-border-color bg-bg-base p-4">
-                <span className="text-xs text-text-muted">Produtos analisados</span>
-                <p className="mt-1 text-2xl font-bold text-text-primary">{s.totalProductsAnalyzed}</p>
-              </div>
-              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4">
-                <span className="text-xs text-emerald-300">Aptos para atualizar conteúdo</span>
-                <p className="mt-1 text-2xl font-bold text-emerald-400">{s.aptToPublishContent}</p>
-              </div>
-              <div className="rounded-lg border border-rose-500/30 bg-rose-500/5 p-4">
-                <span className="text-xs text-rose-300">Bloqueados por regra fiscal</span>
-                <p className="mt-1 text-2xl font-bold text-rose-400">{s.blockedByFiscalRule}</p>
-                <span className="text-[11px] text-text-muted">EAN ausente/inválido ou NCM com risco</span>
-              </div>
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4">
-                <span className="text-xs text-amber-300">Estoque/preço ignorados (integração nativa)</span>
-                <p className="mt-1 text-2xl font-bold text-amber-400">{s.ignoredStockPriceByNativeOwner}</p>
-                <span className="text-[11px] text-text-muted">
-                  Responsável: {simResult?.syncOwners.map((o) => `${o.platform}=${o.stock_price}`).join(' · ')}
+      <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {funnel.map((card) => (
+          <article key={card.label} className={`rounded-xl border p-4 ${card.className}`}>
+            <div className="flex items-start justify-between gap-2">
+              <p className={`text-2xl font-bold tabular-nums ${card.valueClass}`}>{(card.value ?? 0).toLocaleString('pt-BR')}</p>
+              {card.tip && (
+                <span title={card.tip} className="text-rose-700 dark:text-rose-200">
+                  <HelpCircle className="h-4 w-4" aria-label={card.tip} />
                 </span>
-              </div>
+              )}
             </div>
-
-            <div className="mt-4 grid gap-4 text-xs lg:grid-cols-2">
-              <div className="rounded-lg border border-border-color bg-bg-base p-4">
-                <div className="flex items-center gap-1.5 font-semibold text-emerald-400">
-                  <ShieldCheck className="h-4 w-4" />
-                  <span>Campos protegidos que permanecerão inalterados no Bling</span>
-                </div>
-                <ul className="mt-1.5 list-inside list-disc text-text-muted">
-                  {simResult?.protectedBlingFields.map((f) => <li key={f}>{f}</li>)}
-                </ul>
-              </div>
-              <div className="rounded-lg border border-border-color bg-bg-base p-4">
-                <div className="flex items-center gap-1.5 font-semibold text-amber-300">
-                  <Lock className="h-4 w-4" />
-                  <span>Proteção contra conflito com integração nativa e Full</span>
-                </div>
-                <p className="mt-1.5 text-text-muted">
-                  Enquanto o responsável por estoque e preço for <code className="text-text-primary">bling_native</code>, o HUB não escreve estoque nem preço. Estoque Full (<code className="text-text-primary">meli_facility</code>) nunca recebe escrita de quantidade.
-                </p>
-              </div>
-            </div>
-
-            {simResult && simResult.plannedProductDiffs.length > 0 && (
-              <div className="mt-5 overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <caption className="sr-only">Diferenças planejadas por produto</caption>
-                  <thead className="border-b border-border-color text-[11px] uppercase text-text-muted">
-                    <tr>
-                      <th scope="col" className="py-2 pr-3">SKU / Produto</th>
-                      <th scope="col" className="py-2 px-3">Estoque / Preço</th>
-                      <th scope="col" className="py-2 pl-3">Conteúdo / Medidas</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border-color/70">
-                    {simResult.plannedProductDiffs.map((diff) => (
-                      <tr key={diff.blingId}>
-                        <td className="py-2.5 pr-3">
-                          <span className="font-mono font-semibold text-emerald-400">{diff.sku}</span>
-                          <div className="text-text-muted">{diff.name}</div>
-                        </td>
-                        <td className="py-2.5 px-3 text-amber-300">{diff.stockPriceAction}</td>
-                        <td className="py-2.5 pl-3 text-text-primary">{diff.contentAction}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </>
-        )}
+            <p className="mt-1 text-xs text-text-muted">{card.label}</p>
+          </article>
+        ))}
       </section>
 
-      {/* 5.6 Histórico real de tentativas */}
-      <section className="mt-8 rounded-xl border border-border-color bg-bg-surface/50 p-6">
-        <h2 className="text-base font-bold text-text-primary">Histórico de tentativas de publicação por passo</h2>
-        <p className="mt-1 text-xs text-text-muted">
-          O HUB nunca repete cegamente uma operação após timeout: verifica o estado remoto e reexecuta apenas o passo que falhou.
-        </p>
+      <section className="mt-6 overflow-x-auto rounded-xl border border-border-color bg-bg-surface">
+        <table className="w-full text-left text-sm">
+          <caption className="px-4 py-3 text-left text-xs text-text-muted">Amostra dos produtos analisados nesta simulação.</caption>
+          <thead className="border-b border-border-color text-[11px] uppercase tracking-wide text-text-muted">
+            <tr className="h-10">
+              <th className="px-4 font-semibold">Produto / SKU</th>
+              <th className="px-3 font-semibold">Status</th>
+              <th className="px-4 text-right font-semibold">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(simResult?.plannedProductDiffs ?? []).map((diff) => {
+              const tone = classifyPublication(diff.stockPriceAction, diff.contentAction);
+              return (
+                <tr key={diff.blingId} className="border-b border-border-color">
+                  <td className="px-4 py-3">
+                    <p className="max-w-xs truncate font-medium text-text-primary" title={diff.name}>{diff.name}</p>
+                    <p className="font-mono text-[11px] text-text-muted">{diff.sku || 'Sem SKU'}</p>
+                  </td>
+                  <td className="px-3 py-3"><StatusBadge tone={tone} /></td>
+                  <td className="px-4 py-3 text-right">
+                    {tone === 'ready' && canSimulate && (
+                      <button type="button" onClick={() => void simulateOne(diff.productId)} className="inline-flex items-center gap-1 rounded-md bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white">
+                        <Play className="h-3.5 w-3.5" />
+                        Simular envio
+                      </button>
+                    )}
+                    {tone === 'fiscal' && (
+                      <Link href={`/fiscal?aba=${fiscalQueue(diff.contentAction)}&q=${encodeURIComponent(diff.sku)}`} className="text-xs font-semibold underline">
+                        Corrigir no HUB
+                      </Link>
+                    )}
+                    {tone !== 'ready' && tone !== 'fiscal' && <SovereigntyLock />}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </section>
 
-        {push && !push.replayEnabled && (
-          <div className="mt-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
-            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-            <span>{push.replayDisabledReason}</span>
-          </div>
-        )}
-        {pushError && (
-          <div role="alert" className="mt-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">{pushError}</div>
-        )}
-        {push && push.attempts.length === 0 && (
-          <div className="mt-4 flex items-center gap-2 text-sm text-text-muted">
-            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-            <span>Nenhuma tentativa de publicação registrada até agora (o HUB opera em modo shadow).</span>
-          </div>
-        )}
-
-        <div className="mt-4 space-y-3">
-          {push?.attempts.map((att) => (
-            <div key={att.id} className="rounded-xl border border-border-color bg-bg-base/70 p-4">
-              <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
-                <div className="space-y-1.5">
-                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                    <span className="font-mono font-bold text-emerald-400">#{att.id.slice(0, 8)}</span>
-                    <span className="rounded border border-border-color bg-bg-surface px-2 py-0.5 font-medium text-text-primary">
-                      {att.channel} · {att.operationType}
-                    </span>
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 font-semibold ${
-                        att.state === 'Concluído'
-                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                          : att.state === 'Falhou' || att.state === 'Bloqueado por regra de negócio'
-                          ? 'border-rose-500/30 bg-rose-500/10 text-rose-300'
-                          : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                      }`}
-                    >
-                      {att.state === 'Concluído' ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-                      {att.state}
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-text-muted">
-                      <Clock className="h-3 w-3" /> {new Date(att.createdAt).toLocaleString('pt-BR')}
-                      {att.durationMs !== null ? ` (${att.durationMs} ms)` : ''} · {att.attempts} tentativa(s)
-                    </span>
-                  </div>
-                  <p className="text-sm font-semibold text-text-primary">
-                    {att.productName} <span className="font-mono text-xs text-text-muted">(SKU: {att.sku})</span>
-                  </p>
-                  {att.completedSteps.length > 0 && (
-                    <p className="text-xs text-emerald-300">
-                      Passos confirmados (não serão repetidos): <strong>{att.completedSteps.join(' → ')}</strong>
-                    </p>
-                  )}
-                  {att.skippedSteps.length > 0 && (
-                    <p className="text-xs text-text-muted">Passos ignorados: {att.skippedSteps.join(', ')}</p>
-                  )}
-                  {att.failureReason && (
-                    <p className="text-xs text-amber-200">
-                      {att.failedStep ? `Passo ${att.failedStep}: ` : ''}{att.failureReason}
-                    </p>
-                  )}
-                </div>
-
-                {(att.state === 'Falhou' || att.state === 'Concluído parcialmente') && (
-                  <button
-                    type="button"
-                    disabled={!push?.replayEnabled}
-                    title={push?.replayDisabledReason}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/15 px-3.5 py-2 text-xs font-semibold text-amber-200 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
+      {push && push.attempts.length > 0 && (
+        <section className="mt-8">
+          <h2 className="text-sm font-semibold text-text-primary">Tentativas já registradas</h2>
+          <ul className="mt-3 space-y-2">
+            {push.attempts.map((attempt) => (
+              <li key={attempt.id} className="rounded-xl border border-border-color bg-bg-surface px-4 py-3 text-xs">
+                <p className="font-medium text-text-primary">{attempt.productName} · {attempt.sku}</p>
+                <p className="mt-1 text-text-muted">{attempt.state} · {attempt.channel} · {new Date(attempt.createdAt).toLocaleString('pt-BR')}</p>
+                {attempt.failureReason && <p className="mt-1 text-text-muted">{attempt.failureReason}</p>}
+                {(attempt.state === 'Falhou' || attempt.state === 'Concluído parcialmente') && (
+                  <button type="button" disabled={!push.replayEnabled} title={push.replayDisabledReason} className="mt-2 inline-flex items-center gap-1 text-text-muted disabled:opacity-50">
                     <RotateCcw className="h-3.5 w-3.5" />
-                    <span>Reconciliar e reprocessar {att.failedStep ? `passo ${att.failedStep}` : ''}</span>
+                    Reprocessar
                   </button>
                 )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   );
 }

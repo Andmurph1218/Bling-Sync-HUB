@@ -1,4 +1,4 @@
-export const ROLES = ['operator', 'fiscal_approver', 'admin'] as const;
+export const ROLES = ['admin', 'operator', 'fiscal_approver', 'viewer'] as const;
 
 export type UserRole = (typeof ROLES)[number];
 
@@ -7,8 +7,10 @@ export interface AuthenticatedUser {
   email: string;
   name: string;
   roles: UserRole[];
+  permissions: string[];
   sessionId: string;
   mustChangePassword: boolean;
+  mfaEnabled: boolean;
 }
 
 declare global {

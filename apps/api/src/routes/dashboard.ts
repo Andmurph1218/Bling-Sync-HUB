@@ -1,10 +1,11 @@
 import { isBlankSku } from '../catalog/blank-sku.js';
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
-import { requireAuth, requireRole } from '../auth/middleware.js';
+import { requireAuth, requirePermission, requireRole } from '../auth/middleware.js';
 import { query, withTransaction } from '../db/pool.js';
 import { resolveMatchingDecision } from '../engines/pire.js';
 import { confirmNcmSuggestionStep } from '../engines/nve.js';
+import { buildEanHistoryCsv, loadEanMetrics, loadFiscalHub } from '../catalog/fiscal-hub.js';
 import { validateGs1Gtin } from '../engines/gve.js';
 
 export const dashboardRouter = Router();
@@ -640,8 +641,91 @@ dashboardRouter.post(
  * Lista e aprova/rejeita propostas de EAN externo na fila humana (ean_pending_validation).
  */
 dashboardRouter.get(
+  '/api/fiscal/hub',
+  requirePermission('fiscal:approve_ean', 'fiscal:approve_ncm'),
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.status(200).json(await loadFiscalHub());
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+dashboardRouter.post(
+  '/api/fiscal/ncm/:suggestionId/reject',
+  requirePermission('fiscal:approve_ncm'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const note = typeof req.body?.note === 'string' ? req.body.note.trim() : '';
+      const found = await query<{
+        master_product_id: string;
+        proposed_ncm: string;
+        first_review_by: string | null;
+        ncm: string | null;
+      }>(
+        `SELECT s.master_product_id, s.proposed_ncm, s.first_review_by, mp.ncm
+         FROM ncm_manual_suggestions s
+         INNER JOIN master_products mp ON mp.id = s.master_product_id
+         WHERE s.id = $1 AND s.status IN ('pending_first', 'pending_second')`,
+        [req.params.suggestionId]
+      );
+      const suggestion = found.rows[0];
+      if (!suggestion) {
+        res.status(409).json({ error: 'ncm_not_pending' });
+        return;
+      }
+      await query(`UPDATE ncm_manual_suggestions SET status = 'rejected' WHERE id = $1`, [req.params.suggestionId]);
+      await query(
+        `INSERT INTO ncm_audit_log (
+           master_product_id, previous_ncm, new_ncm, decision, first_review_by, second_review_by, tipi_note
+         ) VALUES ($1, $2, $3, 'rejected', $4, $5, $6)`,
+        [
+          suggestion.master_product_id,
+          suggestion.ncm,
+          suggestion.proposed_ncm,
+          suggestion.first_review_by,
+          req.user?.id ?? null,
+          note || null,
+        ]
+      );
+      res.status(200).json({ status: 'rejected' });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+dashboardRouter.get(
+  '/api/fiscal/ean/summary',
+  requirePermission('fiscal:approve_ean'),
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.status(200).json(await loadEanMetrics());
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+dashboardRouter.get(
+  '/api/fiscal/ean/history.csv',
+  requirePermission('fiscal:approve_ean'),
+  async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const csv = await buildEanHistoryCsv();
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="historico-ean.csv"');
+      res.status(200).send(csv);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+dashboardRouter.get(
   '/api/fiscal/ean/pending',
-  requireRole('fiscal_approver', 'admin'),
+  requirePermission('fiscal:approve_ean'),
   async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const pendingRes = await query<{
@@ -713,7 +797,7 @@ dashboardRouter.get(
 
 dashboardRouter.post(
   '/api/fiscal/ean/:id/review',
-  requireRole('fiscal_approver'),
+  requirePermission('fiscal:approve_ean'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const pendingId = req.params.id;
@@ -837,10 +921,12 @@ dashboardRouter.post(
  */
 dashboardRouter.get(
   '/api/fiscal/ncm/suggestions',
-  requireRole('fiscal_approver', 'admin'),
+  requirePermission('fiscal:approve_ncm'),
   async (_req: Request, res: Response, next: NextFunction) => {
     try {
-      const [suggestionsRes, auditRes] = await Promise.all([
+      const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const sinceYear = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
+      const [suggestionsRes, auditRes, metricsRes] = await Promise.all([
         query<{
           id: string;
           master_product_id: string;
@@ -865,20 +951,35 @@ dashboardRouter.get(
           first_review_by: string | null;
           second_review_by: string | null;
           tipi_note: string | null;
+          created_at: Date;
         }>(
           `SELECT id, master_product_id, previous_ncm, new_ncm, decision,
-                  first_review_by, second_review_by, tipi_note
+                  first_review_by, second_review_by, tipi_note, created_at
            FROM ncm_audit_log
-           ORDER BY created_at DESC`
+           WHERE created_at >= $1
+           ORDER BY created_at DESC`,
+          [sinceYear]
+        ),
+        query<{ pending_first: number; pending_second: number; approved_30d: number; rejected_30d: number }>(
+          `SELECT
+             (SELECT count(*)::int FROM ncm_manual_suggestions WHERE status = 'pending_first') AS pending_first,
+             (SELECT count(*)::int FROM ncm_manual_suggestions WHERE status = 'pending_second') AS pending_second,
+             (SELECT count(*)::int FROM ncm_audit_log WHERE decision = 'dual_approved' AND created_at >= $1) AS approved_30d,
+             (SELECT count(*)::int FROM ncm_audit_log WHERE decision = 'rejected' AND created_at >= $1) AS rejected_30d`,
+          [since30]
         ),
       ]);
 
-      const productIds = [...new Set(suggestionsRes.rows.map((s) => s.master_product_id))];
+      const productIds = [...new Set([
+        ...suggestionsRes.rows.map((s) => s.master_product_id),
+        ...auditRes.rows.map((row) => row.master_product_id),
+      ])];
       const reviewerIds = [
         ...new Set(
-          suggestionsRes.rows
-            .flatMap((s) => [s.first_review_by, s.second_review_by])
-            .filter((v): v is string => Boolean(v))
+          [
+            ...suggestionsRes.rows.flatMap((s) => [s.first_review_by, s.second_review_by]),
+            ...auditRes.rows.flatMap((row) => [row.first_review_by, row.second_review_by]),
+          ].filter((v): v is string => Boolean(v))
         ),
       ];
       const [productsRes, reviewersRes] = await Promise.all([
@@ -909,6 +1010,7 @@ dashboardRouter.get(
         const p = productById.get(s.master_product_id);
         return {
           id: s.id,
+          productId: s.master_product_id,
           blingId: p?.bling_id ?? null,
           sku: p?.bling_sku ?? null,
           productName: p?.name ?? null,
@@ -922,10 +1024,31 @@ dashboardRouter.get(
         };
       });
 
+      const history = auditRes.rows.map((row) => {
+        const product = productById.get(row.master_product_id);
+        const first = reviewerLabel(row.first_review_by);
+        const second = reviewerLabel(row.second_review_by);
+        return {
+          ...row,
+          createdAt: new Date(row.created_at).toISOString(),
+          sku: product?.bling_sku ?? null,
+          productName: product?.name ?? null,
+          firstReviewerName: first?.name ?? null,
+          secondReviewerName: second?.name ?? null,
+        };
+      });
+      const metrics = metricsRes.rows[0] ?? { pending_first: 0, pending_second: 0, approved_30d: 0, rejected_30d: 0 };
       res.status(200).json({
         suggestions: suggestionsRes.rows,
         items,
-        auditLog: auditRes.rows,
+        auditLog: history,
+        history,
+        metrics: {
+          pendingFirst: metrics.pending_first,
+          pendingSecond: metrics.pending_second,
+          approved30d: metrics.approved_30d,
+          rejected30d: metrics.rejected_30d,
+        },
       });
     } catch (error) {
       next(error);
@@ -935,7 +1058,7 @@ dashboardRouter.get(
 
 dashboardRouter.post(
   '/api/fiscal/ncm/:suggestionId/confirm',
-  requireRole('fiscal_approver'),
+  requirePermission('fiscal:approve_ncm'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const suggestionId = req.params.suggestionId;
@@ -1889,7 +2012,7 @@ dashboardRouter.get(
  */
 dashboardRouter.post(
   '/api/dashboard/simulate-sync',
-  requireRole('operator', 'admin'),
+  requirePermission('push:simulate'),
   async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const [productsRes, ownersRes, controlsRes] = await Promise.all([
@@ -1968,6 +2091,7 @@ dashboardRouter.post(
           'name / description mestres do Bling',
         ],
         plannedProductDiffs: sendableRows.slice(0, 15).map((p) => ({
+          productId: p.id,
           blingId: p.bling_id,
           sku: p.bling_sku,
           name: p.name ?? `Produto #${p.bling_id}`,
@@ -2059,98 +2183,108 @@ dashboardRouter.get(
  */
 dashboardRouter.get(
   '/api/dashboard/audit-trail',
-  requireRole('admin', 'fiscal_approver'),
-  async (_req: Request, res: Response, next: NextFunction) => {
+  requirePermission('audit:read'),
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const [controlRes, ncmAuditRes, eanHistoryRes] = await Promise.all([
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 50));
+      const q = String(req.query.q ?? '').trim().toLowerCase();
+      const motor = String(req.query.motor ?? '');
+      const actor = String(req.query.actor ?? '');
+      const from = req.query.from ? new Date(String(req.query.from)) : null;
+      const to = req.query.to ? new Date(String(req.query.to)) : null;
+      const params: unknown[] = [];
+      const bind = (value: unknown) => {
+        params.push(value);
+        return `$${params.length}`;
+      };
+      const filters = ['TRUE'];
+      if (from && !Number.isNaN(from.getTime())) filters.push(`at >= ${bind(from.toISOString())}`);
+      if (to && !Number.isNaN(to.getTime())) filters.push(`at < ${bind(to.toISOString())}`);
+      if (motor) filters.push(`motor = ${bind(motor)}`);
+      if (actor) filters.push(`lower(origin_actor) LIKE ${bind(`%${actor.toLowerCase()}%`)}`);
+      if (q) {
+        const like = bind(`%${q}%`);
+        filters.push(`(lower(sku) LIKE ${like} OR lower(product_name) LIKE ${like} OR lower(what_changed) LIKE ${like})`);
+      }
+      const where = filters.join(' AND ');
+      const trail = `
+        SELECT id, at, motor, sku, product_name, what_changed, previous_value, new_value, origin_actor, result, source_table FROM (
+          SELECT cc.id::text AS id, cc.changed_at AS at, 'Sistema'::text AS motor,
+                 cc.target_key AS sku, cc.target AS product_name,
+                 (cc.target || ' · ' || cc.field) AS what_changed,
+                 COALESCE(cc.old_value, '') AS previous_value, COALESCE(cc.new_value, '') AS new_value,
+                 CASE WHEN cc.origin = 'admin' THEN COALESCE(u.email, 'admin') ELSE 'Sistema (Auto)' END AS origin_actor,
+                 'Aplicado'::text AS result, 'control_changes'::text AS source_table
+          FROM control_changes cc
+          LEFT JOIN users u ON u.id = cc.changed_by
+          UNION ALL
+          SELECT n.id::text, n.created_at, 'NVE',
+                 COALESCE(mp.bling_sku, ''), COALESCE(mp.name, ''),
+                 'NCM', COALESCE(n.previous_ncm, ''), COALESCE(n.new_ncm, ''),
+                 'Revisores fiscais', n.decision, 'ncm_audit_log'
+          FROM ncm_audit_log n
+          LEFT JOIN master_products mp ON mp.id = n.master_product_id
+          UNION ALL
+          SELECT e.id::text, e.created_at, 'GVE',
+                 COALESCE(mp.bling_sku, e.ean, ''), COALESCE(mp.name, ''),
+                 'EAN ' || COALESCE(e.ean, ''), COALESCE(e.previous_status, ''), e.new_status,
+                 CASE WHEN e.action LIKE 'human_%' THEN 'Revisor fiscal' ELSE 'Sistema (Auto)' END,
+                 e.action, 'ean_validation_history'
+          FROM ean_validation_history e
+          LEFT JOIN master_products mp ON mp.id = e.master_product_id
+        ) trail
+        WHERE ${where}`;
+      const asCsv = req.query.format === 'csv';
+      const limit = asCsv ? 5000 : pageSize;
+      const offset = asCsv ? 0 : (page - 1) * pageSize;
+      const [countRes, pageRes] = await Promise.all([
+        query<{ count: number }>(`SELECT count(*)::int AS count FROM (${trail}) counted`, params),
         query<{
           id: string;
-          target: string;
-          target_key: string;
-          field: string;
-          old_value: string | null;
-          new_value: string | null;
-          origin: string;
-          changed_at: Date | string;
-          user_email: string | null;
-        }>(
-          `SELECT cc.id, cc.target, cc.target_key, cc.field, cc.old_value, cc.new_value,
-                  cc.origin, cc.changed_at, u.email AS user_email
-           FROM control_changes cc
-           LEFT JOIN users u ON u.id = cc.changed_by
-           ORDER BY cc.changed_at DESC
-           LIMIT 25`
-        ),
-        query<{
-          id: string;
-          master_product_id: string;
-          previous_ncm: string | null;
-          new_ncm: string | null;
-          decision: string;
-          tipi_note: string | null;
-          created_at: Date | string;
-        }>(
-          `SELECT id, master_product_id, previous_ncm, new_ncm, decision, tipi_note, created_at
-           FROM ncm_audit_log
-           ORDER BY created_at DESC
-           LIMIT 15`
-        ),
-        query<{
-          id: string;
-          ean: string;
-          previous_status: string | null;
-          new_status: string;
-          action: string;
-          created_at: Date | string;
-        }>(
-          `SELECT id, ean, previous_status, new_status, action, created_at
-           FROM ean_validation_history
-           ORDER BY created_at DESC
-           LIMIT 15`
-        ),
+          at: Date | string;
+          motor: string;
+          sku: string;
+          product_name: string;
+          what_changed: string;
+          previous_value: string;
+          new_value: string;
+          origin_actor: string;
+          result: string;
+          source_table: string;
+        }>(`${trail} ORDER BY at DESC LIMIT ${limit} OFFSET ${offset}`, params),
       ]);
-
-      const records = [
-        ...controlRes.rows.map((c) => ({
-          id: `cc-${c.id}`,
-          when: new Date(c.changed_at).toLocaleString('pt-BR'),
-          whatChanged: `${c.target} (${c.target_key}) · campo ${c.field}`,
-          previousValue: c.old_value ?? '(vazio / inicial)',
-          newValue: c.new_value ?? '(nulo)',
-          originActor:
-            c.origin === 'admin'
-              ? `Administrador (${c.user_email ?? 'admin'})`
-              : 'Sistema automático (origin = system)',
-          result: 'Aplicado em transação e gravado na tabela imutável control_changes',
-          table: 'control_changes',
-        })),
-        ...ncmAuditRes.rows.map((n) => ({
-          id: `ncm-${n.id}`,
-          when: new Date(n.created_at).toLocaleString('pt-BR'),
-          whatChanged: `Dupla confirmação fiscal de NCM (produto ${n.master_product_id.slice(0, 8)})`,
-          previousValue: n.previous_ncm ?? '(sem NCM)',
-          newValue: n.new_ncm ?? '(mantido)',
-          originActor: '2 Revisores Fiscais distintos (fiscal_approver)',
-          result: `${n.decision} · Nota TIPI: ${n.tipi_note ?? 'validada'}`,
-          table: 'ncm_audit_log',
-        })),
-        ...eanHistoryRes.rows.map((e) => ({
-          id: `ean-${e.id}`,
-          when: new Date(e.created_at).toLocaleString('pt-BR'),
-          whatChanged: `Validação de código de barras EAN ${e.ean}`,
-          previousValue: e.previous_status ?? 'pending_validation',
-          newValue: e.new_status,
-          originActor: e.action.startsWith('human_')
-            ? `Revisor Fiscal (${e.action})`
-            : `Sistema automático — motor GVE (${e.action})`,
-          result: 'Registrado em ean_validation_history (retenção 5 anos)',
-          table: 'ean_validation_history',
-        })),
-      ];
-
+      const records = pageRes.rows.map((row) => ({
+        id: `${row.source_table}-${row.id}`,
+        at: new Date(row.at).toISOString(),
+        when: new Date(row.at).toLocaleString('pt-BR'),
+        sku: row.sku,
+        productName: row.product_name,
+        motor: row.motor,
+        whatChanged: row.what_changed,
+        previousValue: row.previous_value || '(vazio)',
+        newValue: row.new_value || '(vazio)',
+        originActor: row.origin_actor,
+        result: row.result,
+        table: row.source_table,
+      }));
+      if (asCsv) {
+        const cell = (value: string) => (/[";\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
+        const lines = ['data;sku;produto;motor;o_que_mudou;anterior;novo;origem;resultado;tabela'];
+        for (const row of records) {
+          lines.push([row.at, row.sku, row.productName, row.motor, row.whatChanged, row.previousValue, row.newValue, row.originActor, row.result, row.table].map(cell).join(';'));
+        }
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename="auditoria.csv"');
+        res.status(200).send(`\uFEFF${lines.join('\r\n')}\r\n`);
+        return;
+      }
       res.status(200).json({
         calculatedAt: new Date().toISOString(),
         records,
+        total: countRes.rows[0]?.count ?? records.length,
+        page,
+        pageSize,
       });
     } catch (error) {
       next(error);

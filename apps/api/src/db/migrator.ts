@@ -21,6 +21,9 @@ import * as m019 from './migrations/1729080000019_channel-listing-links.js';
 import * as m020 from './migrations/1729080000020_integration-catalog.js';
 import * as m021 from './migrations/1729080000021_ops-cache-and-jobs.js';
 import * as m022 from './migrations/1729080000022_problem-dismissals.js';
+import * as m023 from './migrations/1729080000023_viewer-role.js';
+import * as m024 from './migrations/1729080000024_import-job-progress.js';
+import * as m025 from './migrations/1729080000025_governance.js';
 
 export interface MigrationStep {
   id: number;
@@ -52,6 +55,9 @@ export const ALL_MIGRATIONS: MigrationStep[] = [
   { id: 20, name: '1729080000020_integration-catalog', upSql: m020.UP_SQL, downSql: m020.DOWN_SQL },
   { id: 21, name: '1729080000021_ops-cache-and-jobs', upSql: m021.UP_SQL, downSql: m021.DOWN_SQL },
   { id: 22, name: '1729080000022_problem-dismissals', upSql: m022.UP_SQL, downSql: m022.DOWN_SQL },
+  { id: 23, name: '1729080000023_viewer-role', upSql: m023.UP_SQL, downSql: m023.DOWN_SQL },
+  { id: 24, name: '1729080000024_import-job-progress', upSql: m024.UP_SQL, downSql: m024.DOWN_SQL },
+  { id: 25, name: '1729080000025_governance', upSql: m025.UP_SQL, downSql: m025.DOWN_SQL },
 ];
 
 /**

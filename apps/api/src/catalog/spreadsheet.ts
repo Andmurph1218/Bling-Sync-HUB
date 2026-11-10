@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import ExcelJS from 'exceljs';
 import { listCatalog } from './list.js';
 import { query } from '../db/pool.js';
@@ -73,6 +74,28 @@ export interface ImportLine {
   sku: string;
   status: 'sucesso' | 'erro';
   message: string;
+  cells?: Record<string, string>;
+}
+
+export const IMPORT_ASYNC_THRESHOLD = 100;
+
+export function shouldRunImportInBackground(rowCount: number): boolean {
+  return rowCount > IMPORT_ASYNC_THRESHOLD && process.env.VITEST !== 'true';
+}
+
+export async function openImportSheet(file: Buffer): Promise<ExcelJS.Worksheet | null> {
+  const workbook = new ExcelJS.Workbook();
+  const isWorkbook = file.length > 4 && file[0] === 0x50 && file[1] === 0x4b;
+  if (isWorkbook) {
+    await workbook.xlsx.load(file);
+  } else {
+    await workbook.csv.read(Readable.from(file));
+  }
+  return workbook.worksheets[0] ?? null;
+}
+
+export function buildImportTemplateCsv(): string {
+  return '\uFEFFsku;nome;descricao;categoria;url da imagem\r\nSKU-EXEMPLO;Luminária de LED;Descrição comercial;Iluminação;https://exemplo.com/foto.jpg\r\n';
 }
 
 async function applyCover(productId: string, url: string): Promise<void> {
@@ -86,10 +109,17 @@ async function applyCover(productId: string, url: string): Promise<void> {
   );
 }
 
-export async function importCatalogWorkbook(file: Buffer): Promise<{ lines: ImportLine[]; ignoredSovereignColumns: string[] }> {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(file);
-  const sheet = workbook.worksheets[0];
+function snapshotCells(row: ExcelJS.Row, columns: Map<string, number>): Record<string, string> {
+  const cells: Record<string, string> = {};
+  for (const [key, index] of columns) cells[key] = cellText(row.getCell(index).value);
+  return cells;
+}
+
+export async function importCatalogWorkbook(
+  file: Buffer,
+  hooks?: { onProgress?: (processed: number, errors: number) => Promise<void> }
+): Promise<{ lines: ImportLine[]; ignoredSovereignColumns: string[] }> {
+  const sheet = await openImportSheet(file);
   if (!sheet) return { lines: [{ line: 1, sku: '', status: 'erro', message: 'Planilha vazia.' }], ignoredSovereignColumns: [] };
 
   const header = sheet.getRow(1);
@@ -104,6 +134,7 @@ export async function importCatalogWorkbook(file: Buffer): Promise<{ lines: Impo
   }
 
   const ignoredPrice = ['preco', 'estoque', 'price', 'stock'].some((key) => columns.has(key));
+  const ignoredFiscal = ['ncm', 'ean', 'gtin'].filter((key) => columns.has(key));
   const nameColumn = columns.get('nome') ?? columns.get('name');
   const descriptionColumn = columns.get('descricao') ?? columns.get('description');
   const categoryColumn = columns.get('categoria') ?? columns.get('category');
@@ -126,14 +157,14 @@ export async function importCatalogWorkbook(file: Buffer): Promise<{ lines: Impo
       [sku]
     );
     if (!product.rows[0]) {
-      lines.push({ line, sku, status: 'erro', message: `Linha ${line}: SKU não encontrado.` });
+      lines.push({ line, sku, status: 'erro', message: `Linha ${line}: SKU não encontrado.`, cells: snapshotCells(row, columns) });
       continue;
     }
     const productId = product.rows[0].id;
     const imageUrl = imageColumn ? cellText(row.getCell(imageColumn).value) : '';
 
     if (imageUrl && !/^https?:\/\//i.test(imageUrl)) {
-      lines.push({ line, sku, status: 'erro', message: `Linha ${line}: URL da imagem inválida.` });
+      lines.push({ line, sku, status: 'erro', message: `Linha ${line}: URL da imagem inválida.`, cells: snapshotCells(row, columns) });
       continue;
     }
     if (imageUrl) await applyCover(productId, imageUrl);
@@ -144,10 +175,13 @@ export async function importCatalogWorkbook(file: Buffer): Promise<{ lines: Impo
       ignoredPrice ? 'Preço e estoque ignorados.' : '',
     ].filter(Boolean);
     lines.push({ line, sku, status: 'sucesso', message: `Linha ${line}: Sucesso.${notes.length ? ` ${notes.join(' ')}` : ''}` });
+    if (hooks?.onProgress && lines.length % 25 === 0) {
+      await hooks.onProgress(lines.length, lines.filter((entry) => entry.status === 'erro').length);
+    }
   }
   return {
     lines,
-    ignoredSovereignColumns: ignoredPrice ? ['preco', 'estoque'] : [],
+    ignoredSovereignColumns: [...(ignoredPrice ? ['preco', 'estoque'] : []), ...ignoredFiscal],
   };
 }
 

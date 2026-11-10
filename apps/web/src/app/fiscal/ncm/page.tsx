@@ -1,270 +1,239 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
-import { Check, AlertCircle, CheckCircle2, ShieldAlert, Lock, RefreshCw } from 'lucide-react';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Lock, RefreshCw, ShieldCheck } from 'lucide-react';
 import { useCurrentRole } from '../../../components/app-shell';
-import { apiFetch, ApiError } from '../../../utils/api-client';
+import { ApiError, apiFetch } from '../../../utils/api-client';
+import { NcmApprovalTable } from '../../../components/fiscal/ncm/ncm-approval-table';
+import { NcmAuditHistory } from '../../../components/fiscal/ncm/ncm-audit-history';
+import { NcmDetailsDrawer } from '../../../components/fiscal/ncm/ncm-details-drawer';
+import { formatNcm, NcmHistoryRow, NcmItem, NcmMetrics } from '../../../components/fiscal/ncm/types';
 
-interface Reviewer {
-  id: string;
-  name: string;
-  email: string;
-}
+type Tab = 'pendencias' | 'historico';
 
-interface NcmItem {
-  id: string;
-  blingId: string | null;
-  sku: string | null;
-  productName: string | null;
-  currentNcm: string | null;
-  proposedNcm: string;
-  sourcePlatform: string;
-  status: 'pending_first' | 'pending_second' | 'approved' | 'rejected' | 'expired' | string;
-  firstReviewer: Reviewer | null;
-  secondReviewer: Reviewer | null;
-  tipiNote: string | null;
-}
-
-const formatNcm = (v: string | null) =>
-  v && /^\d{8}$/.test(v) ? `${v.slice(0, 4)}.${v.slice(4, 6)}.${v.slice(6)}` : v ?? '—';
+const EMPTY_METRICS: NcmMetrics = { pendingFirst: 0, pendingSecond: 0, approved30d: 0, rejected30d: 0 };
 
 export default function FiscalNcmPage() {
-  const { currentUser, hasRole } = useCurrentRole();
+  const { currentUser, hasPermission } = useCurrentRole();
+  const canReview = hasPermission('fiscal:approve_ncm');
+  const [tab, setTab] = useState<Tab>('pendencias');
   const [items, setItems] = useState<NcmItem[]>([]);
+  const [history, setHistory] = useState<NcmHistoryRow[]>([]);
+  const [metrics, setMetrics] = useState<NcmMetrics>(EMPTY_METRICS);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [notes, setNotes] = useState<Record<string, string>>({});
-  const [busyId, setBusyId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
-
-  const canReview = hasRole('fiscal_approver');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [openItem, setOpenItem] = useState<NcmItem | null>(null);
+  const [bulkNote, setBulkNote] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const json = await apiFetch<{ items: NcmItem[] }>('/api/fiscal/ncm/suggestions');
+      const json = await apiFetch<{ items: NcmItem[]; history?: NcmHistoryRow[]; metrics?: NcmMetrics }>('/api/fiscal/ncm/suggestions');
       setItems(json.items);
+      setHistory(json.history ?? []);
+      setMetrics(json.metrics ?? EMPTY_METRICS);
       setLoadError(null);
     } catch (err) {
-      setLoadError(
-        err instanceof ApiError && err.status === 403
-          ? 'Seu papel não tem acesso à fila fiscal de NCM.'
-          : 'Não foi possível carregar as sugestões de NCM da API local.'
-      );
+      setLoadError(err instanceof ApiError && err.status === 403 ? 'Seu papel não tem acesso à fila fiscal de NCM.' : 'Não foi possível carregar as sugestões de NCM.');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
+  React.useEffect(() => {
     void load();
   }, [load]);
 
-  const handleConfirm = async (item: NcmItem) => {
-    const note = (notes[item.id] ?? '').trim();
-    if (note.length < 3) {
-      setFeedback({ tone: 'error', text: 'Informe a nota de consulta à TIPI antes de confirmar.' });
+  const pending = items.filter((item) => item.status === 'pending_first' || item.status === 'pending_second');
+  const cards = [
+    { label: 'Pendentes de 1ª aprovação', value: metrics.pendingFirst, className: 'text-orange-700 dark:text-orange-300' },
+    { label: 'Aguardando 2ª aprovação', value: metrics.pendingSecond, className: 'text-amber-700 dark:text-amber-200' },
+    { label: 'Aprovados (30d)', value: metrics.approved30d, className: 'text-emerald-700 dark:text-emerald-300' },
+    { label: 'Rejeitados (30d)', value: metrics.rejected30d, className: 'text-rose-700 dark:text-rose-300' },
+  ];
+
+  const decide = async (item: NcmItem, decision: 'approve' | 'reject', note: string) => {
+    if (decision === 'approve' && item.firstReviewer?.id === currentUser.id) {
+      setFeedback({ tone: 'error', text: 'Você já fez a 1ª confirmação. A 2ª precisa ser de outro revisor.' });
       return;
     }
-    setBusyId(item.id);
     try {
-      await apiFetch(`/api/fiscal/ncm/${item.id}/confirm`, { method: 'POST', json: { note } });
+      if (decision === 'approve') {
+        await apiFetch(`/api/fiscal/ncm/${item.id}/confirm`, { method: 'POST', json: { note } });
+      } else {
+        await apiFetch(`/api/fiscal/ncm/${item.id}/reject`, { method: 'POST', json: { note } });
+      }
       setFeedback({
         tone: 'ok',
-        text:
-          item.status === 'pending_first'
-            ? `1ª confirmação de ${formatNcm(item.proposedNcm)} registrada por ${currentUser.name}. Aguardando um segundo aprovador distinto.`
-            : `2ª confirmação concluída: NCM ${formatNcm(item.proposedNcm)} gravado no produto e registrado em ncm_audit_log.`,
+        text: decision === 'reject'
+          ? `Sugestão ${formatNcm(item.proposedNcm)} rejeitada.`
+          : item.status === 'pending_first'
+            ? `1ª confirmação registrada por ${currentUser.name}. Falta outro revisor.`
+            : `2ª confirmação concluída. NCM ${formatNcm(item.proposedNcm)} gravado.`,
       });
-      setNotes((prev) => ({ ...prev, [item.id]: '' }));
+      setOpenItem(null);
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
       await load();
     } catch (err) {
       setFeedback({
         tone: 'error',
-        text:
-          err instanceof ApiError && err.status === 409
-            ? 'Você já fez a 1ª confirmação desta sugestão. A 2ª confirmação precisa ser feita por outro Revisor Fiscal.'
-            : `Falha ao confirmar: ${err instanceof Error ? err.message : 'erro desconhecido'}`,
+        text: err instanceof ApiError && err.status === 409
+          ? 'Você já aprovou este item. Outro revisor precisa concluir.'
+          : 'Não foi possível registrar a decisão.',
       });
-    } finally {
-      setBusyId(null);
     }
   };
 
-  const statusBadge = (status: NcmItem['status']) => {
-    switch (status) {
-      case 'pending_first':
-        return <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-300">Aguardando 1ª aprovação</span>;
-      case 'pending_second':
-        return (
-          <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-0.5 text-xs font-medium text-sky-300">
-            <ShieldAlert className="h-3 w-3" /> Aguardando 2ª aprovação
-          </span>
-        );
-      case 'approved':
-        return (
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-300">
-            <CheckCircle2 className="h-3 w-3" /> Aprovado (TIPI)
-          </span>
-        );
-      default:
-        return <span className="rounded-full border border-border-color bg-bg-surface px-2.5 py-0.5 text-xs text-text-muted">{status}</span>;
+  const approveSelected = async () => {
+    if (bulkNote.trim().length < 3) {
+      setFeedback({ tone: 'error', text: 'A aprovação em lote exige a nota da consulta à TIPI.' });
+      return;
     }
+    const chosen = pending.filter((item) => selected.has(item.id));
+    const blocked = chosen.filter((item) => item.firstReviewer?.id === currentUser.id);
+    const allowed = chosen.filter((item) => item.firstReviewer?.id !== currentUser.id);
+    for (const item of allowed) {
+      try {
+        await apiFetch(`/api/fiscal/ncm/${item.id}/confirm`, { method: 'POST', json: { note: bulkNote.trim() } });
+      } catch (err) {
+        setFeedback({
+          tone: 'error',
+          text: err instanceof ApiError && err.status === 409
+            ? `${item.sku || 'Item'} já foi aprovado por você.`
+            : 'A aprovação em lote parou numa sugestão que não pôde ser confirmada.',
+        });
+        await load();
+        return;
+      }
+    }
+    setBulkNote('');
+    setSelected(new Set());
+    setFeedback({
+      tone: blocked.length > 0 ? 'error' : 'ok',
+      text: blocked.length > 0
+        ? `${allowed.length} confirmada(s). ${blocked.length} ficaram de fora porque você já deu o primeiro voto.`
+        : `${allowed.length} sugestão(ões) confirmada(s).`,
+    });
+    await load();
   };
+
+  const productHistory = useMemo(
+    () => (openItem ? history.filter((row) => row.master_product_id === openItem.productId) : []),
+    [history, openItem]
+  );
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
+    <main className="mx-auto max-w-6xl px-6 py-8 pb-28">
       <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-6 sm:flex-row sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Classificação fiscal (NCM)</h1>
-          <p className="mt-1 text-sm text-text-muted">
-            Cada NCM sugerido exige duas confirmações por Revisores Fiscais distintos, cada uma com nota obrigatória de consulta à TIPI. Enquanto isso, a publicação de conteúdo fica bloqueada.
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-text-primary">Centro de Compliance Fiscal</h1>
+          <p className="mt-1 text-sm text-text-muted">Cada NCM exige dois revisores diferentes e a nota da consulta à TIPI.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20"
-        >
+        <button type="button" onClick={() => void load()} className="inline-flex items-center gap-1.5 rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold">
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           Atualizar
         </button>
       </header>
 
-      {!canReview && (
-        <div className="mt-6 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
-          <Lock className="h-4 w-4 text-amber-400" />
-          <span>
-            Seu papel atual (<strong>{currentUser.roleLabel}</strong>) tem acesso somente leitura. Apenas Revisores Fiscais confirmam NCM.
-          </span>
-        </div>
-      )}
-
-      {feedback && (
-        <div
-          role="status"
-          className={`mt-6 flex items-center justify-between rounded-lg border px-4 py-3 text-xs ${
-            feedback.tone === 'ok'
-              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-              : 'border-rose-500/40 bg-rose-500/10 text-rose-200'
-          }`}
-        >
-          <span>{feedback.text}</span>
-          <button type="button" onClick={() => setFeedback(null)} className="hover:text-text-primary">Fechar</button>
-        </div>
-      )}
-
-      {loadError && (
-        <div role="alert" className="mt-6 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-xs text-rose-200">{loadError}</div>
-      )}
-      {loading && items.length === 0 && <p className="mt-6 text-sm text-text-muted" role="status">Carregando sugestões de NCM...</p>}
-      {!loading && !loadError && items.length === 0 && (
-        <div className="mt-6 flex items-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-4 text-sm text-emerald-200">
-          <CheckCircle2 className="h-5 w-5 text-emerald-400" />
-          <span>Nenhuma sugestão de NCM aguardando confirmação.</span>
-        </div>
-      )}
-
-      {items.length > 0 && (
-        <section className="mt-6 overflow-hidden rounded-xl border border-border-color bg-bg-surface/50">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <caption className="sr-only">Sugestões de NCM e estado da dupla confirmação</caption>
-              <thead className="border-b border-border-color bg-bg-surface/90 text-xs uppercase tracking-wider text-text-muted">
-                <tr>
-                  <th scope="col" className="px-4 py-3.5">SKU / Produto</th>
-                  <th scope="col" className="px-4 py-3.5">NCM atual → proposto</th>
-                  <th scope="col" className="px-4 py-3.5">Origem</th>
-                  <th scope="col" className="px-4 py-3.5">1ª confirmação</th>
-                  <th scope="col" className="px-4 py-3.5">2ª confirmação</th>
-                  <th scope="col" className="px-4 py-3.5">Status</th>
-                  <th scope="col" className="px-4 py-3.5 text-right">Ação</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border-color/80">
-                {items.map((item) => {
-                  const pending = item.status === 'pending_first' || item.status === 'pending_second';
-                  const isOwnFirstReview = item.firstReviewer?.id === currentUser.id;
-                  return (
-                    <tr key={item.id} className="align-top hover:bg-bg-surface/80">
-                      <td className="px-4 py-4">
-                        <div className="font-mono text-xs font-semibold text-emerald-400">{item.sku || '(Sem SKU)'}</div>
-                        {item.blingId ? (
-                          <Link href={`/catalogo/${item.blingId}`} className="mt-0.5 block text-xs text-text-muted hover:underline">
-                            {item.productName ?? `Produto #${item.blingId}`}
-                          </Link>
-                        ) : null}
-                      </td>
-                      <td className="px-4 py-4 font-mono text-xs">
-                        <span className="text-text-muted">{formatNcm(item.currentNcm)}</span>
-                        <span className="mx-1 text-text-muted">→</span>
-                        <span className="font-bold text-text-primary">{formatNcm(item.proposedNcm)}</span>
-                      </td>
-                      <td className="px-4 py-4">
-                        <span className="rounded border border-border-color bg-bg-surface px-2 py-0.5 text-xs text-text-muted">
-                          {item.sourcePlatform === 'mercadolivre' ? 'Mercado Livre' : 'Nuvemshop'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-4 text-xs">
-                        {item.firstReviewer ? (
-                          <span className="text-emerald-300">{item.firstReviewer.name}</span>
-                        ) : (
-                          <span className="text-text-muted">Pendente</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-4 text-xs">
-                        {item.secondReviewer ? (
-                          <span className="text-emerald-300">{item.secondReviewer.name}</span>
-                        ) : item.status === 'pending_second' ? (
-                          <div className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-300">
-                            <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-400" />
-                            <span>Aguardando um segundo aprovador distinto</span>
-                          </div>
-                        ) : (
-                          <span className="text-text-muted">Bloqueado até a 1ª revisão</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-4">{statusBadge(item.status)}</td>
-                      <td className="px-4 py-4 text-right">
-                        {pending && canReview ? (
-                          isOwnFirstReview ? (
-                            <span className="text-xs text-amber-300">Você já fez a 1ª confirmação</span>
-                          ) : (
-                            <div className="flex flex-col items-end gap-2">
-                              <label htmlFor={`tipi-${item.id}`} className="sr-only">Nota de consulta à TIPI</label>
-                              <textarea
-                                id={`tipi-${item.id}`}
-                                rows={2}
-                                placeholder="Nota de consulta à TIPI (obrigatória)"
-                                value={notes[item.id] ?? ''}
-                                onChange={(e) => setNotes((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                className="w-56 rounded-md border border-border-color bg-bg-base px-2 py-1 text-xs text-text-primary focus:border-emerald-500 focus:outline-none"
-                              />
-                              <button
-                                type="button"
-                                disabled={busyId === item.id}
-                                onClick={() => void handleConfirm(item)}
-                                className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/15 px-2.5 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-40"
-                              >
-                                <Check className="h-3.5 w-3.5" />
-                                {item.status === 'pending_first' ? 'Confirmar 1ª etapa' : 'Confirmar 2ª etapa'}
-                              </button>
-                            </div>
-                          )
-                        ) : item.status === 'approved' ? (
-                          <span className="text-xs font-semibold text-emerald-400">Auditado em ncm_audit_log</span>
-                        ) : (
-                          <span className="text-xs text-text-muted">Somente leitura</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {cards.map((card) => (
+          <div key={card.label} className="rounded-xl border border-border-color bg-bg-surface px-4 py-3">
+            <p className={`text-2xl font-bold tabular-nums ${card.className}`}>{card.value.toLocaleString('pt-BR')}</p>
+            <p className="mt-1 text-xs text-text-muted">{card.label}</p>
           </div>
-        </section>
+        ))}
+      </div>
+
+      {!canReview && (
+        <p className="mt-4 flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-100">
+          <Lock className="h-4 w-4" />
+          Modo somente leitura. Aprovar NCM exige a permissão correspondente. Seu papel ({currentUser.roleLabel}) só consulta.
+        </p>
+      )}
+      {feedback && (
+        <p role="status" className={`mt-4 text-sm ${feedback.tone === 'ok' ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-600'}`}>{feedback.text}</p>
+      )}
+      {loadError && <p role="alert" className="mt-4 text-sm text-rose-600">{loadError}</p>}
+
+      <div className="mt-5 flex gap-1 border-b border-border-color" role="tablist">
+        {([['pendencias', 'Pendências'], ['historico', 'Histórico']] as const).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm ${tab === id ? 'border-emerald-600 font-semibold text-text-primary' : 'border-transparent text-text-muted'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'pendencias' && !loading && pending.length === 0 && !loadError && (
+        <div className="mx-auto mt-8 flex max-w-lg flex-col items-center rounded-xl border border-border-color bg-bg-surface px-6 py-10 text-center">
+          <ShieldCheck className="h-14 w-14 text-emerald-600 dark:text-emerald-400" />
+          <h2 className="mt-4 text-xl font-semibold">Tudo em conformidade!</h2>
+          <p className="mt-2 text-sm text-text-muted">Nenhuma sugestão de NCM aguardando revisão.</p>
+          <button type="button" onClick={() => setTab('historico')} className="mt-5 rounded-lg border border-border-color px-3 py-2 text-xs font-semibold">
+            Ver Histórico de Auditoria
+          </button>
+        </div>
+      )}
+
+      {tab === 'pendencias' && pending.length > 0 && (
+        <div className="mt-4">
+          <NcmApprovalTable
+            items={pending}
+            selected={selected}
+            canReview={canReview}
+            currentUserId={currentUser.id}
+            onToggle={(id) => setSelected((prev) => {
+              const next = new Set(prev);
+              if (next.has(id)) next.delete(id);
+              else next.add(id);
+              return next;
+            })}
+            onToggleAll={() => setSelected(pending.every((item) => selected.has(item.id)) ? new Set() : new Set(pending.filter((item) => item.firstReviewer?.id !== currentUser.id).map((item) => item.id)))}
+            onOpen={setOpenItem}
+            onApprove={setOpenItem}
+            onReject={setOpenItem}
+          />
+        </div>
+      )}
+
+      {tab === 'historico' && <div className="mt-4"><NcmAuditHistory rows={history} /></div>}
+
+      {selected.size > 0 && canReview && tab === 'pendencias' && (
+        <div className="fixed bottom-6 left-1/2 z-40 flex w-[min(40rem,calc(100%-2rem))] -translate-x-1/2 flex-wrap items-center gap-2 rounded-full border border-border-color bg-bg-base px-4 py-2 text-xs shadow-2xl">
+          <span className="font-semibold">{selected.size} selecionada(s)</span>
+          <input
+            value={bulkNote}
+            onChange={(event) => setBulkNote(event.target.value)}
+            placeholder="Nota da TIPI para o lote"
+            className="min-w-48 flex-1 rounded-full border border-border-color bg-bg-surface px-3 py-1"
+          />
+          <button type="button" onClick={() => void approveSelected()} className="rounded-full bg-emerald-700 px-3 py-1 font-semibold text-white">Aprovar selecionados</button>
+          <button type="button" onClick={() => setSelected(new Set())} className="text-text-muted underline">Limpar</button>
+        </div>
+      )}
+
+      {openItem && (
+        <NcmDetailsDrawer
+          item={openItem}
+          history={productHistory}
+          canReview={canReview}
+          blockedOwnVote={openItem.firstReviewer?.id === currentUser.id}
+          onClose={() => setOpenItem(null)}
+          onApprove={(note) => void decide(openItem, 'approve', note)}
+          onReject={(note) => void decide(openItem, 'reject', note)}
+        />
       )}
     </main>
   );

@@ -13,6 +13,7 @@ import { publishQueueRouter } from './routes/publish-queue.js';
 import { appCredentialsRouter } from './routes/app-credentials.js';
 import { matchingRouter } from './routes/matching.js';
 import { integrationCatalogRouter } from './routes/integration-catalog.js';
+import { usersAdminRouter } from './routes/users-admin.js';
 import { logger } from './lib/logger.js';
 
 export function createApp(): Express {
@@ -43,6 +44,7 @@ export function createApp(): Express {
   app.use(appCredentialsRouter);
   app.use(matchingRouter);
   app.use(integrationCatalogRouter);
+  app.use(usersAdminRouter);
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     const message = err instanceof Error ? err.message : 'Erro interno do servidor';

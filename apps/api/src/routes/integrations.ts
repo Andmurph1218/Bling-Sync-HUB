@@ -60,7 +60,7 @@ function presentApp(app: IntegrationApp, token: (TokenSnapshot & { expiresAt: st
     status: resolved.status,
     statusLabel: resolved.label,
     reason: resolved.reason,
-    authorizePath: resolved.status === 'attention' ? app.authorizePath : null,
+    authorizePath: app.authorizePath,
     expiresAt: token?.expiresAt ?? null,
   };
 }

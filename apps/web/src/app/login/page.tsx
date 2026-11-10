@@ -14,16 +14,35 @@ function LoginForm() {
   const [password, setPassword] = useState(DEV_LOGIN ? 'admin' : '');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [mfaTicket, setMfaTicket] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      const session = await apiFetch<{ mustChangePassword?: boolean }>('/auth/login', {
+      if (mfaTicket) {
+        const session = await apiFetch<{ mustChangePassword?: boolean }>('/auth/login/mfa', {
+          method: 'POST',
+          json: { ticket: mfaTicket, code: mfaCode },
+        });
+        if (session.mustChangePassword) {
+          router.replace('/conta/senha');
+          return;
+        }
+        const next = params.get('next');
+        router.replace(next && next.startsWith('/') && !next.startsWith('/login') ? next : '/');
+        return;
+      }
+      const session = await apiFetch<{ mustChangePassword?: boolean; mfaRequired?: boolean; ticket?: string }>('/auth/login', {
         method: 'POST',
         json: { email, password },
       });
+      if (session.mfaRequired && session.ticket) {
+        setMfaTicket(session.ticket);
+        return;
+      }
       if (session.mustChangePassword) {
         router.replace('/conta/senha');
         return;
@@ -85,6 +104,21 @@ function LoginForm() {
           />
         </div>
 
+        {mfaTicket && (
+          <div className="space-y-1.5">
+            <label htmlFor="mfa" className="text-xs font-medium text-text-muted">Código do autenticador</label>
+            <input
+              id="mfa"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              required
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value)}
+              className="w-full rounded-lg border border-border-color bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-emerald-500 focus:outline-none"
+            />
+          </div>
+        )}
+
         <div className="space-y-1.5">
           <label htmlFor="password" className="text-xs font-medium text-text-muted">Senha</label>
           <input
@@ -104,7 +138,7 @@ function LoginForm() {
           className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-text-primary hover:bg-emerald-500 disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
         >
           {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-          <span>{submitting ? 'Entrando...' : 'Entrar'}</span>
+          <span>{submitting ? 'Entrando...' : mfaTicket ? 'Confirmar código' : 'Entrar'}</span>
         </button>
 
         <p className="text-[11px] leading-relaxed text-text-muted">

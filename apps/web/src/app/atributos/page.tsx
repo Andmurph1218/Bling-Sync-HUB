@@ -1,211 +1,98 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../utils/api-client';
+import { useCurrentRole } from '../../components/app-shell';
+import { MERCADO_LIVRE_ACTIVE } from '../../config/channels';
+import { AttributeMappingTable } from '../../components/mapping/attribute-mapping-table';
+import { CategoryMappingPanel } from '../../components/mapping/category-mapping-panel';
+import { MappingPlatform, MappingStudio } from '../../components/mapping/types';
 
-interface Category {
-  id: string;
-  parent_id: string | null;
-  name: string;
-}
-
-interface Spec {
-  id: string;
-  name: string;
-  required: boolean;
-}
-
-interface DraftAttr {
-  channelAttributeId: string;
-  channelAttributeName: string;
-  required: boolean;
-  mode: 'fixed' | 'dynamic' | 'manual';
-  fixedValue: string;
-  sourceField: string;
-}
-
-const FIXTURES = {
-  mercadolivre: { id: 'MLB999001', name: 'Lâmpadas' },
-  nuvemshop: { id: 'ns-cat-lamps', name: 'Lâmpadas' },
-} as const;
+type StudioTab = 'categories' | 'attributes';
 
 export default function AtributosPage() {
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [name, setName] = useState('');
-  const [categoryId, setCategoryId] = useState('');
-  const [platform, setPlatform] = useState<'mercadolivre' | 'nuvemshop'>('mercadolivre');
-  const [draft, setDraft] = useState<DraftAttr[]>([]);
-  const [green, setGreen] = useState<boolean | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const { hasRole } = useCurrentRole();
+  const canWrite = hasRole('operator', 'admin');
+  const [tab, setTab] = useState<StudioTab>('categories');
+  const [platform, setPlatform] = useState<MappingPlatform>('nuvemshop');
+  const [studio, setStudio] = useState<MappingStudio | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
-    const payload = await apiFetch<{ categories: Category[] }>('/api/catalog/categories');
-    setCategories(payload.categories);
-  };
+  const load = useCallback(async () => {
+    try {
+      setStudio(await apiFetch<MappingStudio>(`/api/catalog/mapping-studio?platform=${platform}`));
+      setError(null);
+    } catch {
+      setStudio(null);
+      setError('Não foi possível ler o estúdio de mapeamento.');
+    }
+  }, [platform]);
 
   useEffect(() => {
-    void load().catch(() => setMessage('Não foi possível ler as categorias.'));
-  }, []);
+    void load();
+  }, [load]);
 
-  const loadSpecs = async () => {
-    const fixture = FIXTURES[platform];
-    const specs = await apiFetch<{ known: boolean; attributes: Spec[] }>(
-      `/api/catalog/channel-attributes?platform=${platform}&channelCategoryId=${fixture.id}`
-    );
-    setDraft(
-      specs.attributes.map((attribute) => ({
-        channelAttributeId: attribute.id,
-        channelAttributeName: attribute.name,
-        required: attribute.required,
-        mode: attribute.id === 'BRAND' || attribute.id === 'brand' ? 'dynamic' : 'fixed',
-        fixedValue: '',
-        sourceField: attribute.id === 'BRAND' || attribute.id === 'brand' ? 'brand' : '',
-      }))
-    );
-    setGreen(null);
-  };
-
-  const save = async () => {
-    if (!categoryId) return;
-    const fixture = FIXTURES[platform];
-    await apiFetch(`/api/catalog/categories/${categoryId}/channels/${platform}`, {
-      method: 'PUT',
-      json: {
-        channelCategoryId: fixture.id,
-        channelCategoryName: fixture.name,
-        attributes: draft.map((row) => ({
-          channelAttributeId: row.channelAttributeId,
-          channelAttributeName: row.channelAttributeName,
-          required: row.required,
-          mode: row.mode,
-          fixedValue: row.mode === 'fixed' ? row.fixedValue : null,
-          sourceField: row.mode === 'dynamic' ? row.sourceField : null,
-        })),
-      },
-    });
-    const resolved = draft
-      .filter((row) => row.required)
-      .every((row) => (row.mode === 'fixed' ? row.fixedValue.trim() : row.mode === 'dynamic' ? row.sourceField.trim() : true));
-    setGreen(resolved);
-    setMessage(resolved ? 'Categoria verde: obrigatórios resolvidos.' : 'Ainda há obrigatório sem valor ou origem.');
-  };
+  const channelName = platform === 'nuvemshop' ? 'Nuvemshop' : 'Mercado Livre';
 
   return (
-    <main className="mx-auto max-w-4xl px-6 py-8">
-      <h1 className="text-2xl font-bold text-text-primary">Atributos</h1>
-      <p className="mt-1 text-sm text-text-muted">
-        Mapeie uma vez por categoria do catálogo e canal. Verde só quando todo obrigatório está resolvido.
-      </p>
-      {message && <p className="mt-4 text-sm text-text-primary" role="status">{message}</p>}
-
-      <section className="mt-6 rounded-xl border border-border-color bg-bg-surface/50 p-4">
-        <h2 className="text-sm font-semibold text-text-primary">Categorias do catálogo</h2>
-        <ul className="mt-2 space-y-1 text-xs text-text-muted">
-          {categories.length === 0 && <li>Nenhuma categoria. Um produto sem categoria aparece em Completude.</li>}
-          {categories.map((category) => (
-            <li key={category.id}>{category.name}</li>
-          ))}
-        </ul>
-        <div className="mt-3 flex gap-2">
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Nome da categoria"
-            className="rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
-          />
-          <button
-            type="button"
-            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-text-primary"
-            onClick={() => {
-              void apiFetch('/api/catalog/categories', { method: 'POST', json: { name } })
-                .then(() => {
-                  setName('');
-                  return load();
-                })
-                .catch(() => setMessage('Não foi possível criar a categoria.'));
-            }}
-          >
-            Criar
-          </button>
+    <main className="mx-auto max-w-6xl px-6 py-8">
+      <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-6 lg:flex-row lg:items-end">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-text-primary">Data Mapping Studio</h1>
+          <p className="mt-1 max-w-3xl text-sm text-text-muted">
+            Mapeie a categoria do ERP para a categoria do canal e, em seguida, traduza os atributos e os valores.
+            O que você salvar vale para todos os produtos daquela categoria.
+          </p>
         </div>
-      </section>
-
-      <section className="mt-6 rounded-xl border border-border-color bg-bg-surface/50 p-4">
-        <h2 className="text-sm font-semibold text-text-primary">Mapa categoria × canal</h2>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <select
-            value={categoryId}
-            onChange={(event) => setCategoryId(event.target.value)}
-            className="rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
-          >
-            <option value="">Categoria</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>{category.name}</option>
-            ))}
-          </select>
+        <label className="text-xs text-text-muted">
+          Canal de destino
           <select
             value={platform}
-            onChange={(event) => setPlatform(event.target.value as 'mercadolivre' | 'nuvemshop')}
-            className="rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
+            onChange={(event) => setPlatform(event.target.value as MappingPlatform)}
+            className="mt-1 block rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-sm text-text-primary"
           >
-            <option value="mercadolivre">Mercado Livre</option>
             <option value="nuvemshop">Nuvemshop</option>
+            {MERCADO_LIVRE_ACTIVE && <option value="mercadolivre">Mercado Livre</option>}
           </select>
-          <button type="button" onClick={() => void loadSpecs().catch(() => setMessage('Fixture de atributos indisponível.'))} className="rounded-lg border border-border-color px-3 py-1.5 text-xs text-text-primary">
-            Ler atributos da categoria do canal
+        </label>
+      </header>
+
+      {studio?.channelTreeSource === 'fixture' && (
+        <p className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-100">
+          A árvore de {channelName} é um exemplo, no formato da API do canal. Quando a leitura real estiver ligada, esta tela usa a mesma resposta sem mudar o mapeamento já salvo.
+        </p>
+      )}
+      {error && <p className="mt-4 text-sm text-rose-600 dark:text-rose-200" role="alert">{error}</p>}
+
+      <div className="mt-5 flex gap-1 border-b border-border-color" role="tablist">
+        {([
+          ['categories', 'Mapeamento de Categorias'],
+          ['attributes', 'Mapeamento de Atributos e Valores'],
+        ] as const).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            className={`-mb-px border-b-2 px-3 py-2 text-sm ${
+              tab === id ? 'border-emerald-600 font-semibold text-text-primary' : 'border-transparent text-text-muted hover:text-text-primary'
+            }`}
+          >
+            {label}
           </button>
-        </div>
-        <div className="mt-4 space-y-3">
-          {draft.map((row, index) => (
-            <div key={row.channelAttributeId} className="grid gap-2 rounded-lg border border-border-color p-3 sm:grid-cols-4">
-              <div className="text-xs text-text-primary">
-                {row.channelAttributeName}
-                {row.required ? ' (obrigatório)' : ' (opcional)'}
-              </div>
-              <select
-                value={row.mode}
-                onChange={(event) => {
-                  const mode = event.target.value as DraftAttr['mode'];
-                  setDraft((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, mode } : item)));
-                }}
-                className="rounded border border-border-color bg-bg-base px-2 py-1 text-xs text-text-primary"
-              >
-                <option value="fixed">Fixo</option>
-                <option value="dynamic">Dinâmico</option>
-                <option value="manual">Manual</option>
-              </select>
-              {row.mode === 'fixed' && (
-                <input
-                  value={row.fixedValue}
-                  onChange={(event) =>
-                    setDraft((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, fixedValue: event.target.value } : item)))
-                  }
-                  placeholder="Valor fixo"
-                  className="rounded border border-border-color bg-bg-base px-2 py-1 text-xs text-text-primary"
-                />
-              )}
-              {row.mode === 'dynamic' && (
-                <input
-                  value={row.sourceField}
-                  onChange={(event) =>
-                    setDraft((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, sourceField: event.target.value } : item)))
-                  }
-                  placeholder="brand, name ou eixo"
-                  className="rounded border border-border-color bg-bg-base px-2 py-1 text-xs text-text-primary"
-                />
-              )}
-            </div>
-          ))}
-        </div>
-        <button type="button" onClick={() => void save().catch(() => setMessage('Não foi possível salvar o mapa.'))} className="mt-4 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-text-primary">
-          Salvar mapa
-        </button>
-        {green !== null && (
-          <p className={`mt-3 text-sm font-semibold ${green ? 'text-emerald-300' : 'text-amber-300'}`}>
-            {green ? 'Verde' : 'Ainda não está verde'}
-          </p>
+        ))}
+      </div>
+
+      <div className="mt-5">
+        {!studio && !error && <p className="text-sm text-text-muted">Carregando...</p>}
+        {studio && tab === 'categories' && (
+          <CategoryMappingPanel platform={platform} studio={studio} canWrite={canWrite} onSaved={load} />
         )}
-      </section>
+        {studio && tab === 'attributes' && (
+          <AttributeMappingTable platform={platform} categories={studio.erp} fields={studio.fields} canWrite={canWrite} />
+        )}
+      </div>
     </main>
   );
 }

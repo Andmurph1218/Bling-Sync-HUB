@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import express from 'express';
 import { z } from 'zod';
-import { requireAuth, requireRole } from '../auth/middleware.js';
+import { requireAuth, requirePermission, requireRole } from '../auth/middleware.js';
 import { query, withTransaction } from '../db/pool.js';
 import { lookupChannelAttributeSpecs } from '../catalog/channel-attributes.js';
 import { listCatalog, CatalogTab } from '../catalog/list.js';
@@ -15,9 +15,22 @@ import {
   readProblemLog,
 } from '../catalog/problem-panel.js';
 import { buildQualityCsv, isQualityMetricCode, loadQualitySummary } from '../catalog/quality.js';
+import { findChannelCategory } from '../catalog/channel-category-catalog.js';
+import {
+  descendantHubCategoryIds,
+  ensureHubCategoryPath,
+  linkChannelCategory,
+  listFieldValues,
+  loadMappingStudio,
+  MappingPlatform,
+  readAttributeDraft,
+  replaceAttributeMaps,
+  suggestStudioMappings,
+} from '../catalog/mapping-studio.js';
 import { buildPublishPreview, recalculateCompleteness, PublishChannel } from '../catalog/publish-preview.js';
 import { enqueueReadyProducts, isLivePublishingEnabled } from '../queues/publish-queue.js';
-import { buildCatalogWorkbook, importCatalogWorkbook } from '../catalog/spreadsheet.js';
+import { buildCatalogWorkbook, buildImportTemplateCsv } from '../catalog/spreadsheet.js';
+import { acceptCatalogImport, buildImportErrorCsv } from '../catalog/import-jobs.js';
 import { createBatchJob, readBatchJob } from '../catalog/batch-jobs.js';
 import { createErpConnector } from '../connectors/strategy/factory.js';
 import { STOCK_LAUNCH_WARNING } from '../connectors/strategy/bling-erp.js';
@@ -494,7 +507,7 @@ catalogRouter.post(
 
 catalogRouter.post(
   '/api/catalog/publish/batch',
-  requireRole('operator', 'admin'),
+  requirePermission('push:execute'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const parsed = sendListSchema.safeParse(req.body ?? { ids: req.body?.ids, channel: 'mercadolivre' });
@@ -512,7 +525,7 @@ catalogRouter.post(
 
 catalogRouter.post(
   '/api/catalog/:id/simulate',
-  requireRole('operator', 'admin'),
+  requirePermission('push:simulate'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       if (!z.string().uuid().safeParse(req.params.id).success) {
@@ -534,7 +547,7 @@ catalogRouter.post(
 
 catalogRouter.post(
   '/api/catalog/products/:id/simulate-publish',
-  requireRole('operator', 'admin'),
+  requirePermission('push:simulate'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       const channel = req.query.channel === 'nuvemshop' ? 'nuvemshop' : 'mercadolivre';
@@ -769,33 +782,70 @@ catalogRouter.post(
         res.status(400).json({ error: 'invalid_file' });
         return;
       }
-      const report = await importCatalogWorkbook(file);
-      const rowsError = report.lines.filter((line) => line.status === 'erro').length;
-      await query(
-        `INSERT INTO import_jobs (user_id, file_name, status, rows_processed, rows_error, error_log)
-         VALUES ($1, $2, 'done', $3, $4, $5::jsonb)`,
-        [
-          req.user?.id ?? null,
-          'catalogo.xlsx',
-          report.lines.length,
-          rowsError,
-          JSON.stringify(report.lines.filter((line) => line.status === 'erro')),
-        ]
-      ).catch(() => undefined);
-      res.status(200).json(report);
+      const fileName = decodeURIComponent(String(req.headers['x-file-name'] ?? 'catalogo.xlsx'));
+      const accepted = await acceptCatalogImport({ userId: req.user?.id ?? null, fileName, file });
+      res.status(accepted.status).json(accepted.body);
     } catch (error) {
       next(error);
     }
   }
 );
 
+catalogRouter.get('/api/catalog/import/template.csv', requireRole('operator', 'admin'), (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="template-catalogo.csv"');
+  res.status(200).send(buildImportTemplateCsv());
+});
+
 catalogRouter.get('/api/catalog/imports', requireRole('admin'), async (_req: Request, res: Response, next: NextFunction) => {
   try {
     const rows = await query(
-      `SELECT id, file_name, status, rows_processed, rows_error, created_at
-       FROM import_jobs ORDER BY created_at DESC LIMIT 100`
+      `SELECT j.id, j.file_name, j.status, j.total, j.rows_processed, j.rows_error, j.created_at, j.finished_at,
+              COALESCE(u.name, 'HUB') AS user_name
+       FROM import_jobs j
+       LEFT JOIN users u ON u.id = j.user_id
+       ORDER BY j.created_at DESC
+       LIMIT 100`
     );
     res.status(200).json({ jobs: rows.rows });
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.get('/api/catalog/imports/:id', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rows = await query(
+      `SELECT j.id, j.file_name, j.status, j.total, j.rows_processed, j.rows_error, j.error_log, j.created_at,
+              COALESCE(u.name, 'HUB') AS user_name
+       FROM import_jobs j
+       LEFT JOIN users u ON u.id = j.user_id
+       WHERE j.id = $1`,
+      [req.params.id]
+    );
+    if (!rows.rows[0]) {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+    res.status(200).json(rows.rows[0]);
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.get('/api/catalog/imports/:id/errors.csv', requireRole('admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rows = await query<{ error_log: Array<{ sku?: string; message?: string; cells?: Record<string, string> }> }>(
+      `SELECT error_log FROM import_jobs WHERE id = $1`,
+      [req.params.id]
+    );
+    if (!rows.rows[0]) {
+      res.status(404).json({ error: 'not_found' });
+      return;
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="erros-importacao.csv"');
+    res.status(200).send(buildImportErrorCsv(rows.rows[0].error_log ?? []));
   } catch (error) {
     next(error);
   }
@@ -950,19 +1000,128 @@ catalogRouter.get('/api/catalog/categories/:id/channels', requireAuth, async (re
   }
 });
 
+catalogRouter.get('/api/catalog/mapping-studio', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const platform = mappingPlatform(req.query.platform) ?? 'nuvemshop';
+    res.status(200).json(await loadMappingStudio(platform));
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.get('/api/catalog/mapping-studio/suggest', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const platform = mappingPlatform(req.query.platform);
+    if (!platform) {
+      res.status(400).json({ error: 'invalid_platform' });
+      return;
+    }
+    res.status(200).json({ suggestions: await suggestStudioMappings(platform) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.get('/api/catalog/mapping-studio/values', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const values = await listFieldValues(String(req.query.field ?? ''));
+    if (!values) {
+      res.status(400).json({ error: 'unknown_field' });
+      return;
+    }
+    res.status(200).json({ values });
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.get('/api/catalog/mapping-studio/attributes', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const platform = mappingPlatform(req.query.platform);
+    const hubCategoryId = String(req.query.hubCategoryId ?? '');
+    if (!platform || !z.string().uuid().safeParse(hubCategoryId).success) {
+      res.status(400).json({ error: 'invalid_payload' });
+      return;
+    }
+    const draft = await readAttributeDraft(hubCategoryId, platform);
+    if (!draft) {
+      res.status(404).json({ error: 'not_mapped' });
+      return;
+    }
+    res.status(200).json(draft);
+  } catch (error) {
+    next(error);
+  }
+});
+
+const categoryLinkSchema = z.object({
+  platform: z.enum(['nuvemshop', 'mercadolivre']),
+  items: z.array(z.object({
+    hubCategoryId: z.string().uuid().nullable(),
+    path: z.array(z.string().trim().min(1).max(120)).min(1).max(8),
+    channelCategoryId: z.string().min(1),
+    channelCategoryName: z.string().min(1),
+  })).min(1).max(300),
+});
+
+catalogRouter.post(
+  '/api/catalog/mapping-studio/categories',
+  requireRole('operator', 'admin'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const parsed = categoryLinkSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: 'invalid_payload' });
+        return;
+      }
+      if (parsed.data.items.some((item) => !findChannelCategory(parsed.data.platform, item.channelCategoryId))) {
+        res.status(400).json({ error: 'unknown_channel_category' });
+        return;
+      }
+      const saved: string[] = [];
+      await withTransaction(async (client) => {
+        for (const item of parsed.data.items) {
+          const hubCategoryId = await ensureHubCategoryPath(client, item.path, item.hubCategoryId);
+          const labels = [item.path[item.path.length - 1] ?? '', item.path.join(' > ')];
+          await linkChannelCategory(
+            client,
+            hubCategoryId,
+            parsed.data.platform,
+            item.channelCategoryId,
+            item.channelCategoryName,
+            labels,
+            req.user?.id ?? null
+          );
+          saved.push(hubCategoryId);
+        }
+      });
+      res.status(200).json({ saved });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+const attributeDraftSchema = z.object({
+  channelAttributeId: z.string().min(1),
+  channelAttributeName: z.string().min(1),
+  required: z.boolean(),
+  mode: z.enum(['fixed', 'dynamic', 'manual']),
+  fixedValue: z.string().nullable().optional(),
+  sourceField: z.string().nullable().optional(),
+  valueMaps: z.array(z.object({ hubValue: z.string().min(1), channelValue: z.string().min(1) })).optional(),
+});
+
 const saveChannelSchema = z.object({
   channelCategoryId: z.string().min(1),
   channelCategoryName: z.string().min(1),
-  attributes: z.array(z.object({
-    channelAttributeId: z.string().min(1),
-    channelAttributeName: z.string().min(1),
-    required: z.boolean(),
-    mode: z.enum(['fixed', 'dynamic', 'manual']),
-    fixedValue: z.string().nullable().optional(),
-    sourceField: z.string().nullable().optional(),
-    valueMaps: z.array(z.object({ hubValue: z.string().min(1), channelValue: z.string().min(1) })).optional(),
-  })),
+  applyToChildren: z.boolean().optional(),
+  attributes: z.array(attributeDraftSchema),
 });
+
+function mappingPlatform(value: unknown): MappingPlatform | null {
+  return value === 'nuvemshop' || value === 'mercadolivre' ? value : null;
+}
 
 catalogRouter.put(
   '/api/catalog/categories/:id/channels/:platform',
@@ -979,41 +1138,26 @@ catalogRouter.put(
         res.status(400).json({ error: 'invalid_payload' });
         return;
       }
+      const drafts = parsed.data.attributes.map((attribute) => ({
+        ...attribute,
+        fixedValue: attribute.fixedValue ?? null,
+        sourceField: attribute.sourceField ?? null,
+        valueMaps: attribute.valueMaps ?? [],
+      }));
       await withTransaction(async (client) => {
-        const mapRes = await client.query<{ id: string }>(
-          `INSERT INTO channel_category_maps (hub_category_id, platform, channel_category_id, channel_category_name)
-           VALUES ($1, $2, $3, $4)
-           ON CONFLICT (hub_category_id, platform) DO UPDATE
-             SET channel_category_id = EXCLUDED.channel_category_id,
-                 channel_category_name = EXCLUDED.channel_category_name
-           RETURNING id`,
-          [req.params.id, platform, parsed.data.channelCategoryId, parsed.data.channelCategoryName]
-        );
-        const mapId = mapRes.rows[0]!.id;
-        await client.query(`DELETE FROM channel_attribute_maps WHERE channel_category_map_id = $1`, [mapId]);
-        for (const attribute of parsed.data.attributes) {
-          const inserted = await client.query<{ id: string }>(
-            `INSERT INTO channel_attribute_maps (
-               channel_category_map_id, channel_attribute_id, channel_attribute_name, required, mode, fixed_value, source_field
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-             RETURNING id`,
-            [
-              mapId,
-              attribute.channelAttributeId,
-              attribute.channelAttributeName,
-              attribute.required,
-              attribute.mode,
-              attribute.fixedValue ?? null,
-              attribute.sourceField ?? null,
-            ]
+        const targets = [req.params.id];
+        if (parsed.data.applyToChildren) targets.push(...(await descendantHubCategoryIds(client, req.params.id)));
+        for (const hubCategoryId of targets) {
+          await linkChannelCategory(
+            client,
+            hubCategoryId,
+            platform,
+            parsed.data.channelCategoryId,
+            parsed.data.channelCategoryName,
+            [],
+            req.user?.id ?? null
           );
-          for (const value of attribute.valueMaps ?? []) {
-            await client.query(
-              `INSERT INTO channel_attribute_value_maps (channel_attribute_map_id, hub_value, channel_value)
-               VALUES ($1, $2, $3)`,
-              [inserted.rows[0]!.id, value.hubValue, value.channelValue]
-            );
-          }
+          await replaceAttributeMaps(client, hubCategoryId, platform, drafts);
         }
       });
       res.status(200).json({ saved: true });

@@ -21,7 +21,7 @@ export interface ProblemGroup {
   groupMessage: string;
   count: number;
   lastAt: string | null;
-  action: 'reprocess' | 'bling';
+  action: 'reprocess' | 'bling' | 'fiscal';
   channel: string;
   single?: ProblemItem | null;
 }

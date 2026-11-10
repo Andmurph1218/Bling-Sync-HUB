@@ -4,7 +4,7 @@ import { env } from '../config/env.js';
 import { withTransaction } from '../db/pool.js';
 import { extractOpaqueToken, requireAuth, requireRole } from '../auth/middleware.js';
 import { DefaultPasswordRejectedError } from '../auth/password-policy.js';
-import { authenticateUser, changeOwnPassword, createUser, revokeSessionByToken } from '../auth/service.js';
+import { authenticateUser, changeOwnPassword, completeMfaLogin, createUser, revokeSessionByToken } from '../auth/service.js';
 import { ROLES } from '../auth/types.js';
 
 export const authRouter = Router();
@@ -50,6 +50,10 @@ authRouter.post('/auth/login', async (req: Request, res: Response, next: NextFun
       res.status(401).json({ error: 'invalid_credentials', message: 'E-mail ou senha inválidos' });
       return;
     }
+    if (result.mfaRequired) {
+      res.status(200).json({ mfaRequired: true, ticket: result.ticket });
+      return;
+    }
 
     res.cookie(env.SESSION_COOKIE_NAME, result.opaqueToken, {
       httpOnly: true,
@@ -65,6 +69,8 @@ authRouter.post('/auth/login', async (req: Request, res: Response, next: NextFun
         email: result.user.email,
         name: result.user.name,
         roles: result.user.roles,
+        permissions: result.user.permissions,
+        mfaEnabled: result.user.mfaEnabled,
         mustChangePassword: result.user.mustChangePassword,
       },
       mustChangePassword: result.user.mustChangePassword,
@@ -75,6 +81,43 @@ authRouter.post('/auth/login', async (req: Request, res: Response, next: NextFun
       res.status(403).json({ error: error.code, message: error.message });
       return;
     }
+    next(error);
+  }
+});
+
+authRouter.post('/auth/login/mfa', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = z.object({ ticket: z.string().min(10), code: z.string().min(6).max(8) }).safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_payload' });
+      return;
+    }
+    const result = await completeMfaLogin(parsed.data.ticket, parsed.data.code);
+    if (!result || result.mfaRequired) {
+      res.status(401).json({ error: 'invalid_mfa', message: 'Código inválido ou expirado.' });
+      return;
+    }
+    res.cookie(env.SESSION_COOKIE_NAME, result.opaqueToken, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: env.SESSION_COOKIE_SECURE,
+      expires: result.expiresAt,
+      path: '/',
+    });
+    res.status(200).json({
+      user: {
+        id: result.user.id,
+        email: result.user.email,
+        name: result.user.name,
+        roles: result.user.roles,
+        permissions: result.user.permissions,
+        mfaEnabled: result.user.mfaEnabled,
+        mustChangePassword: result.user.mustChangePassword,
+      },
+      mustChangePassword: result.user.mustChangePassword,
+      expiresAt: result.expiresAt.toISOString(),
+    });
+  } catch (error) {
     next(error);
   }
 });
@@ -100,6 +143,8 @@ authRouter.get('/auth/me', requireAuth, (req: Request, res: Response) => {
       email: user.email,
       name: user.name,
       roles: user.roles,
+      permissions: user.permissions,
+      mfaEnabled: user.mfaEnabled,
       mustChangePassword: user.mustChangePassword,
     },
   });

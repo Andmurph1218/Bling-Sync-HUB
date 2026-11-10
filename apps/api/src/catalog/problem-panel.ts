@@ -5,7 +5,7 @@ import { ProblemType, translateProblemMessage } from './problems.js';
 
 export type ProblemSeverity = 'critico' | 'aviso' | 'erro';
 export type ProblemSource = 'completude' | 'publish_queue' | 'webhook_events';
-export type ProblemActionKind = 'reprocess' | 'bling';
+export type ProblemActionKind = 'reprocess' | 'bling' | 'fiscal';
 
 export interface ProblemGroupRow {
   key: string;
@@ -92,7 +92,7 @@ const GAP_META: Record<
     failureType: 'Cadastro',
     message: 'NCM ausente ou inválido',
     groupMessage: (n) => `${n} produtos sem NCM válido`,
-    action: 'bling',
+    action: 'fiscal',
     channel: 'Bling',
   },
   ean: {
@@ -101,7 +101,7 @@ const GAP_META: Record<
     failureType: 'Cadastro',
     message: 'Falta EAN válido exigido pelo canal',
     groupMessage: (n) => `${n} produtos sem EAN válido exigido pelo canal`,
-    action: 'bling',
+    action: 'fiscal',
     channel: 'Bling',
   },
   cover: {

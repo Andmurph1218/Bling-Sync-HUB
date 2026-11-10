@@ -19,7 +19,6 @@ import {
   ChevronLeft,
   ChevronRight,
   AlertTriangle,
-  Radio,
   LogOut,
   Loader2,
   Settings,
@@ -28,13 +27,15 @@ import { apiFetch } from '../utils/api-client';
 import { ThemeToggle } from './theme-toggle';
 import { MERCADO_LIVRE_ACTIVE } from '../config/channels';
 
-export type UserRole = 'admin' | 'fiscal_approver' | 'operator';
+export type UserRole = 'admin' | 'fiscal_approver' | 'operator' | 'viewer';
 
 export interface SessionUser {
   id: string;
   name: string;
   email: string;
   roles: UserRole[];
+  permissions: string[];
+  mfaEnabled: boolean;
   /** Papel principal usado para exibição (admin > fiscal_approver > operator). */
   role: UserRole;
   roleLabel: string;
@@ -46,6 +47,7 @@ const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Administrador',
   fiscal_approver: 'Revisor Fiscal',
   operator: 'Operador',
+  viewer: 'Leitura',
 };
 
 function toSessionUser(raw: {
@@ -53,13 +55,17 @@ function toSessionUser(raw: {
   name: string;
   email: string;
   roles: UserRole[];
+  permissions?: string[];
+  mfaEnabled?: boolean;
   mustChangePassword?: boolean;
 }): SessionUser {
   const role: UserRole = raw.roles.includes('admin')
     ? 'admin'
     : raw.roles.includes('fiscal_approver')
     ? 'fiscal_approver'
-    : 'operator';
+    : raw.roles.includes('operator')
+    ? 'operator'
+    : 'viewer';
   const initials =
     raw.name
       .split(/\s+/)
@@ -70,6 +76,8 @@ function toSessionUser(raw: {
   return {
     ...raw,
     role,
+    permissions: raw.permissions ?? [],
+    mfaEnabled: raw.mfaEnabled === true,
     roleLabel: raw.roles.map((r) => ROLE_LABELS[r]).join(' · '),
     initials,
     mustChangePassword: raw.mustChangePassword === true,
@@ -79,6 +87,7 @@ function toSessionUser(raw: {
 interface RoleContextValue {
   currentUser: SessionUser;
   hasRole: (...roles: UserRole[]) => boolean;
+  hasPermission: (permission: string) => boolean;
   acknowledgePasswordChange: () => void;
 }
 
@@ -87,6 +96,8 @@ const ANONYMOUS: SessionUser = {
   name: 'Visitante',
   email: '',
   roles: [],
+  permissions: [],
+  mfaEnabled: false,
   role: 'operator',
   roleLabel: 'Sem sessão',
   initials: '--',
@@ -96,6 +107,7 @@ const ANONYMOUS: SessionUser = {
 const RoleContext = createContext<RoleContextValue>({
   currentUser: ANONYMOUS,
   hasRole: () => false,
+  hasPermission: () => false,
   acknowledgePasswordChange: () => undefined,
 });
 
@@ -109,6 +121,8 @@ interface NavItem {
   shortLabel: string;
   icon: React.ComponentType<{ className?: string }>;
   allowedRoles: UserRole[];
+  permission?: string;
+  anyPermission?: string[];
   isSubItem?: boolean;
 }
 
@@ -117,22 +131,28 @@ interface NavItem {
  * filtrada pelos papéis reais da sessão.
  */
 const NAV_ITEMS: NavItem[] = [
-  { href: '/', label: 'Início', shortLabel: 'Início', icon: LayoutDashboard, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
-  { href: '/catalogo', label: 'Catálogo', shortLabel: 'Catálogo', icon: Boxes, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { href: '/', label: 'Início', shortLabel: 'Início', icon: LayoutDashboard, allowedRoles: ['admin', 'fiscal_approver', 'operator', 'viewer'] },
+  { href: '/catalogo', label: 'Catálogo', shortLabel: 'Catálogo', icon: Boxes, allowedRoles: ['admin', 'fiscal_approver', 'operator', 'viewer'] },
   { href: '/completude', label: 'Completude', shortLabel: 'Completude', icon: ClipboardList, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
   { href: '/problemas', label: 'Problemas', shortLabel: 'Problemas', icon: AlertTriangle, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
   { href: '/atributos', label: 'Atributos', shortLabel: 'Atributos', icon: Tags, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
-  { href: '/fiscal', label: 'Fiscal', shortLabel: 'Fiscal', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'] },
-  { href: '/fiscal/ean', label: 'Código de barras', shortLabel: 'EAN', icon: Barcode, allowedRoles: ['admin', 'fiscal_approver'], isSubItem: true },
+  { href: '/fiscal', label: 'Fiscal', shortLabel: 'Fiscal', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'], anyPermission: ['fiscal:approve_ean', 'fiscal:approve_ncm'] },
+  { href: '/fiscal/ean', label: 'Código de barras', shortLabel: 'EAN', icon: Barcode, allowedRoles: ['admin', 'fiscal_approver'], permission: 'fiscal:approve_ean', isSubItem: true },
   { href: '/admin/imports', label: 'Importações', shortLabel: 'Imports', icon: ClipboardList, allowedRoles: ['admin'], isSubItem: true },
-  { href: '/fiscal/ncm', label: 'Classificação fiscal', shortLabel: 'NCM', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'], isSubItem: true },
-  { href: '/qualidade-margem', label: 'Qualidade do cadastro', shortLabel: 'Qualidade', icon: TrendingUp, allowedRoles: ['admin', 'fiscal_approver', 'operator'], isSubItem: true },
-  { href: '/publicacoes', label: 'Publicações', shortLabel: 'Publicar', icon: Send, allowedRoles: ['admin', 'operator'] },
+  { href: '/fiscal/ncm', label: 'Classificação fiscal', shortLabel: 'NCM', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'], permission: 'fiscal:approve_ncm', isSubItem: true },
+  { href: '/qualidade-margem', label: 'Saúde e margem', shortLabel: 'Margem', icon: TrendingUp, allowedRoles: ['admin', 'fiscal_approver', 'operator'], isSubItem: true },
+  { href: '/publicacoes', label: 'Publicações', shortLabel: 'Publicar', icon: Send, allowedRoles: ['admin', 'operator'], anyPermission: ['push:simulate', 'push:execute'] },
   { href: '/vinculos', label: 'Vínculos', shortLabel: 'Vínculos', icon: GitCompare, allowedRoles: ['admin', 'operator'] },
   { href: '/canais', label: 'Canais', shortLabel: 'Canais', icon: Sliders, allowedRoles: ['admin', 'operator'] },
   { href: '/integracoes', label: 'Integrações', shortLabel: 'Integrações', icon: Store, allowedRoles: ['admin', 'operator'] },
   { href: '/admin/integracoes', label: 'Loja de apps', shortLabel: 'Loja', icon: Store, allowedRoles: ['admin'] },
-  { href: '/auditoria', label: 'Auditoria', shortLabel: 'Auditoria', icon: History, allowedRoles: ['admin', 'fiscal_approver'] },
+  { href: '/auditoria', label: 'Auditoria', shortLabel: 'Auditoria', icon: History, allowedRoles: ['admin', 'fiscal_approver'], permission: 'audit:read' },
+  { href: '/configuracoes', label: 'Configurações', shortLabel: 'Config.', icon: Settings, allowedRoles: ['admin'], anyPermission: ['settings:manage_general', 'settings:manage_users', 'settings:manage_notifications', 'settings:manage_webhooks', 'settings:manage_security'] },
+  { href: '/configuracoes/geral', label: 'Geral', shortLabel: 'Geral', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_general', isSubItem: true },
+  { href: '/configuracoes/usuarios', label: 'Usuários', shortLabel: 'Usuários', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_users', isSubItem: true },
+  { href: '/configuracoes/notificacoes', label: 'Notificações', shortLabel: 'Alertas', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_notifications', isSubItem: true },
+  { href: '/configuracoes/webhooks', label: 'Webhooks e chaves', shortLabel: 'Chaves', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_webhooks', isSubItem: true },
+  { href: '/configuracoes/seguranca', label: 'Segurança', shortLabel: 'Segurança', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_security', isSubItem: true },
 ];
 
 interface OauthRow {
@@ -155,7 +175,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [checking, setChecking] = useState(true);
   const [oauthRows, setOauthRows] = useState<OauthRow[] | null>(null);
 
-  const isLoginPage = pathname === '/login';
+  const isLoginPage = pathname === '/login' || pathname.startsWith('/convite');
 
   useEffect(() => {
     if (isLoginPage) {
@@ -166,7 +186,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setChecking(true);
     void (async () => {
       try {
-        const me = await apiFetch<{ user: { id: string; name: string; email: string; roles: UserRole[]; mustChangePassword?: boolean } }>('/auth/me');
+        const me = await apiFetch<{ user: { id: string; name: string; email: string; roles: UserRole[]; permissions?: string[]; mfaEnabled?: boolean; mustChangePassword?: boolean } }>('/auth/me');
         if (cancelled) return;
         setUser(toSessionUser(me.user));
         try {
@@ -235,13 +255,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const hasRole = (...roles: UserRole[]) => user.roles.some((r) => roles.includes(r));
-  const visibleNavItems = NAV_ITEMS.filter((item) => hasRole(...item.allowedRoles));
+  const hasRole = (...roles: UserRole[]) => user.roles.includes('admin') || user.roles.some((r) => roles.includes(r));
+  const hasPermission = (permission: string) =>
+    user.roles.includes('admin') || user.permissions.includes(permission) || (permission.endsWith(':read') && user.permissions.includes('*:read'));
+  const visibleNavItems = NAV_ITEMS.filter((item) => {
+    if (item.anyPermission) return item.anyPermission.some((permission) => hasPermission(permission));
+    if (item.permission) return hasPermission(item.permission);
+    return hasRole(...item.allowedRoles);
+  });
 
   const roleBadgeStyle: Record<UserRole, string> = {
     admin: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
     fiscal_approver: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
     operator: 'border-sky-500/40 bg-sky-500/10 text-sky-300',
+    viewer: 'border-border-color bg-bg-surface text-text-muted',
   };
 
   const now = Date.now();
@@ -260,7 +287,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   });
 
   return (
-    <RoleContext.Provider value={{ currentUser: user, hasRole, acknowledgePasswordChange }}>
+    <RoleContext.Provider value={{ currentUser: user, hasRole, hasPermission, acknowledgePasswordChange }}>
       <div className="flex min-h-screen bg-bg-base text-text-primary">
         <aside
           className={`hidden md:flex flex-col border-r border-border-color/80 bg-bg-surface/60 transition-all duration-200 ${
@@ -298,7 +325,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
               return (
                 <Link
-                  key={item.href}
+                  key={`${item.href}-${item.label}`}
                   href={item.href}
                   title={collapsed ? item.label : undefined}
                   aria-current={isActive ? 'page' : undefined}
@@ -316,20 +343,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               );
             })}
           </nav>
-
-          {!collapsed && (
-            <div className="border-t border-border-color/80 p-4">
-              <div className="rounded-lg border border-border-color bg-bg-base/70 p-3">
-                <div className="flex items-center gap-2 text-xs font-medium text-emerald-400">
-                  <Radio className="h-3.5 w-3.5" />
-                  <span>O Bling manda</span>
-                </div>
-                <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
-                  Os marketplaces enriquecem. O HUB valida, coordena e registra.
-                </p>
-              </div>
-            </div>
-          )}
         </aside>
 
         <div className="flex flex-1 flex-col min-w-0 pb-16 md:pb-0">
