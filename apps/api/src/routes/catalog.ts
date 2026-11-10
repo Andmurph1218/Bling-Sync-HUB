@@ -7,11 +7,12 @@ import { lookupChannelAttributeSpecs } from '../catalog/channel-attributes.js';
 import { listCatalog, CatalogTab } from '../catalog/list.js';
 import { listProblems } from '../catalog/problems.js';
 import { buildPublishPreview, recalculateCompleteness, PublishChannel } from '../catalog/publish-preview.js';
-import { enqueueReadyProducts } from '../queues/publish-queue.js';
+import { enqueueReadyProducts, isLivePublishingEnabled } from '../queues/publish-queue.js';
 import { buildCatalogWorkbook, importCatalogWorkbook } from '../catalog/spreadsheet.js';
 import { createBatchJob, readBatchJob } from '../catalog/batch-jobs.js';
 import { createErpConnector } from '../connectors/strategy/factory.js';
 import { STOCK_LAUNCH_WARNING } from '../connectors/strategy/bling-erp.js';
+import { getFullSyncStatus } from '../catalog/full-sync.js';
 import { ErpRejectedError } from '../connectors/strategy/types.js';
 
 export const catalogRouter = Router();
@@ -36,7 +37,7 @@ catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: R
     const listed = await listCatalog({ tab: 'todos', sku: '', name: '', brand: '', page: 1, pageSize: 1 });
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
-    const [unlinked, sentToday, failedToday, queued, problems, oauth, lastOk, lastError] = await Promise.all([
+    const [unlinked, sentToday, failedToday, queued, problems, oauth, lastOk, lastError, linkedNs, lastBling] = await Promise.all([
       query<{ count: number }>(`SELECT count(*)::int AS count FROM matching_queue WHERE status = 'pending'`),
       query<{ count: number }>(
         `SELECT count(*)::int AS count FROM push_jobs WHERE status = 'completed' AND created_at >= $1`,
@@ -60,7 +61,16 @@ catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: R
       query<{ last_error: Date | string | null }>(
         `SELECT max(created_at) AS last_error FROM push_jobs WHERE status = 'failed'`
       ),
+      query<{ count: number }>(
+        `SELECT count(DISTINCT master_product_id)::int AS count
+         FROM platform_links
+         WHERE platform = 'nuvemshop' AND sync_status = 'linked'`
+      ),
+      query<{ last_sync: Date | string | null }>(
+        `SELECT max(last_bling_sync) AS last_sync FROM master_products`
+      ),
     ]);
+    const sync = getFullSyncStatus();
     const publicationsToday =
       (sentToday.rows[0]?.count ?? 0) +
       (failedToday.rows[0]?.count ?? 0) +
@@ -87,6 +97,16 @@ catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: R
       channels: oauth.rows,
       lastSyncOk: lastOk.rows[0]?.last_ok ?? null,
       lastSyncError: lastError.rows[0]?.last_error ?? null,
+      lastBlingSync: lastBling.rows[0]?.last_sync ?? null,
+      linkedNuvemshop: linkedNs.rows[0]?.count ?? 0,
+      livePublishing: isLivePublishingEnabled(),
+      sync: {
+        status: sync.status,
+        startedAt: sync.startedAt,
+        finishedAt: sync.finishedAt,
+        seen: sync.seen,
+        upserted: sync.upserted,
+      },
       counts: listed.counts,
     });
   } catch (error) {
