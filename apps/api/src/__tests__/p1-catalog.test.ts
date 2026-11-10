@@ -80,7 +80,7 @@ describe('P1 — atributos e completude', () => {
 
   it('produto ativo sem categoria aparece como sem categoria', () => {
     const checklist = evaluateCatalogChecklist({
-      blingId: '1',
+      erpId: '1',
       sku: 'SKU-1',
       hasCoverImage: true,
       hubCategoryId: null,
@@ -156,7 +156,7 @@ describe('P1 — catálogo no banco', () => {
 
   it('arquiva e desarquiva sem mudar o status do ERP', async () => {
     const created = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('p1-1', 'P1-ARQ', 'Luminária', 'P', 'S')
        RETURNING id`
     );
@@ -189,7 +189,7 @@ describe('P1 — catálogo no banco', () => {
     for (let index = 0; index < 1000; index += 1) {
       const sku = `SKU-${String(index).padStart(4, '0')}`;
       await query(
-        `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+        `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
          VALUES ($1, $2, $3, 'P', 'S')`,
         [`bulk-${index}`, sku, `Produto ${index}`]
       );
@@ -224,7 +224,7 @@ describe('P1 — catálogo no banco', () => {
     const categoryId = category.rows[0]!.id;
     const product = await query<{ id: string }>(
       `INSERT INTO master_products (
-         bling_id, bling_sku, name, brand, bling_tipo, bling_formato, ncm_status, hub_category_id
+         erp_id, erp_sku, name, brand, bling_tipo, product_format, ncm_status, hub_category_id
        ) VALUES ('p1-green', 'LAMP-1', 'Lâmpada LED', 'JHS', 'P', 'S', 'valid', $1)
        RETURNING id`,
       [categoryId]
@@ -232,7 +232,7 @@ describe('P1 — catálogo no banco', () => {
     const masterId = product.rows[0]!.id;
     const variant = await query<{ id: string }>(
       `INSERT INTO product_variants (
-         master_product_id, bling_sku, is_default, bling_formato, price, stock, ean_status
+         master_product_id, erp_sku, is_default, product_format, price, stock, ean_status
        ) VALUES ($1, 'LAMP-1', true, 'S', 25.00, 4, 'valid')
        RETURNING id`,
       [masterId]
@@ -305,10 +305,10 @@ describe('P1 — catálogo no banco', () => {
   });
 
   it('salvar a capa recalcula a completude na leitura seguinte, sem cache', async () => {
-    const created = await query<{ id: string; bling_id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+    const created = await query<{ id: string; erp_id: string }>(
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('p1-cover', 'CAPA-NOVA', 'Produto sem capa', 'P', 'S')
-       RETURNING id, bling_id`
+       RETURNING id, erp_id`
     );
     const product = created.rows[0]!;
     const before = await listCatalog({

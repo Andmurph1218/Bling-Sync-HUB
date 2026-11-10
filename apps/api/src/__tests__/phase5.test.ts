@@ -53,7 +53,7 @@ describe('Fase 5 — Motor de Imagens IQRE (Enfileiramento Assíncrono, Worker S
 
   it('1. A sync apenas enfileira as imagens em image_processing_queue (sem baixar na hora) e ignora URL normalizada duplicada do mesmo produto', async () => {
     const prodRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('5001', 'PROD-IMG-1', 'Garrafa Térmica Inox 1L', 'P', 'S')
        RETURNING id`
     );
@@ -92,14 +92,14 @@ describe('Fase 5 — Motor de Imagens IQRE (Enfileiramento Assíncrono, Worker S
 
   it('2. O fechamento (iqre.finalize) deduplica imagens com distância de Hamming <= 5 mantendo a maior resolução e NÃO cruza produtos diferentes', async () => {
     const prodARes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('5010', 'PROD-DEDUP-A', 'Mochila Executiva A', 'P', 'S')
        RETURNING id`
     );
     const prodAId = prodARes.rows[0]!.id;
 
     const prodBRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('5011', 'PROD-DEDUP-B', 'Mochila Executiva B', 'P', 'S')
        RETURNING id`
     );
@@ -218,7 +218,7 @@ describe('Fase 5 — Motor de Imagens IQRE (Enfileiramento Assíncrono, Worker S
 
   it('3. Direitos de terceiro (third_party_risk), marca d’água, capa >= 500x500 e falha após 4 tentativas sem bloquear o fechamento do produto', async () => {
     const prodCRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('5020', 'PROD-RIGHTS-C', 'Kit Ferramentas C', 'P', 'S')
        RETURNING id`
     );

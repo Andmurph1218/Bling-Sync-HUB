@@ -53,7 +53,7 @@ describe('Fase 7 — Motor de Prontidão CRE (Três Scores por Variante, KPI da 
     // Produto com NCM inválido, EAN inválido, preço zero e NENHUMA linha em channel_readiness_scores
     const prodRes = await query<{ id: string }>(
       `INSERT INTO master_products (
-         bling_id, bling_sku, name, bling_tipo, bling_formato,
+         erp_id, erp_sku, name, bling_tipo, product_format,
          ncm, ncm_status, ncm_fiscal_risk
        ) VALUES ('7001', 'PROD-CRE-BROKEN', 'Item Fiscalmente Quebrado', 'P', 'S', '00000000', 'invalid', true)
        RETURNING id`
@@ -62,7 +62,7 @@ describe('Fase 7 — Motor de Prontidão CRE (Três Scores por Variante, KPI da 
 
     const varRes = await query<{ id: string }>(
       `INSERT INTO product_variants (
-         master_product_id, bling_sku, is_default, bling_formato,
+         master_product_id, erp_sku, is_default, product_format,
          price, ean, ean_status, fiscal_risk_flag
        ) VALUES ($1, 'PROD-CRE-BROKEN', true, 'S', 0, '0000000000000', 'invalid', true)
        RETURNING id`,
@@ -126,8 +126,8 @@ describe('Fase 7 — Motor de Prontidão CRE (Três Scores por Variante, KPI da 
   it('2. Calcula os 3 scores por variante (Bling, ML, Nuvemshop), define KPI do produto pela pior variante ativa e grava top 3 melhorias e histórico', async () => {
     const prodRes = await query<{ id: string }>(
       `INSERT INTO master_products (
-         bling_id, bling_sku, name, description, brand,
-         bling_tipo, bling_formato, ncm, ncm_status, ncm_fiscal_risk,
+         erp_id, erp_sku, name, description, brand,
+         bling_tipo, product_format, ncm, ncm_status, ncm_fiscal_risk,
          meta_description, seo_slug, keywords
        ) VALUES (
          '7002', 'GAR-PREMIUM-PAI',
@@ -146,7 +146,7 @@ describe('Fase 7 — Motor de Prontidão CRE (Três Scores por Variante, KPI da 
     // Variante 1 completa (alta pontuação em todos os canais)
     const v1Res = await query<{ id: string }>(
       `INSERT INTO product_variants (
-         master_product_id, bling_variant_id, bling_sku, is_default, bling_formato,
+         master_product_id, bling_variant_id, erp_sku, is_default, product_format,
          price, net_weight, width, height, depth,
          ean, ean_status, fiscal_risk_flag
        ) VALUES (
@@ -162,7 +162,7 @@ describe('Fase 7 — Motor de Prontidão CRE (Três Scores por Variante, KPI da 
     // Variante 2 incompleta (sem peso, sem dimensões e com EAN pendente -> puxa o KPI do produto para baixo)
     const v2Res = await query<{ id: string }>(
       `INSERT INTO product_variants (
-         master_product_id, bling_variant_id, bling_sku, is_default, bling_formato,
+         master_product_id, bling_variant_id, erp_sku, is_default, product_format,
          price, net_weight, width, height, depth,
          ean, ean_status, fiscal_risk_flag
        ) VALUES (
@@ -225,8 +225,8 @@ describe('Fase 7 — Motor de Prontidão CRE (Três Scores por Variante, KPI da 
   it('3. CONTENT e CREATE consultam o score do CRE e bloqueiam quando o score do canal está abaixo do threshold ou falta categoria verificada no ML', async () => {
     const prodRes = await query<{ id: string }>(
       `INSERT INTO master_products (
-         bling_id, bling_sku, name, description, brand,
-         bling_tipo, bling_formato, ncm, ncm_status, ncm_fiscal_risk
+         erp_id, erp_sku, name, description, brand,
+         bling_tipo, product_format, ncm, ncm_status, ncm_fiscal_risk
        ) VALUES (
          '7003', 'PROD-LOW-SCORE', 'Item Curto', 'Curta', NULL,
          'P', 'S', '96170010', 'valid', false
@@ -237,7 +237,7 @@ describe('Fase 7 — Motor de Prontidão CRE (Três Scores por Variante, KPI da 
 
     const varRes = await query<{ id: string }>(
       `INSERT INTO product_variants (
-         master_product_id, bling_sku, is_default, bling_formato,
+         master_product_id, erp_sku, is_default, product_format,
          price, ean, ean_status, fiscal_risk_flag
        ) VALUES ($1, 'PROD-LOW-SCORE', true, 'S', 49.90, '7891000100011', 'valid', false)
        RETURNING id`,

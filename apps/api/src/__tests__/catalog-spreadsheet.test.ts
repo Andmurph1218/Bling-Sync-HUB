@@ -5,7 +5,8 @@ import { newDb, DataType } from 'pg-mem';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { createUser } from '../auth/service.js';
-import { blingRejectionMessage, setBlingProductWriterForTests, STOCK_LAUNCH_WARNING } from '../connectors/strategy/bling-erp.js';
+import { blingRejectionMessage, setBlingProductWriterForTests } from '../connectors/bling/bling-erp.js';
+import { STOCK_LAUNCH_WARNING } from '../connectors/strategy/types.js';
 import { ErpRejectedError } from '../connectors/strategy/types.js';
 import { DbPoolLike, query, setPool } from '../db/pool.js';
 import { runAllMigrationsUp } from '../db/migrator.js';
@@ -73,13 +74,13 @@ describe('catálogo — anti-duplicação e planilha', () => {
 
   it('bloqueia SKU existente, exporta o catálogo e importa só enriquecimento', async () => {
     const created = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, description, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, description, bling_tipo, product_format)
        VALUES ('plan-1', 'SKU-PLAN', 'Luminária', 'Descrição antiga', 'P', 'S')
        RETURNING id`
     );
     const productId = created.rows[0]!.id;
     await query(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, price, stock, ean)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, price, stock, ean)
        VALUES ($1, 'SKU-PLAN', true, 19.9, 4, '7891000000001')`,
       [productId]
     );
@@ -169,7 +170,7 @@ describe('catálogo — anti-duplicação e planilha', () => {
       .send({ sku: 'NOVO-BLING', name: 'Luminária nova', price: 12.5, stock: 3 });
     expect(rejected.status).toBe(422);
     expect(rejected.body.message).toBe('Erro no Bling: O NCM é obrigatório para esta operação');
-    const absent = await query(`SELECT id FROM master_products WHERE bling_sku = 'NOVO-BLING'`);
+    const absent = await query(`SELECT id FROM master_products WHERE erp_sku = 'NOVO-BLING'`);
     expect(absent.rowCount).toBe(0);
 
     let received: unknown = null;
@@ -184,17 +185,17 @@ describe('catálogo — anti-duplicação e planilha', () => {
       .set('Cookie', cookie)
       .send({ sku: 'NOVO-BLING', name: 'Luminária nova', price: 12.5, stock: 3, description: 'não entra' });
     expect(created.status).toBe(201);
-    expect(created.body.blingId).toBe('99887766');
-    expect(String(created.body.blingId).startsWith('local-')).toBe(false);
+    expect(created.body.erpId).toBe('99887766');
+    expect(String(created.body.erpId).startsWith('local-')).toBe(false);
     expect(received).toEqual({ name: 'Luminária nova', sku: 'NOVO-BLING', price: 12.5, stock: 3 });
 
-    const saved = await query<{ bling_id: string; description: string | null; price: string; stock: string }>(
-      `SELECT mp.bling_id, mp.description, pv.price::text AS price, pv.stock::text AS stock
+    const saved = await query<{ erp_id: string; description: string | null; price: string; stock: string }>(
+      `SELECT mp.erp_id, mp.description, pv.price::text AS price, pv.stock::text AS stock
        FROM master_products mp
        INNER JOIN product_variants pv ON pv.master_product_id = mp.id
-       WHERE mp.bling_sku = 'NOVO-BLING'`
+       WHERE mp.erp_sku = 'NOVO-BLING'`
     );
-    expect(saved.rows[0]?.bling_id).toBe('99887766');
+    expect(saved.rows[0]?.erp_id).toBe('99887766');
     expect(saved.rows[0]?.description).toBeNull();
     expect(Number(saved.rows[0]?.price)).toBe(12.5);
     expect(Number(saved.rows[0]?.stock)).toBe(3);
@@ -207,15 +208,15 @@ describe('catálogo — anti-duplicação e planilha', () => {
       .set('Cookie', cookie)
       .send({ sku: 'NOVO-ESTOQUE', name: 'Sem saldo', price: 8, stock: 2 });
     expect(partial.status).toBe(201);
-    expect(partial.body.blingId).toBe('99887767');
+    expect(partial.body.erpId).toBe('99887767');
     expect(partial.body.stockWarning).toBe(STOCK_LAUNCH_WARNING);
     const logged = await query<{ error_detail: string }>(
       `SELECT error_detail FROM sync_logs WHERE idempotency_key = 'bling-stock:99887767'`
     );
     expect(logged.rows[0]?.error_detail).toBe(STOCK_LAUNCH_WARNING);
-    const kept = await query<{ bling_id: string }>(
-      `SELECT bling_id FROM master_products WHERE bling_sku = 'NOVO-ESTOQUE'`
+    const kept = await query<{ erp_id: string }>(
+      `SELECT erp_id FROM master_products WHERE erp_sku = 'NOVO-ESTOQUE'`
     );
-    expect(kept.rows[0]?.bling_id).toBe('99887767');
+    expect(kept.rows[0]?.erp_id).toBe('99887767');
   });
 });

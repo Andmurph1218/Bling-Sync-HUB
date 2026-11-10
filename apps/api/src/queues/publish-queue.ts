@@ -2,7 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { env } from '../config/env.js';
 import { ListingDraft } from '../connectors/strategy/types.js';
-import { createMarketplaceConnector } from '../connectors/strategy/factory.js';
+import { getMarketplaceConnector } from '../connectors/strategy/factory.js';
 import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
 import { buildPublishPreview, checklistForChannel, PublishChannel } from '../catalog/publish-preview.js';
@@ -97,7 +97,7 @@ export async function processPublishQueueItem(
       await mark(id, 'success', DRY_RUN_LOG);
       return;
     }
-    const connector = createMarketplaceConnector(row.channel);
+    const connector = getMarketplaceConnector(row.channel);
     const draft = row.payload_json;
     if (hooks?.publish) {
       await hooks.publish(connector.id, draft);

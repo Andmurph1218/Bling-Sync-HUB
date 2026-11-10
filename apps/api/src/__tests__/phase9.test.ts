@@ -6,7 +6,7 @@ import { runAllMigrationsUp } from '../db/migrator.js';
 import {
   enqueueOrPromotePushJob,
   executePushJobById,
-} from '../engines/ape.js';
+} from '../connectors/bling/ape.js';
 import {
   ingestWebhookController,
   processWebhookEventById,
@@ -65,7 +65,7 @@ describe('Fase 9 — Motor de Push Atômico APE (Sem PUT Completo, Eco do PUT N�
 
     const prodRes = await query<{ id: string }>(
       `INSERT INTO master_products (
-         bling_id, bling_sku, name, bling_tipo, bling_formato,
+         erp_id, erp_sku, name, bling_tipo, product_format,
          ncm, ncm_status, ncm_fiscal_risk
        ) VALUES ('9001', 'GAR-FULL-ONLY', 'Garrafa Full Mercado Livre', 'P', 'S', '96170010', 'valid', false)
        RETURNING id`
@@ -74,7 +74,7 @@ describe('Fase 9 — Motor de Push Atômico APE (Sem PUT Completo, Eco do PUT N�
 
     const varRes = await query<{ id: string }>(
       `INSERT INTO product_variants (
-         master_product_id, bling_sku, is_default, bling_formato,
+         master_product_id, erp_sku, is_default, product_format,
          price, cost_price, stock, ean, ean_status, fiscal_risk_flag
        ) VALUES ($1, 'GAR-FULL-ONLY', true, 'S', 99.90, 45.00, 20, '7891234567895', 'valid', false)
        RETURNING id`,
@@ -197,7 +197,7 @@ describe('Fase 9 — Motor de Push Atômico APE (Sem PUT Completo, Eco do PUT N�
     // Produto com NCM inválido ('00000000', ncm_fiscal_risk = true) e preço (39.90) ABAIXO do custo (50.00)!
     const prodRes = await query<{ id: string }>(
       `INSERT INTO master_products (
-         bling_id, bling_sku, name, bling_tipo, bling_formato,
+         erp_id, erp_sku, name, bling_tipo, product_format,
          ncm, ncm_status, ncm_fiscal_risk, catalog_status
        ) VALUES ('9002', 'PROD-APE-BELOW-COST', 'Item Inativado com Preço Abaixo do Custo', 'P', 'S', '00000000', 'invalid', true, 'inactive')
        RETURNING id`
@@ -206,7 +206,7 @@ describe('Fase 9 — Motor de Push Atômico APE (Sem PUT Completo, Eco do PUT N�
 
     const varRes = await query<{ id: string }>(
       `INSERT INTO product_variants (
-         master_product_id, bling_sku, is_default, bling_formato,
+         master_product_id, erp_sku, is_default, product_format,
          price, cost_price, stock, net_weight, width, height, depth,
          ean, ean_status, fiscal_risk_flag, variant_status
        ) VALUES (
@@ -285,13 +285,13 @@ describe('Fase 9 — Motor de Push Atômico APE (Sem PUT Completo, Eco do PUT N�
 
   it('5. Variante sem SKU não entra na fila de envio', async () => {
     const prodRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('9002-EMPTY', '', 'Produto sem SKU', 'P', 'S')
        RETURNING id`
     );
     const masterId = prodRes.rows[0]!.id;
     const varRes = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price)
        VALUES ($1, '', true, 'S', 10)
        RETURNING id`,
       [masterId]

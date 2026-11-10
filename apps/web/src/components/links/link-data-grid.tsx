@@ -12,7 +12,7 @@ export interface CatalogLink {
   createdAt: string | null;
   sku: string;
   name: string;
-  blingId: string;
+  erpId: string;
 }
 
 const METHOD: Record<string, string> = {

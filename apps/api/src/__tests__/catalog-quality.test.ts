@@ -59,13 +59,13 @@ describe('Qualidade de dados do catálogo', () => {
     cookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie) ?? '';
 
     await query(
-      `INSERT INTO master_products (bling_id, bling_sku, name, description, ncm_status, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, description, ncm_status, bling_tipo, product_format)
        VALUES ('q-1', 'Q-OK', 'Completo', 'Descrição', 'valid', 'P', 'S'),
               ('q-2', '', 'Sem SKU; com "aspas"', NULL, 'unknown', 'P', 'S')`
     );
-    const full = await query<{ id: string }>(`SELECT id FROM master_products WHERE bling_id = 'q-1'`);
+    const full = await query<{ id: string }>(`SELECT id FROM master_products WHERE erp_id = 'q-1'`);
     await query(
-      `INSERT INTO product_variants (master_product_id, bling_variant_id, bling_sku, is_default, price, stock, gross_weight, width, height, depth)
+      `INSERT INTO product_variants (master_product_id, bling_variant_id, erp_sku, is_default, price, stock, gross_weight, width, height, depth)
        VALUES ($1, 'q-1', 'Q-OK', true, 10, 3, 0.5, 10, 10, 10)`,
       [full.rows[0]!.id]
     );
@@ -80,7 +80,7 @@ describe('Qualidade de dados do catálogo', () => {
     const response = await request(app).get('/api/catalog/quality').set('Cookie', cookie);
     expect(response.status).toBe(200);
     expect(response.body.total).toBe(2);
-    // pg-mem miscounts `bling_sku = ''` in WHERE on the indexed column; the CSV test covers the SKU gap.
+    // pg-mem miscounts `erp_sku = ''` in WHERE on the indexed column; the CSV test covers the SKU gap.
     expect(response.body.metrics).toMatchObject({ ncm: 1, stock: 1, dimensions: 1, cover: 2 });
   });
 
@@ -89,7 +89,7 @@ describe('Qualidade de dados do catálogo', () => {
     expect(report.status).toBe(200);
     expect(report.headers['content-type']).toContain('text/csv');
     const lines = report.text.replace(/^\uFEFF/, '').trim().split('\r\n');
-    expect(lines[0]).toBe('sku;bling_id;nome;pendencias');
+    expect(lines[0]).toBe('sku;erp_id;nome;pendencias');
     const noSku = lines.find((line) => line.includes('q-2'));
     expect(noSku).toContain('"Sem SKU; com ""aspas"""');
     expect(noSku).toContain('Sem SKU, ');

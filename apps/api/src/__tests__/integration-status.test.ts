@@ -2,10 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { evaluateCatalogChecklist } from '../catalog/completeness.js';
 import { describeChannelIntegration } from '../catalog/integration-status.js';
 import { instantiateConnector } from '../connectors/ipaas/connector.js';
+import { loadConnectors } from '../connectors/load.js';
 
 function checklist(overrides: Partial<Parameters<typeof evaluateCatalogChecklist>[0]> = {}) {
   return evaluateCatalogChecklist({
-    blingId: '1',
+    erpId: '1',
     sku: 'SKU-1',
     hasCoverImage: true,
     hubCategoryId: 'cat',
@@ -69,7 +70,8 @@ describe('status de integração por canal', () => {
 });
 
 describe('fábrica de conectores', () => {
-  it('só instancia Bling e Nuvemshop conectados e ignora o Mercado Livre desligado', () => {
+  it('só instancia Bling e Nuvemshop conectados e ignora o Mercado Livre desligado', async () => {
+    await loadConnectors();
     expect(instantiateConnector('bling', true)?.id).toBe('bling');
     expect(instantiateConnector('nuvemshop', true)?.id).toBe('nuvemshop');
     expect(instantiateConnector('bling', false)).toBeNull();

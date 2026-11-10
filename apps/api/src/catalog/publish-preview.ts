@@ -38,13 +38,13 @@ export async function buildPublishPreview(productId: string, channel: PublishCha
     id: string;
     name: string | null;
     brand: string | null;
-    bling_sku: string;
+    erp_sku: string;
     hub_category_id: string | null;
     price: string | null;
     stock: string | null;
     variant_id: string | null;
   }>(
-    `SELECT mp.id, mp.name, mp.brand, mp.bling_sku, mp.hub_category_id,
+    `SELECT mp.id, mp.name, mp.brand, mp.erp_sku, mp.hub_category_id,
             pv.price::text AS price, pv.stock::text AS stock, pv.id AS variant_id
      FROM master_products mp
      LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
@@ -132,7 +132,7 @@ export async function buildPublishPreview(productId: string, channel: PublishCha
     buying_mode: 'buy_it_now',
     condition: 'new',
     listing_type_id: 'gold_special',
-    seller_custom_field: isBlankSku(product.bling_sku) ? '' : product.bling_sku,
+    seller_custom_field: isBlankSku(product.erp_sku) ? '' : product.erp_sku,
     attributes: materialized.attributes,
   };
 
@@ -152,8 +152,8 @@ export async function recalculateCompleteness(ids: string[]): Promise<Array<{ id
   const items = [];
   for (const id of ids) {
     const found = await query<{
-      bling_id: string;
-      bling_sku: string | null;
+      erp_id: string;
+      erp_sku: string | null;
       ncm_status: string;
       ncm_fiscal_risk: boolean;
       hub_category_id: string | null;
@@ -161,7 +161,7 @@ export async function recalculateCompleteness(ids: string[]): Promise<Array<{ id
       ean_status: string | null;
       cover_count: number;
     }>(
-      `SELECT mp.bling_id, mp.bling_sku, mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id,
+      `SELECT mp.erp_id, mp.erp_sku, mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id,
               pv.price::text AS price, pv.ean_status,
               (
                 SELECT count(*)::int FROM product_images pi
@@ -175,8 +175,8 @@ export async function recalculateCompleteness(ids: string[]): Promise<Array<{ id
     const row = found.rows[0];
     if (!row) continue;
     const checklist = evaluateCatalogChecklist({
-      blingId: row.bling_id,
-      sku: row.bling_sku,
+      erpId: row.erp_id,
+      sku: row.erp_sku,
       hasCoverImage: Number(row.cover_count) > 0,
       hubCategoryId: row.hub_category_id,
       mappedPlatforms: [],
@@ -198,8 +198,8 @@ export async function checklistForChannel(
   channel: PublishChannel
 ): Promise<(ChecklistResult & { sku: string }) | null> {
   const found = await query<{
-    bling_id: string;
-    bling_sku: string | null;
+    erp_id: string;
+    erp_sku: string | null;
     ncm_status: string;
     ncm_fiscal_risk: boolean;
     hub_category_id: string | null;
@@ -207,7 +207,7 @@ export async function checklistForChannel(
     ean: string | null;
     ean_status: string | null;
   }>(
-    `SELECT mp.bling_id, mp.bling_sku, mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id,
+    `SELECT mp.erp_id, mp.erp_sku, mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id,
             pv.price::text AS price, pv.ean, pv.ean_status
      FROM master_products mp
      LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
@@ -274,8 +274,8 @@ export async function checklistForChannel(
     duplicate = (owners.rows[0]?.count ?? 0) > 1;
   }
   const checklist = evaluateCatalogChecklist({
-    blingId: row.bling_id,
-    sku: row.bling_sku,
+    erpId: row.erp_id,
+    sku: row.erp_sku,
     hasCoverImage: coverCount > 0,
     hubCategoryId: row.hub_category_id,
     mappedPlatforms: green ? [channel] : [],
@@ -288,5 +288,5 @@ export async function checklistForChannel(
     hasDuplicateCandidate: duplicate,
     channels: [channel],
   });
-  return { ...checklist, sku: row.bling_sku ?? '' };
+  return { ...checklist, sku: row.erp_sku ?? '' };
 }

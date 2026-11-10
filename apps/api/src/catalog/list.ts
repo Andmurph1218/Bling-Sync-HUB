@@ -23,7 +23,7 @@ export type CatalogTab =
 
 export interface CatalogListItem {
   id: string;
-  blingId: string;
+  erpId: string;
   sku: string;
   name: string | null;
   brand: string | null;
@@ -44,11 +44,11 @@ export interface CatalogListItem {
 
 interface FlagRow {
   id: string;
-  bling_id: string;
-  bling_sku: string;
+  erp_id: string;
+  erp_sku: string;
   name: string | null;
   brand: string | null;
-  bling_formato: string;
+  product_format: string;
   ncm_status: string;
   ncm_fiscal_risk: boolean;
   hub_category_id: string | null;
@@ -92,7 +92,7 @@ export function matchesCatalogTab(
 
 const ACTIVE = `mp.catalog_status = 'active'`;
 const NOT_ARCHIVED = `${ACTIVE} AND mp.archived_at IS NULL`;
-const BLANK_SKU = `(mp.bling_sku IS NULL OR mp.bling_sku = '')`;
+const BLANK_SKU = `(mp.erp_sku IS NULL OR mp.erp_sku = '')`;
 const NO_COVER = `mp.id NOT IN (SELECT master_product_id FROM product_images WHERE is_cover_eligible = true)`;
 const NO_CATEGORY = `mp.hub_category_id IS NULL`;
 const BAD_NCM = `(mp.ncm_status <> 'valid' OR mp.ncm_fiscal_risk = true)`;
@@ -201,7 +201,7 @@ export async function listCatalog(input: {
   brand: string;
   page: number;
   pageSize: number;
-  blingId?: string;
+  erpId?: string;
   gap?: string;
   collectGapSamples?: boolean;
   all?: boolean;
@@ -232,11 +232,11 @@ export async function listCatalog(input: {
     return `$${params.length}`;
   };
   const clauses = [tabSql(input.tab)];
-  if (input.blingId) clauses.push(`mp.bling_id = ${bind(input.blingId)}`);
+  if (input.erpId) clauses.push(`mp.erp_id = ${bind(input.erpId)}`);
   const sku = input.sku.trim().toLowerCase();
   const name = input.name.trim().toLowerCase();
   const brand = input.brand.trim().toLowerCase();
-  if (sku) clauses.push(`lower(mp.bling_sku) LIKE ${bind(`%${sku}%`)}`);
+  if (sku) clauses.push(`lower(mp.erp_sku) LIKE ${bind(`%${sku}%`)}`);
   if (name) clauses.push(`lower(COALESCE(mp.name, '')) LIKE ${bind(`%${name}%`)}`);
   if (brand) clauses.push(`lower(COALESCE(mp.brand, '')) LIKE ${bind(`%${brand}%`)}`);
   if (input.gap && QUALITY_GAP_SQL[input.gap]) clauses.push(QUALITY_GAP_SQL[input.gap]);
@@ -256,7 +256,7 @@ export async function listCatalog(input: {
     ean: string | null;
   }>(
     `SELECT
-       mp.id, mp.bling_id, mp.bling_sku, mp.name, mp.brand, mp.bling_formato,
+       mp.id, mp.erp_id, mp.erp_sku, mp.name, mp.brand, mp.product_format,
        mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id, mp.archived_at,
        mp.worst_score, mp.has_fiscal_risk,
        pv.price::text AS price, pv.promotional_price::text AS promotional_price,
@@ -264,7 +264,7 @@ export async function listCatalog(input: {
      FROM master_products mp
      LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
      WHERE ${where}
-     ORDER BY mp.updated_at DESC, mp.bling_sku ASC
+     ORDER BY mp.updated_at DESC, mp.erp_sku ASC
      LIMIT ${limit} OFFSET ${offset}`,
     params
   );
@@ -418,8 +418,8 @@ export async function listCatalog(input: {
     const isPublished = publishedIds.has(row.id);
     const isRejected = rejectedIds.has(row.id);
     const checklist = evaluateCatalogChecklist({
-      blingId: row.bling_id,
-      sku: row.bling_sku,
+      erpId: row.erp_id,
+      sku: row.erp_sku,
       hasCoverImage: hasCover,
       hubCategoryId: row.hub_category_id,
       mappedPlatforms: mapped,
@@ -442,8 +442,8 @@ export async function listCatalog(input: {
     const promo = num(row.promotional_price);
     const integrations = activeChannels.map((platform) => {
       const channelChecklist = evaluateCatalogChecklist({
-        blingId: row.bling_id,
-        sku: row.bling_sku,
+        erpId: row.erp_id,
+        sku: row.erp_sku,
         hasCoverImage: hasCover,
         hubCategoryId: row.hub_category_id,
         mappedPlatforms: mapped,
@@ -466,12 +466,12 @@ export async function listCatalog(input: {
     });
     return {
       id: row.id,
-      blingId: row.bling_id,
-      sku: row.bling_sku,
+      erpId: row.erp_id,
+      sku: row.erp_sku,
       name: row.name,
       brand: row.brand,
-      typeLabel: TYPE_LABEL[row.bling_formato] ?? 'Simples',
-      formato: row.bling_formato,
+      typeLabel: TYPE_LABEL[row.product_format] ?? 'Simples',
+      formato: row.product_format,
       stock: row.stock === null ? null : Math.floor(Number(row.stock)),
       price,
       promotionalPrice: promo !== null && promo > 0 ? promo : null,

@@ -34,8 +34,8 @@ matchingRouter.get(
       }
       const product = await query<{
         id: string;
-        bling_id: string;
-        bling_sku: string;
+        erp_id: string;
+        erp_sku: string;
         name: string | null;
         price: string | null;
         stock: string | null;
@@ -43,15 +43,15 @@ matchingRouter.get(
         link_status: string | null;
         listing_id: string | null;
       }>(
-        `SELECT mp.id, mp.bling_id, mp.bling_sku, mp.name,
+        `SELECT mp.id, mp.erp_id, mp.erp_sku, mp.name,
                 pv.price::text AS price, pv.stock::text AS stock, pv.ean,
                 cl.link_status, cl.listing_id
          FROM master_products mp
          LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
          LEFT JOIN channel_listing_links cl ON cl.product_id = mp.id AND cl.channel = 'mercadolivre'
          WHERE mp.catalog_status = 'active'
-           AND (mp.bling_sku = $1 OR pv.ean = $1)
-         ORDER BY CASE WHEN mp.bling_sku = $1 THEN 0 ELSE 1 END
+           AND (mp.erp_sku = $1 OR pv.ean = $1)
+         ORDER BY CASE WHEN mp.erp_sku = $1 THEN 0 ELSE 1 END
          LIMIT 1`,
         [sku]
       );
@@ -74,8 +74,8 @@ matchingRouter.get(
         hub: row
           ? {
               id: row.id,
-              blingId: row.bling_id,
-              sku: row.bling_sku || 'Sem SKU',
+              erpId: row.erp_id,
+              sku: row.erp_sku || 'Sem SKU',
               name: row.name ?? 'Sem nome',
               ean: row.ean,
               price: money(row.price),
@@ -169,14 +169,14 @@ matchingRouter.get(
           sync_status: string;
           confirmed_at: Date | null;
           last_synced_at: Date | null;
-          bling_id: string;
-          bling_sku: string | null;
+          erp_id: string;
+          erp_sku: string | null;
           name: string | null;
           price: string | null;
           platform_price: string | null;
         }>(
           `SELECT pl.id, pl.platform, pl.platform_product_id, pl.match_method, pl.sync_status,
-                  pl.confirmed_at, pl.last_synced_at, mp.bling_id, mp.bling_sku, mp.name,
+                  pl.confirmed_at, pl.last_synced_at, mp.erp_id, mp.erp_sku, mp.name,
                   pv.price::text AS price, pvl.platform_price::text AS platform_price
            FROM platform_links pl
            INNER JOIN master_products mp ON mp.id = pl.master_product_id
@@ -184,7 +184,7 @@ matchingRouter.get(
            LEFT JOIN platform_variant_links pvl
              ON pvl.platform = pl.platform AND pvl.platform_product_id = pl.platform_product_id AND pvl.variant_id = pv.id
            WHERE ${platformSql}
-             AND ($1 = '' OR lower(COALESCE(mp.bling_sku, '')) LIKE $2 OR lower(pl.platform_product_id) LIKE $2 OR lower(COALESCE(mp.name, '')) LIKE $2)
+             AND ($1 = '' OR lower(COALESCE(mp.erp_sku, '')) LIKE $2 OR lower(pl.platform_product_id) LIKE $2 OR lower(COALESCE(mp.name, '')) LIKE $2)
              AND (
                $3 = 'todos'
                OR ($3 = 'ativos' AND pl.sync_status <> 'channel_deleted')
@@ -224,9 +224,9 @@ matchingRouter.get(
           method: row.match_method,
           status: visual,
           createdAt: row.confirmed_at ?? row.last_synced_at,
-          sku: row.bling_sku || 'Sem SKU',
+          sku: row.erp_sku || 'Sem SKU',
           name: row.name ?? 'Sem nome',
-          blingId: row.bling_id,
+          erpId: row.erp_id,
         };
       });
       res.status(200).json({
@@ -253,16 +253,16 @@ matchingRouter.get(
         res.status(200).json({ items: [] });
         return;
       }
-      const rows = await query<{ id: string; bling_sku: string | null; name: string | null }>(
-        `SELECT id, bling_sku, name FROM master_products
+      const rows = await query<{ id: string; erp_sku: string | null; name: string | null }>(
+        `SELECT id, erp_sku, name FROM master_products
          WHERE catalog_status = 'active'
-           AND (lower(COALESCE(bling_sku, '')) LIKE $1 OR lower(COALESCE(name, '')) LIKE $1)
-         ORDER BY bling_sku NULLS LAST
+           AND (lower(COALESCE(erp_sku, '')) LIKE $1 OR lower(COALESCE(name, '')) LIKE $1)
+         ORDER BY erp_sku NULLS LAST
          LIMIT 8`,
         [`%${term}%`]
       );
       res.status(200).json({
-        items: rows.rows.map((row) => ({ id: row.id, sku: row.bling_sku || 'Sem SKU', name: row.name ?? 'Sem nome' })),
+        items: rows.rows.map((row) => ({ id: row.id, sku: row.erp_sku || 'Sem SKU', name: row.name ?? 'Sem nome' })),
       });
     } catch (error) {
       next(error);

@@ -119,7 +119,7 @@ export function ProblemDataGrid({
   const allSelected = groups.length > 0 && groups.every((group) => selection.groupKeys.has(group.key));
 
   const actionsFor = (group: ProblemGroup, item: ProblemItem | null, bulk: boolean) => {
-    const blingHref = item?.blingId ? buildBlingProductUrl(item.blingId) : BLING_PRODUCTS_URL;
+    const blingHref = item?.erpId ? buildBlingProductUrl(item.erpId) : BLING_PRODUCTS_URL;
     const syncBlocked = !canWrite || (isErpSyncTarget(item?.id ?? group.key) && !canSyncErp);
     return (
       <div className="flex items-center justify-end gap-1.5">
@@ -130,9 +130,9 @@ export function ProblemDataGrid({
           >
             Resolver no Fiscal
           </Link>
-        ) : group.action === 'bling' ? (
+        ) : group.action === 'erp' ? (
           <a href={blingHref} target="_blank" rel="noreferrer" className={ACTION_OUTLINE}>
-            Corrigir no Bling
+            Corrigir no ERP
             <ExternalLink className="h-3 w-3" aria-hidden="true" />
           </a>
         ) : (

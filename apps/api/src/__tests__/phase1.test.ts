@@ -54,8 +54,8 @@ describe('Fase 1 — Schema Completo (Migrations 1 a 12 sobem e descem, Seeds, �
 
   it('1. Sobe as 16 migrations em ordem e popula os seeds iniciais (eixos, aliases, limites, DLM, depósitos e lojas)', async () => {
     const applied = await runAllMigrationsUp({ stripPartitionClauseForMemDb: true });
-    expect(applied).toHaveLength(25);
-    expect(ALL_MIGRATIONS).toHaveLength(25);
+    expect(applied).toHaveLength(26);
+    expect(ALL_MIGRATIONS).toHaveLength(26);
 
     const axesCount = await query<{ count: number }>(
       `SELECT count(*)::int AS count FROM attribute_axes`
@@ -96,14 +96,14 @@ describe('Fase 1 — Schema Completo (Migrations 1 a 12 sobem e descem, Seeds, �
 
   it('2. Garante constraints críticas: uq_one_default_variant, push_jobs_active (pending vs locked) e dupla confirmação de NCM por usuários distintos', async () => {
     const prodRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('100101', 'GAR-INOX-500-PT', 'Garrafa Térmica Inox', 'P', 'S')
        RETURNING id`
     );
     const masterId = prodRes.rows[0]!.id;
 
     const varRes = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price)
        VALUES ($1, 'GAR-INOX-500-PT', true, 'S', 89.90)
        RETURNING id`,
       [masterId]
@@ -113,7 +113,7 @@ describe('Fase 1 — Schema Completo (Migrations 1 a 12 sobem e descem, Seeds, �
     // Segunda variante is_default para o mesmo produto deve falhar no índice uq_one_default_variant
     await expect(
       query(
-        `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price)
+        `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price)
          VALUES ($1, 'GAR-INOX-500-PT-DUP', true, 'S', 89.90)`,
         [masterId]
       )
@@ -207,7 +207,7 @@ describe('Fase 1 — Schema Completo (Migrations 1 a 12 sobem e descem, Seeds, �
 
     // Desce todas as 16 migrations na ordem inversa (16 -> 1)
     const reverted = await runAllMigrationsDown({ stripPartitionClauseForMemDb: true });
-    expect(reverted).toHaveLength(25);
+    expect(reverted).toHaveLength(26);
 
     const remaining = await query<{ count: number }>(
       `SELECT count(*)::int AS count FROM pgmigrations`

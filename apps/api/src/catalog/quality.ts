@@ -46,17 +46,17 @@ export async function buildQualityCsv(gap?: QualityMetricCode): Promise<string> 
   const metrics = gap ? QUALITY_METRICS.filter((metric) => metric.code === gap) : QUALITY_METRICS;
   const flags = metrics.map((metric, index) => `(${QUALITY_GAP_SQL[metric.code]}) AS gap_${index}`).join(',\n       ');
   const anyGap = metrics.map((metric) => QUALITY_GAP_SQL[metric.code]).join(' OR ');
-  const result = await query<Record<string, unknown> & { bling_sku: string | null; bling_id: string; name: string | null }>(
-    `SELECT mp.bling_sku, mp.bling_id, mp.name,
+  const result = await query<Record<string, unknown> & { erp_sku: string | null; erp_id: string; name: string | null }>(
+    `SELECT mp.erp_sku, mp.erp_id, mp.name,
        ${flags}
      FROM master_products mp
      WHERE ${QUALITY_SCOPE_SQL} AND (${anyGap})
-     ORDER BY mp.bling_sku NULLS FIRST, mp.bling_id`
+     ORDER BY mp.erp_sku NULLS FIRST, mp.erp_id`
   );
-  const lines = ['sku;bling_id;nome;pendencias'];
+  const lines = ['sku;erp_id;nome;pendencias'];
   for (const row of result.rows) {
     const missing = metrics.filter((_, index) => row[`gap_${index}`] === true).map((metric) => metric.label);
-    lines.push([row.bling_sku, row.bling_id, row.name, missing.join(', ')].map(csvCell).join(';'));
+    lines.push([row.erp_sku, row.erp_id, row.name, missing.join(', ')].map(csvCell).join(';'));
   }
   return `\uFEFF${lines.join('\r\n')}\r\n`;
 }

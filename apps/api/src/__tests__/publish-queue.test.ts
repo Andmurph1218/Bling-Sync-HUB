@@ -64,7 +64,7 @@ describe('P2 — fila de publicação', () => {
     const products = [];
     for (let index = 0; index < 3; index += 1) {
       const created = await query<{ id: string }>(
-        `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+        `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
          VALUES ($1, $2, $3, 'P', 'S')
          RETURNING id`,
         [`pub-${index}`, `PUB-${index}`, `Produto ${index}`]
@@ -111,7 +111,7 @@ describe('P2 — fila de publicação', () => {
 
   it('falha a simulação quando o canal não tem checklist', async () => {
     const created = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('pub-shopee', 'PUB-SHOPEE', 'Sem mapa', 'P', 'S')
        RETURNING id`
     );
@@ -138,7 +138,7 @@ describe('P2 — fila de publicação', () => {
 
   it('com a flag ligada chama a publicação e, desligada, não chama', async () => {
     const created = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('pub-flag', 'PUB-FLAG', 'Flag', 'P', 'S')
        RETURNING id`
     );
@@ -187,14 +187,14 @@ describe('P2 — fila de publicação', () => {
     const category = await query<{ id: string }>(`INSERT INTO hub_categories (name) VALUES ('Simulação') RETURNING id`);
     const categoryId = category.rows[0]!.id;
     const product = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, brand, bling_tipo, bling_formato, hub_category_id)
+      `INSERT INTO master_products (erp_id, erp_sku, name, brand, bling_tipo, product_format, hub_category_id)
        VALUES ('sim-1', 'SIM-1', 'Lâmpada LED', 'JHS', 'P', 'S', $1)
        RETURNING id`,
       [categoryId]
     );
     const productId = product.rows[0]!.id;
     await query(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, stock)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, stock)
        VALUES ($1, 'SIM-1', true, 'S', 19.9, 3)`,
       [productId]
     );
@@ -256,7 +256,7 @@ describe('P2 — fila de publicação', () => {
     const category = await query<{ id: string }>(`INSERT INTO hub_categories (name) VALUES ('Verde') RETURNING id`);
     const categoryId = category.rows[0]!.id;
     const product = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, brand, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, brand, bling_tipo, product_format)
        VALUES ('verde-1', 'VERDE-1', 'Produto verde', 'JHS', 'P', 'S')
        RETURNING id`
     );
@@ -268,7 +268,7 @@ describe('P2 — fila de publicação', () => {
       [productId, categoryId]
     );
     await query(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, stock)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, stock)
        VALUES ($1, 'VERDE-1', true, 'S', 10, 2)`,
       [productId]
     );
@@ -304,7 +304,7 @@ describe('P2 — fila de publicação', () => {
 
   it('agrega falha de envio, webhook e pendência de completude', async () => {
     const created = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('prob-1', 'PROB-1', 'Produto com falha', 'P', 'S')
        RETURNING id`
     );
@@ -334,7 +334,7 @@ describe('P2 — fila de publicação', () => {
     const estoque = response.body.groups.find((group: { type: string }) => group.type === 'estoque');
     expect(estoque.items).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ sku: 'PROB-1', channel: 'Bling', message: 'saldo rejeitado', source: 'webhook_events' }),
+        expect.objectContaining({ sku: 'PROB-1', channel: 'ERP', message: 'saldo rejeitado', source: 'webhook_events' }),
       ])
     );
     expect(response.body.pendencies).toEqual(

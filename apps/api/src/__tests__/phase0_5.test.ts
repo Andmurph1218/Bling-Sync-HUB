@@ -13,7 +13,7 @@ import {
   BLING_GET_PRODUCT_404_RESPONSE_FIXTURE,
   BLING_GET_PRODUCT_200_RESPONSE_FIXTURE,
   BLING_RATE_LIMIT_429_FIXTURE,
-} from '../contracts/fixtures/bling.fixtures.js';
+} from '../connectors/bling/fixtures.js';
 import {
   ML_LEGACY_VARIATIONS_ITEM_FIXTURE,
   ML_USER_PRODUCT_FAMILY_ITEMS_FIXTURE,
@@ -26,13 +26,12 @@ import {
   applyMlUptinMigration,
   classifyApiHttpError,
   computePublishableStockFromBalances,
-  mapBlingProductToCatalog,
   mapMercadoLivreListingGroup,
   mapMercadoLivreStockLocations,
   mapNuvemshopProduct,
-  resolveBlingLifecycleSignal,
   resolveVariantChannelPrice,
 } from '../contracts/mappers.js';
+import { mapBlingProductToCatalog, resolveBlingLifecycleSignal } from '../connectors/bling/mappers.js';
 
 describe('Fase 0.5 — Fixtures Sanitizados e Mappers (Simples, Variação, Kit, 429 e product.deleted)', () => {
   it('1. Mapper cobre produto simples (formato S): 1 variante is_default, mesmo SKU, stock nulo e espelho de CEST/origem', () => {
@@ -41,9 +40,9 @@ describe('Fase 0.5 — Fixtures Sanitizados e Mappers (Simples, Variação, Kit,
     if (res.kind !== 'mapped') return;
 
     const { product } = res;
-    expect(product.bling_id).toBe('100101');
-    expect(product.bling_sku).toBe('GAR-INOX-500-PT');
-    expect(product.bling_formato).toBe('S');
+    expect(product.erp_id).toBe('100101');
+    expect(product.erp_sku).toBe('GAR-INOX-500-PT');
+    expect(product.product_format).toBe('S');
     expect(product.ncm).toBe('96170010');
     expect(product.cest).toBe('2004700');
     expect(product.tax_origin).toBe(0);
@@ -53,8 +52,8 @@ describe('Fase 0.5 — Fixtures Sanitizados e Mappers (Simples, Variação, Kit,
     const v = product.variants[0]!;
     expect(v.is_default).toBe(true);
     expect(v.bling_variant_id).toBeNull();
-    expect(v.bling_sku).toBe('GAR-INOX-500-PT');
-    expect(v.bling_formato).toBe('S');
+    expect(v.erp_sku).toBe('GAR-INOX-500-PT');
+    expect(v.product_format).toBe('S');
     expect(v.stock_mode).toBeNull();
     // Regra crítica: nunca copia saldoVirtualTotal (999) do payload de produto para stock
     expect(v.stock).toBeNull();
@@ -66,7 +65,7 @@ describe('Fase 0.5 — Fixtures Sanitizados e Mappers (Simples, Variação, Kit,
     expect(resVar.kind).toBe('mapped');
     if (resVar.kind !== 'mapped') return;
 
-    expect(resVar.product.bling_formato).toBe('V');
+    expect(resVar.product.product_format).toBe('V');
     expect(resVar.product.product_axes).toEqual(['cor', 'tamanho']);
     expect(resVar.product.variants).toHaveLength(2);
     expect(resVar.product.variants.every((v) => !v.is_default)).toBe(true);
@@ -80,9 +79,9 @@ describe('Fase 0.5 — Fixtures Sanitizados e Mappers (Simples, Variação, Kit,
 
     const unitVariant = resVarKit.product.variants[0]!;
     const pairKitVariant = resVarKit.product.variants[1]!;
-    expect(unitVariant.bling_formato).toBe('S');
+    expect(unitVariant.product_format).toBe('S');
     expect(unitVariant.components).toHaveLength(0);
-    expect(pairKitVariant.bling_formato).toBe('E');
+    expect(pairKitVariant.product_format).toBe('E');
     expect(pairKitVariant.stock_mode).toBe('virtual');
     expect(pairKitVariant.components).toEqual([
       { component_bling_id: '400401', quantity: 2 },
@@ -94,11 +93,11 @@ describe('Fase 0.5 — Fixtures Sanitizados e Mappers (Simples, Variação, Kit,
     expect(resKit.kind).toBe('mapped');
     if (resKit.kind !== 'mapped') return;
 
-    expect(resKit.product.bling_formato).toBe('E');
+    expect(resKit.product.product_format).toBe('E');
     expect(resKit.product.variants).toHaveLength(1);
     const kitVar = resKit.product.variants[0]!;
     expect(kitVar.is_default).toBe(true);
-    expect(kitVar.bling_formato).toBe('E');
+    expect(kitVar.product_format).toBe('E');
     expect(kitVar.stock_mode).toBe('virtual');
     expect(kitVar.stock).toBeNull();
     expect(kitVar.components).toEqual([

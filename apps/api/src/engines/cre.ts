@@ -112,7 +112,7 @@ export async function calculateProductReadinessCre(
 
     const varsRes = await client.query<{
       id: string;
-      bling_sku: string;
+      erp_sku: string;
       price: string | number | null;
       net_weight: string | number | null;
       width: string | number | null;
@@ -123,7 +123,7 @@ export async function calculateProductReadinessCre(
       fiscal_risk_flag: boolean;
       variant_status: 'active' | 'inactive' | 'discontinued';
     }>(
-      `SELECT id, bling_sku, price, net_weight, width, height, depth,
+      `SELECT id, erp_sku, price, net_weight, width, height, depth,
               ean, ean_status, fiscal_risk_flag, variant_status
        FROM product_variants
        WHERE master_product_id = $1 AND variant_status <> 'discontinued'
@@ -258,7 +258,7 @@ export async function calculateProductReadinessCre(
       }
 
       let blingIdentification = 0;
-      if (v.bling_sku && v.bling_sku.trim().length >= 3) {
+      if (v.erp_sku && v.erp_sku.trim().length >= 3) {
         blingIdentification += 5;
       }
       const namePtsBling = Math.round((nameEval.score / 100) * 10);

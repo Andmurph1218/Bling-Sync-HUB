@@ -102,7 +102,7 @@ async function applyCover(productId: string, url: string): Promise<void> {
   await query(
     `INSERT INTO product_images (
        master_product_id, source_url, url_normalized, source_platform, is_cover_eligible, rights_status
-     ) VALUES ($1, $2, $2, 'bling', true, 'owned')
+     ) VALUES ($1, $2, $2, 'erp', true, 'owned')
      ON CONFLICT (master_product_id, url_normalized)
      DO UPDATE SET is_cover_eligible = true, updated_at = now()`,
     [productId, url]
@@ -153,7 +153,7 @@ export async function importCatalogWorkbook(
     const sku = cellText(row.getCell(skuColumn).value);
     if (!sku) continue;
     const product = await query<{ id: string }>(
-      `SELECT id FROM master_products WHERE bling_sku = $1 AND catalog_status = 'active' LIMIT 1`,
+      `SELECT id FROM master_products WHERE erp_sku = $1 AND catalog_status = 'active' LIMIT 1`,
       [sku]
     );
     if (!product.rows[0]) {
@@ -168,7 +168,7 @@ export async function importCatalogWorkbook(
       continue;
     }
     if (imageUrl) await applyCover(productId, imageUrl);
-    await applyBlingFields(productId, row, { nameColumn, descriptionColumn, categoryColumn });
+    await applyErpFields(productId, row, { nameColumn, descriptionColumn, categoryColumn });
     const activeChannels = channelColumns.filter((column) => MERCADO_LIVRE_ACTIVE || column.platform === 'nuvemshop');
     await applyEmptyChannelFields(productId, row, columns, activeChannels);
     const notes = [
@@ -185,7 +185,7 @@ export async function importCatalogWorkbook(
   };
 }
 
-async function applyBlingFields(
+async function applyErpFields(
   productId: string,
   row: ExcelJS.Row,
   columns: { nameColumn?: number; descriptionColumn?: number; categoryColumn?: number }

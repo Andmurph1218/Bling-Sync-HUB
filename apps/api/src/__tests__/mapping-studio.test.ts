@@ -84,7 +84,7 @@ describe('Estúdio de mapeamento no banco', () => {
     const setCookie = login.headers['set-cookie'];
     cookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie) ?? '';
     await query(
-      `INSERT INTO master_products (bling_id, bling_sku, name, brand, category, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, brand, category, bling_tipo, product_format)
        VALUES ('map-1', 'MAP-1', 'Lâmpada', 'Philips', 'Elétrica > Lâmpadas', 'P', 'S')`
     );
   });
@@ -112,12 +112,12 @@ describe('Estúdio de mapeamento no banco', () => {
     const hubCategoryId = saved.body.saved[0];
 
     const product = await query<{ hub_category_id: string }>(
-      `SELECT hub_category_id FROM master_products WHERE bling_id = 'map-1'`
+      `SELECT hub_category_id FROM master_products WHERE erp_id = 'map-1'`
     );
     expect(product.rows[0]?.hub_category_id).toBe(hubCategoryId);
     const verified = await query<{ channel_category_id: string; is_verified: boolean }>(
       `SELECT channel_category_id, is_verified FROM product_category_mappings WHERE master_product_id = (
-         SELECT id FROM master_products WHERE bling_id = 'map-1'
+         SELECT id FROM master_products WHERE erp_id = 'map-1'
        )`
     );
     expect(verified.rows[0]).toMatchObject({ channel_category_id: 'ns-cat-lamps', is_verified: true });

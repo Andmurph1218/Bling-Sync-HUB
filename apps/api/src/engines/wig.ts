@@ -434,7 +434,7 @@ async function processBlingWebhookInsideLock(evt: {
       await client.query(
         `UPDATE master_products
          SET catalog_status = 'inactive', status_changed_at = now(), updated_at = now()
-         WHERE bling_id = $1`,
+         WHERE erp_id = $1`,
         [evt.resource_id]
       );
       await markWebhookIgnored(client, evt, 'service');
@@ -455,7 +455,7 @@ async function processBlingWebhookInsideLock(evt: {
       const hubWritesRes = await client.query<{ changed_fields: string[] }>(
         `SELECT changed_fields
          FROM hub_writes
-         WHERE bling_id = $1
+         WHERE erp_id = $1
          ORDER BY written_at DESC
          LIMIT 5`,
         [evt.resource_id]
@@ -538,10 +538,10 @@ async function processBlingWebhookInsideLock(evt: {
       );
     }
 
-    // 4. Localiza ou faz upsert do master_product pelo bling_id (updated que chega antes do created faz upsert - Seção 10.2)
+    // 4. Localiza ou faz upsert do master_product pelo erp_id (updated que chega antes do created faz upsert - Seção 10.2)
     let masterProductId: string | null = null;
     const prodRes = await client.query<{ id: string }>(
-      `SELECT id FROM master_products WHERE bling_id = $1 FOR UPDATE`,
+      `SELECT id FROM master_products WHERE erp_id = $1 FOR UPDATE`,
       [evt.resource_id]
     );
 
@@ -555,7 +555,7 @@ async function processBlingWebhookInsideLock(evt: {
       const name = data.nome ? String(data.nome) : null;
       const insProd = await client.query<{ id: string }>(
         `INSERT INTO master_products (
-           bling_id, bling_sku, name, bling_tipo, bling_formato, last_bling_snapshot, last_bling_sync
+           erp_id, erp_sku, name, bling_tipo, product_format, last_bling_snapshot, last_bling_sync
          ) VALUES ($1, $2, $3, 'P', 'S', $4, now())
          RETURNING id`,
         [evt.resource_id, sku, name, JSON.stringify(data)]
@@ -563,7 +563,7 @@ async function processBlingWebhookInsideLock(evt: {
       masterProductId = insProd.rows[0]!.id;
 
       await client.query(
-        `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, stock)
+        `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, stock)
          VALUES ($1, $2, true, 'S', $3, NULL)`,
         [masterProductId, sku, data.preco ? Number(data.preco) : 0]
       );

@@ -3,7 +3,7 @@ import { isBlankSku } from './blank-sku.js';
 export type CatalogChannel = 'mercadolivre' | 'nuvemshop';
 
 export interface ChecklistInput {
-  blingId: string;
+  erpId: string;
   sku: string | null;
   hasCoverImage: boolean;
   hubCategoryId: string | null;
@@ -42,7 +42,7 @@ function hasAll(platforms: CatalogChannel[], required: CatalogChannel[]): boolea
 
 export function evaluateCatalogChecklist(input: ChecklistInput): ChecklistResult {
   const required = input.channels?.length ? input.channels : ACTIVE_CHANNELS;
-  const ficha = `/catalogo/${encodeURIComponent(input.blingId)}`;
+  const ficha = `/catalogo/${encodeURIComponent(input.erpId)}`;
   const items: ChecklistItem[] = [
     {
       code: 'sku',

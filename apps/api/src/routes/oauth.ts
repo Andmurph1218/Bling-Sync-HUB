@@ -4,7 +4,8 @@ import dotenv from 'dotenv';
 import { Router, Request, Response, NextFunction } from 'express';
 import { query } from '../db/pool.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
-import { sharedBlingRateLimiter } from '../connectors/bling-rate-limiter.js';
+import { loadConnectors } from '../connectors/load.js';
+import { rateLimiter } from '../connectors/rate-limit-port.js';
 import { getPublicBaseUrl as readPublicBaseUrl } from '../config/public-url.js';
 import { loadAppCredentials } from '../connectors/app-credentials.js';
 
@@ -210,7 +211,8 @@ export async function discoverBlingWarehousesAndStores(): Promise<{
   );
 
   const fetchBlingJson = async <T>(path: string): Promise<T> => {
-    return sharedBlingRateLimiter.schedule('webhook_p1_push_stock', async () => {
+    await loadConnectors();
+    return rateLimiter().schedule('webhook_p1_push_stock', async () => {
       const res = await fetch(`https://api.bling.com.br/Api/v3${path}`, {
         method: 'GET',
         headers: {

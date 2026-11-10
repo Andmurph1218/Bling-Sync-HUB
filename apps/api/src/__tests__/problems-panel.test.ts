@@ -71,12 +71,12 @@ describe('Painel de exceções agrupado', () => {
 
     for (let index = 0; index < 120; index += 1) {
       await query(
-        `INSERT INTO master_products (bling_id, bling_sku, name, ncm_status, bling_tipo, bling_formato)
+        `INSERT INTO master_products (erp_id, erp_sku, name, ncm_status, bling_tipo, product_format)
          VALUES ($1, $2, $3, 'unknown', 'P', 'S')`,
         [`pp-${index}`, `PP-${String(index).padStart(3, '0')}`, `Produto ${index}`]
       );
     }
-    const first = await query<{ id: string }>(`SELECT id FROM master_products WHERE bling_id = 'pp-0'`);
+    const first = await query<{ id: string }>(`SELECT id FROM master_products WHERE erp_id = 'pp-0'`);
     for (let index = 0; index < 3; index += 1) {
       await query(
         `INSERT INTO publish_queue (product_id, channel, status, payload_json, error_message)
@@ -101,7 +101,7 @@ describe('Painel de exceções agrupado', () => {
     const stock = body.groups.find((group) => group.key === 'gap:stock');
     expect(stock).toMatchObject({ count: 120, severity: 'critico', type: 'estoque', action: 'reprocess' });
     expect(stock?.groupMessage).toBe('120 produtos aguardando leitura de estoque do ERP');
-    expect(body.groups.find((group) => group.key === 'gap:ncm')).toMatchObject({ count: 120, action: 'bling' });
+    expect(body.groups.find((group) => group.key === 'gap:ncm')).toMatchObject({ count: 120, action: 'fiscal' });
 
     const publish = body.groups.filter((group) => group.source === 'publish_queue');
     expect(publish).toHaveLength(1);
@@ -143,7 +143,7 @@ describe('Painel de exceções agrupado', () => {
       .send({ groupKeys: [publish.key], itemIds: [] });
     expect(csv.status).toBe(200);
     const lines = csv.text.replace(/^\uFEFF/, '').trim().split('\r\n');
-    expect(lines[0]).toBe('gravidade;tipo;canal;sku;bling_id;produto;mensagem;data');
+    expect(lines[0]).toBe('gravidade;tipo;canal;sku;erp_id;produto;mensagem;data');
     expect(lines).toHaveLength(4);
     expect(lines[1]).toContain('Erro;Publicação;Nuvemshop;PP-000');
   });

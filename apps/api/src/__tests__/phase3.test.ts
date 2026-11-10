@@ -126,7 +126,7 @@ describe('Fase 3 — Motores Fiscais Puros GVE (GS1 + duplicate) e NVE (NCM 0000
 
   it('2. GVE: EAN válido repetido entre variantes não descontinuadas do mesmo produto marca duplicate apenas nelas, não abre fila e sai quando uma variante é descontinuada', async () => {
     const prodRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('3001', 'PROD-DUP-EAN', 'Produto Grade com EAN Repetido', 'P', 'V')
        RETURNING id`
     );
@@ -134,19 +134,19 @@ describe('Fase 3 — Motores Fiscais Puros GVE (GS1 + duplicate) e NVE (NCM 0000
 
     // V1 e V2 carregam o mesmo EAN válido 7891000100011; V3 carrega outro EAN válido 7891000100028
     const v1Res = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_variant_id, bling_sku, is_default, bling_formato, price, ean)
+      `INSERT INTO product_variants (master_product_id, bling_variant_id, erp_sku, is_default, product_format, price, ean)
        VALUES ($1, '3001-1', 'SKU-V1', false, 'S', 59.90, '7891000100011')
        RETURNING id`,
       [masterId]
     );
     const v2Res = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_variant_id, bling_sku, is_default, bling_formato, price, ean)
+      `INSERT INTO product_variants (master_product_id, bling_variant_id, erp_sku, is_default, product_format, price, ean)
        VALUES ($1, '3001-2', 'SKU-V2', false, 'S', 59.90, '7891000100011')
        RETURNING id`,
       [masterId]
     );
     const v3Res = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_variant_id, bling_sku, is_default, bling_formato, price, ean)
+      `INSERT INTO product_variants (master_product_id, bling_variant_id, erp_sku, is_default, product_format, price, ean)
        VALUES ($1, '3001-3', 'SKU-V3', false, 'S', 64.90, '7891000100028')
        RETURNING id`,
       [masterId]
@@ -214,14 +214,14 @@ describe('Fase 3 — Motores Fiscais Puros GVE (GS1 + duplicate) e NVE (NCM 0000
 
   it('3. GVE: Bling vazio e externo válido vai para ean_pending_validation sem auto-preencher o Bling', async () => {
     const prodRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('3002', 'PROD-EMPTY-EAN', 'Produto Sem EAN no Bling', 'P', 'S')
        RETURNING id`
     );
     const masterId = prodRes.rows[0]!.id;
 
     const varRes = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, ean)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, ean)
        VALUES ($1, 'PROD-EMPTY-EAN', true, 'S', 49.90, NULL)
        RETURNING id`,
       [masterId]
@@ -259,20 +259,20 @@ describe('Fase 3 — Motores Fiscais Puros GVE (GS1 + duplicate) e NVE (NCM 0000
 
   it('4. NVE: NCM em conflito entre variantes marca conflict no pai, não gera sugestão e sai de conflict mantendo risco se o pai for inválido', async () => {
     const prodRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato, ncm)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format, ncm)
        VALUES ('3003', 'PROD-CONFLICT-NCM', 'Produto com Conflito de NCM entre Variantes', 'P', 'V', '00000000')
        RETURNING id`
     );
     const masterId = prodRes.rows[0]!.id;
 
     const v1Res = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_variant_id, bling_sku, is_default, bling_formato, price)
+      `INSERT INTO product_variants (master_product_id, bling_variant_id, erp_sku, is_default, product_format, price)
        VALUES ($1, '3003-1', 'SKU-NCM-1', false, 'S', 79.90)
        RETURNING id`,
       [masterId]
     );
     const v2Res = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_variant_id, bling_sku, is_default, bling_formato, price)
+      `INSERT INTO product_variants (master_product_id, bling_variant_id, erp_sku, is_default, product_format, price)
        VALUES ($1, '3003-2', 'SKU-NCM-2', false, 'S', 79.90)
        RETURNING id`,
       [masterId]
@@ -327,14 +327,14 @@ describe('Fase 3 — Motores Fiscais Puros GVE (GS1 + duplicate) e NVE (NCM 0000
 
   it('5. NVE: Sugestão quando Bling está vazio exige dupla confirmação por 2 usuários fiscal_approver distintos com nota de TIPI e grava ncm_audit_log', async () => {
     const prodRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato, ncm)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format, ncm)
        VALUES ('3004', 'PROD-SUGGEST-NCM', 'Garrafa Sem NCM no Bling', 'P', 'S', NULL)
        RETURNING id`
     );
     const masterId = prodRes.rows[0]!.id;
 
     await query(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price)
        VALUES ($1, 'PROD-SUGGEST-NCM', true, 'S', 89.90)`,
       [masterId]
     );

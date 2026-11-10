@@ -1,5 +1,6 @@
 import { MERCADO_LIVRE_ACTIVE } from '../../config/channels.js';
 import { query } from '../../db/pool.js';
+import { createErpConnector, createMarketplaceConnector, DEFAULT_ERP_ID } from '../strategy/factory.js';
 
 export interface ReadinessRequirement {
   code: string;
@@ -31,8 +32,8 @@ const MARKETPLACE_REQUIREMENTS: ReadinessRequirement[] = [
 ];
 
 /** ERP de origem. A publicação no marketplace não passa por aqui. */
-export class BlingConnector implements IConnector {
-  readonly id = 'bling';
+export class RegisteredErpConnector implements IConnector {
+  readonly id = DEFAULT_ERP_ID;
   readonly kind = 'erp' as const;
 
   public async getProducts(): Promise<{ source: string; items: unknown[] }> {
@@ -78,12 +79,31 @@ export class NuvemshopConnector implements IConnector {
   }
 }
 
+const ADAPTERS: Record<string, () => IConnector> = {
+  [DEFAULT_ERP_ID]: () => new RegisteredErpConnector(),
+  nuvemshop: () => new NuvemshopConnector(),
+};
+
+function isRegistered(provider: string): boolean {
+  try {
+    createErpConnector(provider);
+    return true;
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.startsWith('erp_not_registered')) throw error;
+  }
+  try {
+    createMarketplaceConnector(provider);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function instantiateConnector(provider: string, connected: boolean): IConnector | null {
-  if (!connected) return null;
+  if (!connected || !isRegistered(provider)) return null;
   if (provider === 'mercadolivre' && !MERCADO_LIVRE_ACTIVE) return null;
-  if (provider === 'bling') return new BlingConnector();
-  if (provider === 'nuvemshop') return new NuvemshopConnector();
-  return null;
+  const adapter = ADAPTERS[provider];
+  return adapter ? adapter() : null;
 }
 
 export class ConnectorFactory {

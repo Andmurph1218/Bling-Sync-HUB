@@ -13,7 +13,7 @@
 
 import { getPool, query } from '../db/pool.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
-import { sharedBlingRateLimiter } from '../connectors/bling-rate-limiter.js';
+import { sharedBlingRateLimiter } from '../connectors/bling/rate-limiter.js';
 import { refreshBlingTokenViaHttp } from '../routes/oauth.js';
 import {
   runFullProductCatalogPipeline,
@@ -29,7 +29,7 @@ import {
 import {
   BlingProductPayload,
   BlingStockBalanceItem,
-} from '../contracts/fixtures/bling.fixtures.js';
+} from '../connectors/bling/fixtures.js';
 import {
   MlAttributePayload,
   MlItemPayload,
@@ -67,7 +67,7 @@ const neverRefresh = async (): Promise<never> => {
 };
 
 interface ProductRunRecord {
-  blingId: string;
+  erpId: string;
   sku: string;
   name: string;
   masterProductId: string;
@@ -355,7 +355,7 @@ async function runShadowSync(): Promise<void> {
     }
   }
 
-  // Mapa blingId -> sku (pai + variações)
+  // Mapa erpId -> sku (pai + variações)
   const blingIdToSku = new Map<string, string>();
   const allProductIds = new Set<string>();
   for (const p of payloads) {
@@ -439,7 +439,7 @@ async function runShadowSync(): Promise<void> {
 
     try {
       const report = await runFullProductCatalogPipeline({
-        blingPayload: payload,
+        inboundPayload: payload,
         stockBalancesBySku,
         storePricesBySku: Object.fromEntries(
           Object.entries(storePricesBySku).filter(([sku]) =>
@@ -455,7 +455,7 @@ async function runShadowSync(): Promise<void> {
       }
       summary.bling.stockBalancesApplied += Object.keys(stockBalancesBySku).length;
       productRuns.push({
-        blingId: String(payload.id),
+        erpId: String(payload.id),
         sku: payload.codigo,
         name: payload.nome,
         masterProductId: report.masterProductId,
@@ -466,7 +466,7 @@ async function runShadowSync(): Promise<void> {
       const msg = err instanceof Error ? err.message : String(err);
       summary.errors.push(`pipeline produto ${payload.codigo}: ${msg}`);
       productRuns.push({
-        blingId: String(payload.id),
+        erpId: String(payload.id),
         sku: payload.codigo,
         name: payload.nome,
         masterProductId: '',

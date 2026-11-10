@@ -77,8 +77,8 @@ export function translateMatchingSignal(rawSignal: string): TranslatedSignal {
   };
 }
 
-export function buildBlingProductUrl(blingId: string): string {
-  return `https://www.bling.com.br/produtos.php#edit/${encodeURIComponent(blingId)}`;
+export function buildBlingProductUrl(erpId: string): string {
+  return `https://www.bling.com.br/produtos.php#edit/${encodeURIComponent(erpId)}`;
 }
 
 export function buildChannelAnnouncementUrl(

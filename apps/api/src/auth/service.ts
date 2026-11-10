@@ -45,27 +45,33 @@ export async function createUser(input: CreateUserInput): Promise<{
 
   return withTransaction(async (client: PoolClient) => {
     const userRes = await client.query<{ id: string; email: string; name: string }>(
-      `INSERT INTO users (email, name, password_hash, is_active, must_change_password, invite_accepted_at)
-       VALUES ($1, $2, $3, true, $4, CASE WHEN $5 THEN NULL ELSE now() END)
+      `INSERT INTO users (email, name, password_hash, is_active, must_change_password)
+       VALUES ($1, $2, $3, true, $4)
        RETURNING id, email, name`,
-      [normalizedEmail, input.name.trim(), passwordHash, input.mustChangePassword === true, input.invitePending === true]
+      [normalizedEmail, input.name.trim(), passwordHash, input.mustChangePassword === true]
     );
     const created = userRes.rows[0];
     if (!created) {
       throw new Error('Falha ao inserir usuário');
     }
 
+    if (await columnExists(client, 'users', 'invite_accepted_at') && input.invitePending !== true) {
+      await client.query(`UPDATE users SET invite_accepted_at = now() WHERE id = $1`, [created.id]);
+    }
+    const grants = await tableExists(client, 'access_roles');
     for (const role of uniqueRoles) {
       await client.query(
         `INSERT INTO user_roles (user_id, role) VALUES ($1, $2)`,
         [created.id, role]
       );
-      await client.query(
-        `INSERT INTO user_access_roles (user_id, role_id)
-         SELECT $1, id FROM access_roles WHERE slug = $2
-         ON CONFLICT DO NOTHING`,
-        [created.id, role]
-      );
+      if (grants) {
+        await client.query(
+          `INSERT INTO user_access_roles (user_id, role_id)
+           SELECT $1, id FROM access_roles WHERE slug = $2
+           ON CONFLICT DO NOTHING`,
+          [created.id, role]
+        );
+      }
     }
 
     return {
@@ -91,7 +97,7 @@ export async function authenticateUser(
     must_change_password: boolean;
     mfa_enabled: boolean;
   }>(
-    `SELECT id, email, name, password_hash, is_active, must_change_password, mfa_enabled
+    `SELECT id, email, name, password_hash, is_active, must_change_password, ${await mfaColumn()}
      FROM users
      WHERE email = $1`,
     [normalizedEmail]
@@ -130,8 +136,7 @@ export async function authenticateUser(
     return { mfaRequired: true, ticket, expiresAt };
   }
 
-  const hoursRes = await query<{ session_hours: number }>(`SELECT session_hours FROM tenant_settings WHERE id = 1`);
-  const hours = hoursRes.rows[0]?.session_hours || env.SESSION_TTL_HOURS;
+  const hours = await sessionHours();
   const opaqueToken = generateSessionToken();
   const tokenHash = hashSessionToken(opaqueToken);
   const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000);
@@ -189,7 +194,7 @@ export async function resolveSessionByToken(
        u.name,
        u.is_active,
        u.must_change_password,
-       u.mfa_enabled,
+       ${await mfaColumn()},
        s.expires_at
      FROM sessions s
      INNER JOIN users u ON u.id = s.user_id
@@ -227,7 +232,30 @@ export async function resolveSessionByToken(
   };
 }
 
+async function tableExists(client: PoolClient | null, name: string): Promise<boolean> {
+  const sql = `SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1`;
+  const res = client ? await client.query(sql, [name]) : await query(sql, [name]);
+  return (res.rowCount ?? 0) > 0;
+}
+
+async function columnExists(client: PoolClient | null, table: string, column: string): Promise<boolean> {
+  const sql = `SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2`;
+  const res = client ? await client.query(sql, [table, column]) : await query(sql, [table, column]);
+  return (res.rowCount ?? 0) > 0;
+}
+
+async function mfaColumn(): Promise<string> {
+  return (await columnExists(null, 'users', 'mfa_enabled')) ? 'mfa_enabled' : 'false AS mfa_enabled';
+}
+
+async function sessionHours(): Promise<number> {
+  if (!(await tableExists(null, 'tenant_settings'))) return env.SESSION_TTL_HOURS;
+  const hoursRes = await query<{ session_hours: number }>(`SELECT session_hours FROM tenant_settings WHERE id = 1`);
+  return hoursRes.rows[0]?.session_hours || env.SESSION_TTL_HOURS;
+}
+
 async function loadPermissions(userId: string, roles: readonly string[]): Promise<string[]> {
+  if (!(await tableExists(null, 'user_access_roles'))) return permissionsFor(roles);
   const granted = await query<{ permission: string }>(
     `SELECT arp.permission
      FROM user_access_roles uar
@@ -279,8 +307,7 @@ export async function completeMfaLogin(ticket: string, code: string): Promise<Lo
 }
 
 async function openSession(userId: string): Promise<{ id: string; token: string; expiresAt: Date }> {
-  const hoursRes = await query<{ session_hours: number }>(`SELECT session_hours FROM tenant_settings WHERE id = 1`);
-  const hours = hoursRes.rows[0]?.session_hours || env.SESSION_TTL_HOURS;
+  const hours = await sessionHours();
   const opaqueToken = generateSessionToken();
   const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000);
   const sessionRes = await query<{ id: string }>(

@@ -211,8 +211,8 @@ dashboardRouter.get(
         ),
         query<{
           id: string;
-          bling_id: string;
-          bling_sku: string;
+          erp_id: string;
+          erp_sku: string;
           name: string | null;
           brand: string | null;
           ncm: string | null;
@@ -235,8 +235,8 @@ dashboardRouter.get(
         }>(
           `SELECT
              mp.id,
-             mp.bling_id,
-             mp.bling_sku,
+             mp.erp_id,
+             mp.erp_sku,
              mp.name,
              mp.brand,
              mp.ncm,
@@ -265,7 +265,7 @@ dashboardRouter.get(
         query<{ count: number }>(
           `SELECT count(*)::int AS count
            FROM master_products
-           WHERE catalog_status = 'active' AND bling_sku = ''`
+           WHERE catalog_status = 'active' AND erp_sku = ''`
         ),
       ]);
 
@@ -397,7 +397,7 @@ dashboardRouter.get(
 interface SuggestedMatch {
   master_product_id: string;
   name?: string;
-  bling_sku?: string;
+  erp_sku?: string;
   score?: number;
   strongSignals?: string[];
   auxiliarySignals?: string[];
@@ -545,14 +545,14 @@ dashboardRouter.get(
         candidateIds.size > 0
           ? await query<{
               id: string;
-              bling_id: string;
-              bling_sku: string;
+              erp_id: string;
+              erp_sku: string;
               name: string | null;
               catalog_status: string;
               ean: string | null;
               price: string | null;
             }>(
-              `SELECT mp.id, mp.bling_id, mp.bling_sku, mp.name, mp.catalog_status,
+              `SELECT mp.id, mp.erp_id, mp.erp_sku, mp.name, mp.catalog_status,
                       pv.ean, pv.price::text AS price
                FROM master_products mp
                LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
@@ -587,8 +587,8 @@ dashboardRouter.get(
           candidate: suggestion
             ? {
                 masterProductId: suggestion.master_product_id,
-                blingId: product?.bling_id ?? null,
-                blingSku: product?.bling_sku ?? suggestion.bling_sku ?? '',
+                erpId: product?.erp_id ?? null,
+                erpSku: product?.erp_sku ?? suggestion.erp_sku ?? '',
                 name: product?.name ?? suggestion.name ?? null,
                 ean: product?.ean ?? null,
                 price: product?.price ?? null,
@@ -749,14 +749,14 @@ dashboardRouter.get(
         pendingRes.rows.length > 0
           ? await query<{
               id: string;
-              bling_id: string;
+              erp_id: string;
               product_name: string | null;
               variant_sku: string;
               current_ean: string | null;
               ean_status: string;
             }>(
-              `SELECT epv.id, mp.bling_id, mp.name AS product_name,
-                      pv.bling_sku AS variant_sku, pv.ean AS current_ean, pv.ean_status
+              `SELECT epv.id, mp.erp_id, mp.name AS product_name,
+                      pv.erp_sku AS variant_sku, pv.ean AS current_ean, pv.ean_status
                FROM ean_pending_validation epv
                INNER JOIN product_variants pv ON pv.id = epv.variant_id
                INNER JOIN master_products mp ON mp.id = epv.master_product_id
@@ -771,7 +771,7 @@ dashboardRouter.get(
         const gs1 = validateGs1Gtin(r.proposed_ean);
         return {
           id: r.id,
-          blingId: d?.bling_id ?? null,
+          erpId: d?.erp_id ?? null,
           productName: d?.product_name ?? null,
           variantSku: d?.variant_sku ?? null,
           currentEan: d?.current_ean ?? null,
@@ -984,12 +984,12 @@ dashboardRouter.get(
       ];
       const [productsRes, reviewersRes] = await Promise.all([
         productIds.length > 0
-          ? query<{ id: string; bling_id: string; bling_sku: string; name: string | null; ncm: string | null }>(
-              `SELECT id, bling_id, bling_sku, name, ncm FROM master_products
+          ? query<{ id: string; erp_id: string; erp_sku: string; name: string | null; ncm: string | null }>(
+              `SELECT id, erp_id, erp_sku, name, ncm FROM master_products
                WHERE id IN (${productIds.map((_, i) => `$${i + 1}`).join(', ')})`,
               productIds
             )
-          : Promise.resolve({ rows: [] as Array<{ id: string; bling_id: string; bling_sku: string; name: string | null; ncm: string | null }> }),
+          : Promise.resolve({ rows: [] as Array<{ id: string; erp_id: string; erp_sku: string; name: string | null; ncm: string | null }> }),
         reviewerIds.length > 0
           ? query<{ id: string; name: string; email: string }>(
               `SELECT id, name, email FROM users
@@ -1011,8 +1011,8 @@ dashboardRouter.get(
         return {
           id: s.id,
           productId: s.master_product_id,
-          blingId: p?.bling_id ?? null,
-          sku: p?.bling_sku ?? null,
+          erpId: p?.erp_id ?? null,
+          sku: p?.erp_sku ?? null,
           productName: p?.name ?? null,
           currentNcm: p?.ncm ?? null,
           proposedNcm: s.proposed_ncm,
@@ -1031,7 +1031,7 @@ dashboardRouter.get(
         return {
           ...row,
           createdAt: new Date(row.created_at).toISOString(),
-          sku: product?.bling_sku ?? null,
+          sku: product?.erp_sku ?? null,
           productName: product?.name ?? null,
           firstReviewerName: first?.name ?? null,
           secondReviewerName: second?.name ?? null,
@@ -1634,12 +1634,12 @@ dashboardRouter.get(
           proposed_ean: string;
           source_platform: string;
           created_at: Date | string;
-          bling_sku: string;
-          bling_id: string;
+          erp_sku: string;
+          erp_id: string;
           name: string | null;
         }>(
           `SELECT epv.id, epv.proposed_ean, epv.source_platform, epv.created_at,
-                  mp.bling_sku, mp.bling_id, mp.name
+                  mp.erp_sku, mp.erp_id, mp.name
            FROM ean_pending_validation epv
            INNER JOIN master_products mp ON mp.id = epv.master_product_id
            WHERE epv.status = 'pending'
@@ -1648,12 +1648,12 @@ dashboardRouter.get(
         ),
         query<{
           variant_id: string;
-          bling_sku: string;
-          bling_id: string;
+          erp_sku: string;
+          erp_id: string;
           name: string | null;
           updated_at: Date | string;
         }>(
-          `SELECT pv.id AS variant_id, mp.bling_sku, mp.bling_id, mp.name, pv.updated_at
+          `SELECT pv.id AS variant_id, mp.erp_sku, mp.erp_id, mp.name, pv.updated_at
            FROM product_variants pv
            INNER JOIN master_products mp ON mp.id = pv.master_product_id
            WHERE pv.is_active = true AND (pv.ean IS NULL OR pv.ean = '' OR pv.ean_status <> 'valid')
@@ -1666,12 +1666,12 @@ dashboardRouter.get(
           source_platform: string;
           status: string;
           created_at: Date | string;
-          bling_sku: string;
-          bling_id: string;
+          erp_sku: string;
+          erp_id: string;
           name: string | null;
         }>(
           `SELECT nms.id, nms.proposed_ncm, nms.source_platform, nms.status, nms.created_at,
-                  mp.bling_sku, mp.bling_id, mp.name
+                  mp.erp_sku, mp.erp_id, mp.name
            FROM ncm_manual_suggestions nms
            INNER JOIN master_products mp ON mp.id = nms.master_product_id
            WHERE nms.status IN ('pending_first', 'pending_second')
@@ -1679,15 +1679,15 @@ dashboardRouter.get(
            LIMIT 10`
         ),
         query<{
-          bling_id: string;
-          bling_sku: string;
+          erp_id: string;
+          erp_sku: string;
           name: string | null;
           score_ml: number;
           score_ns: number;
           blockers: string[];
           calculated_at: Date | string;
         }>(
-          `SELECT mp.bling_id, mp.bling_sku, mp.name, crs.score_ml, crs.score_ns,
+          `SELECT mp.erp_id, mp.erp_sku, mp.name, crs.score_ml, crs.score_ns,
                   crs.blockers, crs.calculated_at
            FROM channel_readiness_scores crs
            INNER JOIN master_products mp ON mp.id = crs.master_product_id
@@ -1720,9 +1720,9 @@ dashboardRouter.get(
           id: `ean-miss-${m.variant_id}`,
           category: 'ean_ausente_divergente',
           categoryLabel: 'EAN ausente ou divergente',
-          sku: m.bling_sku || `(Sem SKU · #${m.bling_id})`,
-          productId: m.bling_id,
-          productName: m.name ?? `Produto Bling #${m.bling_id}`,
+          sku: m.erp_sku || `(Sem SKU · #${m.erp_id})`,
+          productId: m.erp_id,
+          productName: m.name ?? `Produto Bling #${m.erp_id}`,
           channel: 'Bling ERP',
           createdAt: new Date(m.updated_at).toLocaleString('pt-BR'),
           reasonPlain:
@@ -1742,9 +1742,9 @@ dashboardRouter.get(
           id: `ean-pend-${ean.id}`,
           category: 'ean_ausente_divergente',
           categoryLabel: 'EAN ausente ou divergente',
-          sku: ean.bling_sku || `(Sem SKU · #${ean.bling_id})`,
-          productId: ean.bling_id,
-          productName: ean.name ?? `Produto #${ean.bling_id}`,
+          sku: ean.erp_sku || `(Sem SKU · #${ean.erp_id})`,
+          productId: ean.erp_id,
+          productName: ean.name ?? `Produto #${ean.erp_id}`,
           channel: ean.source_platform === 'mercadolivre' ? 'Mercado Livre' : 'Nuvemshop',
           createdAt: new Date(ean.created_at).toLocaleString('pt-BR'),
           reasonPlain: `EAN ${ean.proposed_ean} sugerido pelo canal aguarda aprovação humana antes de gravar no Bling.`,
@@ -1762,9 +1762,9 @@ dashboardRouter.get(
           id: `ncm-${ncm.id}`,
           category: 'ncm_divergente',
           categoryLabel: 'NCM divergente',
-          sku: ncm.bling_sku || `(Sem SKU · #${ncm.bling_id})`,
-          productId: ncm.bling_id,
-          productName: ncm.name ?? `Produto #${ncm.bling_id}`,
+          sku: ncm.erp_sku || `(Sem SKU · #${ncm.erp_id})`,
+          productId: ncm.erp_id,
+          productName: ncm.name ?? `Produto #${ncm.erp_id}`,
           channel: ncm.source_platform === 'mercadolivre' ? 'Mercado Livre' : 'Nuvemshop',
           createdAt: new Date(ncm.created_at).toLocaleString('pt-BR'),
           reasonPlain:
@@ -1782,19 +1782,19 @@ dashboardRouter.get(
 
       for (const c of contentRowsRes.rows) {
         items.push({
-          id: `cont-${c.bling_id}`,
+          id: `cont-${c.erp_id}`,
           category: 'conteudo_incompleto',
           categoryLabel: 'Conteúdo incompleto',
-          sku: c.bling_sku || `(Sem SKU · #${c.bling_id})`,
-          productId: c.bling_id,
-          productName: c.name ?? `Produto #${c.bling_id}`,
+          sku: c.erp_sku || `(Sem SKU · #${c.erp_id})`,
+          productId: c.erp_id,
+          productName: c.name ?? `Produto #${c.erp_id}`,
           channel: 'Multi-canal',
           createdAt: new Date(c.calculated_at).toLocaleString('pt-BR'),
           reasonPlain: `Notas atuais de prontidão: Mercado Livre ${c.score_ml}/100 e Nuvemshop ${c.score_ns}/100. Faltam requisitos de descrição, SEO ou categoria.`,
           impactPlain: 'Impede publicação de conteúdo novo até atingir os limiares (ML >= 50, NS >= 45).',
           responsibleRole: 'Operador',
           actionLabel: 'Abrir Ficha Única e completar conteúdo',
-          actionHref: `/catalogo/${c.bling_id}`,
+          actionHref: `/catalogo/${c.erp_id}`,
           severity: 'warning',
           technicalDetail: `Motores CRE/CQS · blockers=${(c.blockers ?? []).join(',')}`,
         });
@@ -1841,7 +1841,7 @@ dashboardRouter.get(
 
 /**
  * Seção 5.2 de docs/bling_sync_hub_evolucao_dashboard.md:
- * Ficha Única do Produto por bling_id ou UUID com dados reais das 7 abas.
+ * Ficha Única do Produto por erp_id ou UUID com dados reais das 7 abas.
  */
 dashboardRouter.get(
   '/api/dashboard/products/:id',
@@ -1851,8 +1851,8 @@ dashboardRouter.get(
       const idOrBlingId = req.params.id ?? '';
       const prodRes = await query<{
         id: string;
-        bling_id: string;
-        bling_sku: string;
+        erp_id: string;
+        erp_sku: string;
         ncm: string | null;
         cest: string | null;
         tax_origin: number | null;
@@ -1861,7 +1861,7 @@ dashboardRouter.get(
         ncm_status: string;
         ncm_fiscal_risk: boolean;
         bling_tipo: string;
-        bling_formato: string;
+        product_format: string;
         name: string | null;
         description: string | null;
         short_description: string | null;
@@ -1870,12 +1870,12 @@ dashboardRouter.get(
         catalog_status: string;
         last_bling_sync: Date | string | null;
       }>(
-        `SELECT id, bling_id, bling_sku, ncm, cest, tax_origin, unit, requires_cest,
-                ncm_status, ncm_fiscal_risk, bling_tipo, bling_formato,
+        `SELECT id, erp_id, erp_sku, ncm, cest, tax_origin, unit, requires_cest,
+                ncm_status, ncm_fiscal_risk, bling_tipo, product_format,
                 name, description, short_description, brand, category,
                 catalog_status, last_bling_sync
          FROM master_products
-         WHERE bling_id = $1 OR id::text = $1
+         WHERE erp_id = $1 OR id::text = $1
          LIMIT 1`,
         [idOrBlingId]
       );
@@ -1891,9 +1891,9 @@ dashboardRouter.get(
           query<{
             id: string;
             bling_variant_id: string | null;
-            bling_sku: string;
+            erp_sku: string;
             is_default: boolean;
-            bling_formato: string;
+            product_format: string;
             price: string | null;
             cost_price: string | null;
             stock: string | null;
@@ -1907,14 +1907,14 @@ dashboardRouter.get(
             fiscal_risk_flag: boolean;
             is_active: boolean;
           }>(
-            `SELECT id, bling_variant_id, bling_sku, is_default, bling_formato,
+            `SELECT id, bling_variant_id, erp_sku, is_default, product_format,
                     price::text AS price, cost_price::text AS cost_price, stock::text AS stock,
                     net_weight::text AS net_weight, gross_weight::text AS gross_weight,
                     width::text AS width, height::text AS height, depth::text AS depth,
                     ean, ean_status, fiscal_risk_flag, is_active
              FROM product_variants
              WHERE master_product_id = $1
-             ORDER BY is_default DESC, bling_sku ASC`,
+             ORDER BY is_default DESC, erp_sku ASC`,
             [product.id]
           ),
           query<{
@@ -2018,8 +2018,8 @@ dashboardRouter.post(
       const [productsRes, ownersRes, controlsRes] = await Promise.all([
         query<{
           id: string;
-          bling_id: string;
-          bling_sku: string;
+          erp_id: string;
+          erp_sku: string;
           name: string | null;
           ncm: string | null;
           ncm_status: string;
@@ -2034,7 +2034,7 @@ dashboardRouter.post(
           publishable_ns: boolean | null;
           blockers: string[] | null;
         }>(
-          `SELECT mp.id, mp.bling_id, mp.bling_sku, mp.name, mp.ncm, mp.ncm_status, mp.ncm_fiscal_risk,
+          `SELECT mp.id, mp.erp_id, mp.erp_sku, mp.name, mp.ncm, mp.ncm_status, mp.ncm_fiscal_risk,
                   pv.ean, pv.ean_status, pv.price::text AS price, pv.stock::text AS stock,
                   crs.score_ml, crs.score_ns, crs.publishable_ml, crs.publishable_ns, crs.blockers
            FROM master_products mp
@@ -2052,7 +2052,7 @@ dashboardRouter.post(
       ]);
 
       const totalProcessed = productsRes.rows.length;
-      const sendableRows = productsRes.rows.filter((p) => !isBlankSku(p.bling_sku));
+      const sendableRows = productsRes.rows.filter((p) => !isBlankSku(p.erp_sku));
       const excludedEmptySku = totalProcessed - sendableRows.length;
       const aptItems = productsRes.rows.filter(
         (p) => p.publishable_ml || p.publishable_ns
@@ -2086,15 +2086,15 @@ dashboardRouter.post(
           'store_price (preço de loja)',
           'cost_price (preço de custo)',
           'stock (saldo virtual de depósitos seller)',
-          'bling_sku (SKU soberano)',
+          'erp_sku (SKU soberano)',
           'ncm / cest / tax_origin (dados fiscais da NF-e)',
           'name / description mestres do Bling',
         ],
         plannedProductDiffs: sendableRows.slice(0, 15).map((p) => ({
           productId: p.id,
-          blingId: p.bling_id,
-          sku: p.bling_sku,
-          name: p.name ?? `Produto #${p.bling_id}`,
+          erpId: p.erp_id,
+          sku: p.erp_sku,
+          name: p.name ?? `Produto #${p.erp_id}`,
           stockPriceAction:
             'IGNORADO (responsabilidade configurada em bling_native)',
           contentAction:
@@ -2119,8 +2119,8 @@ dashboardRouter.get(
   async (_req: Request, res: Response, next: NextFunction) => {
     try {
       const rowsRes = await query<{
-        bling_id: string;
-        bling_sku: string;
+        erp_id: string;
+        erp_sku: string;
         name: string | null;
         price: string | null;
         cost_price: string | null;
@@ -2129,7 +2129,7 @@ dashboardRouter.get(
         score_ml: number | null;
         score_ns: number | null;
       }>(
-        `SELECT mp.bling_id, mp.bling_sku, mp.name,
+        `SELECT mp.erp_id, mp.erp_sku, mp.name,
                 pv.price::text AS price, pv.cost_price::text AS cost_price, pv.stock::text AS stock,
                 crs.score_bling, crs.score_ml, crs.score_ns
          FROM master_products mp
@@ -2150,10 +2150,10 @@ dashboardRouter.get(
         const belowCost = hasValidCost && salePrice > 0 && salePrice < rawCost;
 
         return {
-          blingId: r.bling_id,
-          sku: isBlankSku(r.bling_sku) ? '' : r.bling_sku,
-          skuBlank: isBlankSku(r.bling_sku),
-          productName: r.name ?? `Produto #${r.bling_id}`,
+          erpId: r.erp_id,
+          sku: isBlankSku(r.erp_sku) ? '' : r.erp_sku,
+          skuBlank: isBlankSku(r.erp_sku),
+          productName: r.name ?? `Produto #${r.erp_id}`,
           salePrice,
           costPrice: hasValidCost ? rawCost : null,
           grossMarginPct,
@@ -2220,14 +2220,14 @@ dashboardRouter.get(
           LEFT JOIN users u ON u.id = cc.changed_by
           UNION ALL
           SELECT n.id::text, n.created_at, 'NVE',
-                 COALESCE(mp.bling_sku, ''), COALESCE(mp.name, ''),
+                 COALESCE(mp.erp_sku, ''), COALESCE(mp.name, ''),
                  'NCM', COALESCE(n.previous_ncm, ''), COALESCE(n.new_ncm, ''),
                  'Revisores fiscais', n.decision, 'ncm_audit_log'
           FROM ncm_audit_log n
           LEFT JOIN master_products mp ON mp.id = n.master_product_id
           UNION ALL
           SELECT e.id::text, e.created_at, 'GVE',
-                 COALESCE(mp.bling_sku, e.ean, ''), COALESCE(mp.name, ''),
+                 COALESCE(mp.erp_sku, e.ean, ''), COALESCE(mp.name, ''),
                  'EAN ' || COALESCE(e.ean, ''), COALESCE(e.previous_status, ''), e.new_status,
                  CASE WHEN e.action LIKE 'human_%' THEN 'Revisor fiscal' ELSE 'Sistema (Auto)' END,
                  e.action, 'ean_validation_history'
@@ -2320,12 +2320,12 @@ dashboardRouter.get(
         attempts: number;
         created_at: Date | string;
         finished_at: Date | string | null;
-        bling_id: string;
-        bling_sku: string;
+        erp_id: string;
+        erp_sku: string;
         name: string | null;
       }>(
         `SELECT pj.id, pj.platform, pj.job_kind, pj.status, pj.block_reason, pj.attempts,
-                pj.created_at, pj.finished_at, mp.bling_id, mp.bling_sku, mp.name
+                pj.created_at, pj.finished_at, mp.erp_id, mp.erp_sku, mp.name
          FROM push_jobs pj
          INNER JOIN master_products mp ON mp.id = pj.master_product_id
          ORDER BY pj.created_at DESC
@@ -2357,8 +2357,8 @@ dashboardRouter.get(
         const partial = job.status === 'failed' && completed.length > 0;
         return {
           id: job.id,
-          sku: job.bling_sku || `(Sem SKU · #${job.bling_id})`,
-          productName: job.name ?? `Produto #${job.bling_id}`,
+          sku: job.erp_sku || `(Sem SKU · #${job.erp_id})`,
+          productName: job.name ?? `Produto #${job.erp_id}`,
           channel: job.platform === 'mercadolivre' ? 'Mercado Livre' : 'Nuvemshop',
           operationType: job.job_kind,
           state: partial ? 'Concluído parcialmente' : PUSH_STATE_LABELS[job.status] ?? job.status,

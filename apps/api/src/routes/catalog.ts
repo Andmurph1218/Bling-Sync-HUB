@@ -29,11 +29,12 @@ import {
 } from '../catalog/mapping-studio.js';
 import { buildPublishPreview, recalculateCompleteness, PublishChannel } from '../catalog/publish-preview.js';
 import { enqueueReadyProducts, isLivePublishingEnabled } from '../queues/publish-queue.js';
+import { loadConnectors } from '../connectors/load.js';
 import { buildCatalogWorkbook, buildImportTemplateCsv } from '../catalog/spreadsheet.js';
 import { acceptCatalogImport, buildImportErrorCsv } from '../catalog/import-jobs.js';
 import { createBatchJob, readBatchJob } from '../catalog/batch-jobs.js';
 import { createErpConnector } from '../connectors/strategy/factory.js';
-import { STOCK_LAUNCH_WARNING } from '../connectors/strategy/bling-erp.js';
+import { STOCK_LAUNCH_WARNING } from '../connectors/strategy/types.js';
 import { getFullSyncStatus } from '../catalog/full-sync.js';
 import { ErpRejectedError } from '../connectors/strategy/types.js';
 
@@ -292,26 +293,26 @@ catalogRouter.get('/api/catalog/products', requireAuth, async (req: Request, res
   }
 });
 
-catalogRouter.get('/api/catalog/products/:blingId/variants', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+catalogRouter.get('/api/catalog/products/:erpId/variants', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rows = await query<{
       id: string;
-      bling_sku: string;
+      erp_sku: string;
       price: string | null;
       stock: string | null;
       ean: string | null;
     }>(
-      `SELECT pv.id, pv.bling_sku, pv.price::text AS price, pv.stock::text AS stock, pv.ean
+      `SELECT pv.id, pv.erp_sku, pv.price::text AS price, pv.stock::text AS stock, pv.ean
        FROM product_variants pv
        INNER JOIN master_products mp ON mp.id = pv.master_product_id
-       WHERE mp.bling_id = $1 AND mp.catalog_status = 'active'
-       ORDER BY pv.is_default DESC, pv.bling_sku ASC`,
-      [req.params.blingId]
+       WHERE mp.erp_id = $1 AND mp.catalog_status = 'active'
+       ORDER BY pv.is_default DESC, pv.erp_sku ASC`,
+      [req.params.erpId]
     );
     res.status(200).json({
       variants: rows.rows.map((row) => ({
         id: row.id,
-        sku: row.bling_sku,
+        sku: row.erp_sku,
         price: row.price,
         stock: row.stock === null ? null : Math.floor(Number(row.stock)),
         ean: row.ean,
@@ -322,7 +323,7 @@ catalogRouter.get('/api/catalog/products/:blingId/variants', requireAuth, async 
   }
 });
 
-catalogRouter.get('/api/catalog/products/:blingId/sheet', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+catalogRouter.get('/api/catalog/products/:erpId/sheet', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const listed = await listCatalog({
       tab: 'todos',
@@ -331,7 +332,7 @@ catalogRouter.get('/api/catalog/products/:blingId/sheet', requireAuth, async (re
       brand: '',
       page: 1,
       pageSize: 1,
-      blingId: req.params.blingId,
+      erpId: req.params.erpId,
     });
     const archived = listed.items[0]
       ? { items: [] as typeof listed.items }
@@ -342,7 +343,7 @@ catalogRouter.get('/api/catalog/products/:blingId/sheet', requireAuth, async (re
           brand: '',
           page: 1,
           pageSize: 1,
-          blingId: req.params.blingId,
+          erpId: req.params.erpId,
         });
     const item = listed.items[0] ?? archived.items[0];
     if (!item) {
@@ -575,9 +576,9 @@ catalogRouter.get(
         error_message: string | null;
         sku: string;
         name: string | null;
-        bling_id: string;
+        erp_id: string;
       }>(
-        `SELECT pq.id, pq.channel, pq.status, pq.error_message, mp.bling_sku AS sku, mp.name, mp.bling_id
+        `SELECT pq.id, pq.channel, pq.status, pq.error_message, mp.erp_sku AS sku, mp.name, mp.erp_id
          FROM publish_queue pq
          INNER JOIN master_products mp ON mp.id = pq.product_id
          ORDER BY pq.created_at DESC
@@ -597,8 +598,8 @@ catalogRouter.get('/api/catalog/lookup', requireAuth, async (req: Request, res: 
       res.status(200).json({ found: false });
       return;
     }
-    const found = await query<{ id: string; bling_id: string; name: string | null; bling_sku: string }>(
-      `SELECT id, bling_id, name, bling_sku FROM master_products WHERE bling_sku = $1 AND catalog_status = 'active' LIMIT 1`,
+    const found = await query<{ id: string; erp_id: string; name: string | null; erp_sku: string }>(
+      `SELECT id, erp_id, name, erp_sku FROM master_products WHERE erp_sku = $1 AND catalog_status = 'active' LIMIT 1`,
       [sku]
     );
     const row = found.rows[0];
@@ -615,12 +616,12 @@ catalogRouter.get('/api/catalog/check-exists', requireAuth, async (req: Request,
       res.status(400).json({ error: 'term_required' });
       return;
     }
-    const found = await query<{ id: string; bling_id: string; bling_sku: string; name: string | null; ean: string | null }>(
-      `SELECT mp.id, mp.bling_id, mp.bling_sku, mp.name, pv.ean
+    const found = await query<{ id: string; erp_id: string; erp_sku: string; name: string | null; ean: string | null }>(
+      `SELECT mp.id, mp.erp_id, mp.erp_sku, mp.name, pv.ean
        FROM master_products mp
        LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
        WHERE mp.catalog_status = 'active'
-         AND (lower(mp.bling_sku) = lower($1) OR pv.ean = $1)
+         AND (lower(mp.erp_sku) = lower($1) OR pv.ean = $1)
        LIMIT 1`,
       [term]
     );
@@ -629,7 +630,7 @@ catalogRouter.get('/api/catalog/check-exists', requireAuth, async (req: Request,
       row
         ? {
             exists: true,
-            product: { id: row.id, blingId: row.bling_id, sku: row.bling_sku, name: row.name, ean: row.ean },
+            product: { id: row.id, erpId: row.erp_id, sku: row.erp_sku, name: row.name, ean: row.ean },
           }
         : { exists: false }
     );
@@ -656,25 +657,26 @@ catalogRouter.post(
         res.status(400).json({ error: 'invalid_payload' });
         return;
       }
-      const existing = await query<{ bling_id: string }>(
-        `SELECT mp.bling_id
+      const existing = await query<{ erp_id: string }>(
+        `SELECT mp.erp_id
          FROM master_products mp
          LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
          WHERE mp.catalog_status = 'active'
-           AND (lower(mp.bling_sku) = lower($1) OR pv.ean = $1)
+           AND (lower(mp.erp_sku) = lower($1) OR pv.ean = $1)
          LIMIT 1`,
         [parsed.data.sku]
       );
       if (existing.rows[0]) {
         res.status(409).json({
           error: 'already_exists',
-          product: { blingId: existing.rows[0].bling_id },
+          product: { erpId: existing.rows[0].erp_id },
         });
         return;
       }
       let erpId = '';
       let stockWarning: string | null = null;
       try {
+        await loadConnectors();
         const createdErp = await createErpConnector('bling').createProduct({
           name: parsed.data.name,
           sku: parsed.data.sku,
@@ -694,15 +696,15 @@ catalogRouter.post(
         res.status(422).json({ error: 'bling_rejected', message: 'Erro no Bling: o ERP não devolveu um ID oficial.' });
         return;
       }
-      const created = await query<{ id: string; bling_id: string }>(
-        `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      const created = await query<{ id: string; erp_id: string }>(
+        `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
          VALUES ($1, $2, $3, 'P', 'S')
-         RETURNING id, bling_id`,
+         RETURNING id, erp_id`,
         [erpId, parsed.data.sku, parsed.data.name]
       );
       const product = created.rows[0]!;
       await query(
-        `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, stock)
+        `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, stock)
          VALUES ($1, $2, true, 'S', $3, $4)`,
         [product.id, parsed.data.sku, parsed.data.price, parsed.data.stock]
       );
@@ -723,7 +725,7 @@ catalogRouter.post(
       }
       res.status(201).json({
         id: product.id,
-        blingId: product.bling_id,
+        erpId: product.erp_id,
         sku: parsed.data.sku,
         price: parsed.data.price,
         stock: parsed.data.stock,
@@ -1177,8 +1179,8 @@ catalogRouter.post(
         res.status(400).json({ error: 'invalid_payload' });
         return;
       }
-      const product = await query<{ id: string; bling_id: string }>(
-        `SELECT id, bling_id FROM master_products WHERE id = $1 AND catalog_status = 'active'`,
+      const product = await query<{ id: string; erp_id: string }>(
+        `SELECT id, erp_id FROM master_products WHERE id = $1 AND catalog_status = 'active'`,
         [req.params.id]
       );
       const row = product.rows[0];
@@ -1201,7 +1203,7 @@ catalogRouter.post(
         brand: '',
         page: 1,
         pageSize: 1,
-        blingId: row.bling_id,
+        erpId: row.erp_id,
       });
       res.status(200).json({
         checklist: listed.items[0]?.checklist ?? null,
@@ -1217,14 +1219,14 @@ catalogRouter.get('/api/catalog/problems', requireAuth, async (_req: Request, re
   try {
     const rows = await query<{
       id: string;
-      bling_id: string;
-      bling_sku: string;
+      erp_id: string;
+      erp_sku: string;
       name: string | null;
       platform: string;
       job_kind: string;
       created_at: Date | string;
     }>(
-      `SELECT j.id, mp.bling_id, mp.bling_sku, mp.name, j.platform, j.job_kind, j.created_at
+      `SELECT j.id, mp.erp_id, mp.erp_sku, mp.name, j.platform, j.job_kind, j.created_at
        FROM push_jobs j
        INNER JOIN master_products mp ON mp.id = j.master_product_id
        WHERE j.status = 'failed'

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runFullCatalogSync } from '../catalog/full-sync.js';
-import { BlingProductPayload } from '../contracts/fixtures/bling.fixtures.js';
+import { BlingProductPayload } from '../connectors/bling/fixtures.js';
 import { ErpConnector } from '../connectors/strategy/types.js';
 
 function product(id: number, tipo: 'P' | 'S', extra: Record<string, unknown> = {}): BlingProductPayload {

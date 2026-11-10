@@ -4,7 +4,7 @@ export type ProblemSeverity = 'critico' | 'aviso' | 'erro';
 export interface ProblemItem {
   id: string;
   productId: string | null;
-  blingId: string | null;
+  erpId: string | null;
   sku: string;
   name: string;
   message: string;
@@ -21,7 +21,7 @@ export interface ProblemGroup {
   groupMessage: string;
   count: number;
   lastAt: string | null;
-  action: 'reprocess' | 'bling' | 'fiscal';
+  action: 'reprocess' | 'erp' | 'fiscal';
   channel: string;
   single?: ProblemItem | null;
 }

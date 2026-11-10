@@ -1,5 +1,4 @@
 import { IntegrationCategory, IntegrationStatus, TokenSnapshot } from './types.js';
-import { BlingErpConnector } from './bling-erp.js';
 import { MercadoLivreMarketplaceConnector, NuvemshopMarketplaceConnector } from './marketplaces.js';
 import { UnavailableMarketplaceConnector } from './unavailable.js';
 import { ErpConnector, MarketplaceConnector } from './types.js';
@@ -29,9 +28,11 @@ const MARKETPLACES: Record<string, () => MarketplaceConnector> = {
   tiktok: () => new UnavailableMarketplaceConnector('tiktok'),
 };
 
-const ERPS: Record<string, () => ErpConnector> = {
-  bling: () => new BlingErpConnector(),
-};
+const ERPS: Record<string, () => ErpConnector> = {};
+
+export function registerErpConnector(id: string, create: () => ErpConnector): void {
+  ERPS[id] = create;
+}
 
 export function createMarketplaceConnector(id: string): MarketplaceConnector {
   const factory = MARKETPLACES[id];
@@ -39,6 +40,17 @@ export function createMarketplaceConnector(id: string): MarketplaceConnector {
     throw new Error(`marketplace_not_registered:${id}`);
   }
   return factory();
+}
+
+export const DEFAULT_ERP_ID = 'bling';
+
+export function getMarketplaceConnector(id: string): MarketplaceConnector {
+  return createMarketplaceConnector(id);
+}
+
+export function erpRecordUrl(erpId: string): string {
+  const connector = createErpConnector(DEFAULT_ERP_ID);
+  return connector.recordUrl ? connector.recordUrl(erpId) : '';
 }
 
 export function createErpConnector(id: string): ErpConnector {

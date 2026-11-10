@@ -4,15 +4,14 @@
 
 import { PoolClient } from 'pg';
 import { query, withTransaction } from '../db/pool.js';
-import {
-  BlingProductPayload,
-  BlingStockBalanceItem,
-} from '../contracts/fixtures/bling.fixtures.js';
+import { InboundProduct } from '../connectors/strategy/inbound.js';
+import { loadConnectors } from '../connectors/load.js';
 import {
   computePublishableStockFromBalances,
-  mapBlingProductToCatalog,
+  StockBalanceItem,
   WarehouseConfig,
 } from '../contracts/mappers.js';
+import { mapInboundProduct } from './erp-port.js';
 import { evaluateProductGve, VariantExternalEanCandidate } from '../engines/gve.js';
 import { evaluateProductNve, VariantNcmObservation } from '../engines/nve.js';
 import {
@@ -40,12 +39,7 @@ import {
   ingestWebhookController,
   processWebhookEventById,
 } from '../engines/wig.js';
-import {
-  ChannelStepExecutorCalls,
-  enqueueOrPromotePushJob,
-  executePushJobById,
-  ExecutePushJobReport,
-} from '../engines/ape.js';
+import { pushPort, PushChannelCall, PushJobReport } from './push-port.js';
 
 export const SLA_P1_STOCK_MAX_LAG_MS = 120_000; // 2 minutos (Seção 2)
 
@@ -60,9 +54,10 @@ export interface UpsertCatalogFromBlingResult {
  * respeitando a regra de que product_variants.stock nasce NULL até a leitura de GET /estoques/saldos.
  */
 export async function upsertCatalogProductFromBlingPayload(
-  payload: BlingProductPayload
+  payload: InboundProduct
 ): Promise<UpsertCatalogFromBlingResult> {
-  const mapped = mapBlingProductToCatalog(payload);
+  await loadConnectors();
+  const mapped = mapInboundProduct(payload);
   if (mapped.kind === 'ignored_service') {
     return {
       ignoredService: true,
@@ -75,19 +70,19 @@ export async function upsertCatalogProductFromBlingPayload(
   return withTransaction(async (client: PoolClient) => {
     const prodRes = await client.query<{ id: string }>(
       `INSERT INTO master_products (
-         bling_id, bling_sku, ncm, cest, tax_origin, unit, requires_cest,
-         bling_tipo, bling_formato, name, description, short_description,
+         erp_id, erp_sku, ncm, cest, tax_origin, unit, requires_cest,
+         bling_tipo, product_format, name, description, short_description,
          brand, category, catalog_status, last_bling_snapshot, last_bling_sync, updated_at
        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now(), now())
-       ON CONFLICT (bling_id) DO UPDATE
-         SET bling_sku = EXCLUDED.bling_sku,
+       ON CONFLICT (erp_id) DO UPDATE
+         SET erp_sku = EXCLUDED.erp_sku,
              ncm = COALESCE(master_products.ncm, EXCLUDED.ncm),
              cest = EXCLUDED.cest,
              tax_origin = EXCLUDED.tax_origin,
              unit = EXCLUDED.unit,
              requires_cest = EXCLUDED.requires_cest,
              bling_tipo = EXCLUDED.bling_tipo,
-             bling_formato = EXCLUDED.bling_formato,
+             product_format = EXCLUDED.product_format,
              name = EXCLUDED.name,
              description = EXCLUDED.description,
              short_description = EXCLUDED.short_description,
@@ -99,15 +94,15 @@ export async function upsertCatalogProductFromBlingPayload(
              updated_at = now()
        RETURNING id`,
       [
-        p.bling_id,
-        p.bling_sku,
+        p.erp_id,
+        p.erp_sku,
         p.ncm,
         p.cest,
         p.tax_origin,
         p.unit,
         p.requires_cest,
         p.bling_tipo,
-        p.bling_formato,
+        p.product_format,
         p.name,
         p.description,
         p.short_description,
@@ -131,15 +126,15 @@ export async function upsertCatalogProductFromBlingPayload(
     for (const v of p.variants) {
       const varRes = await client.query<{ id: string }>(
         `INSERT INTO product_variants (
-           master_product_id, bling_variant_id, bling_sku, is_default,
-           bling_formato, stock_mode, price, cost_price, stock,
+           master_product_id, bling_variant_id, erp_sku, is_default,
+           product_format, stock_mode, price, cost_price, stock,
            net_weight, gross_weight, width, height, depth,
            ean, is_active, variant_status, last_bling_sync, updated_at
          ) VALUES (
            $1, $2, $3, $4, $5, $6, $7, $8, NULL,
            $9, $10, $11, $12, $13, $14, $15, $16, now(), now()
          )
-         ON CONFLICT (master_product_id, bling_sku) DO UPDATE
+         ON CONFLICT (master_product_id, erp_sku) DO UPDATE
            SET price = EXCLUDED.price,
                cost_price = EXCLUDED.cost_price,
                net_weight = COALESCE(product_variants.net_weight, EXCLUDED.net_weight),
@@ -155,9 +150,9 @@ export async function upsertCatalogProductFromBlingPayload(
         [
           masterProductId,
           v.bling_variant_id,
-          v.bling_sku,
+          v.erp_sku,
           v.is_default,
-          v.bling_formato,
+          v.product_format,
           v.stock_mode,
           v.price,
           v.cost_price,
@@ -173,7 +168,7 @@ export async function upsertCatalogProductFromBlingPayload(
       );
 
       const variantId = varRes.rows[0]!.id;
-      variantIdsBySku[v.bling_sku] = variantId;
+      variantIdsBySku[v.erp_sku] = variantId;
 
       for (let i = 0; i < v.attributes.length; i++) {
         const attr = v.attributes[i]!;
@@ -222,7 +217,7 @@ export async function upsertCatalogProductFromBlingPayload(
  */
 export async function applyVariantStockBalancesFromBling(
   variantId: string,
-  balanceItem: BlingStockBalanceItem
+  balanceItem: StockBalanceItem
 ): Promise<{
   variantStockColumn: number;
   publishableFloor: number;
@@ -274,8 +269,8 @@ export async function applyVariantStockBalancesFromBling(
 }
 
 export interface FullProductEnrichmentPipelineInput {
-  blingPayload: BlingProductPayload;
-  stockBalancesBySku?: Record<string, BlingStockBalanceItem>;
+  inboundPayload: InboundProduct;
+  stockBalancesBySku?: Record<string, StockBalanceItem>;
   storePricesBySku?: Record<
     string,
     Partial<
@@ -323,7 +318,7 @@ export interface FullProductEnrichmentPipelineReport {
 export async function runFullProductCatalogPipeline(
   input: FullProductEnrichmentPipelineInput
 ): Promise<FullProductEnrichmentPipelineReport> {
-  const upserted = await upsertCatalogProductFromBlingPayload(input.blingPayload);
+  const upserted = await upsertCatalogProductFromBlingPayload(input.inboundPayload);
   if (upserted.ignoredService || !upserted.masterProductId) {
     throw new Error('Serviço ignorado não entra no pipeline de catálogo');
   }
@@ -436,8 +431,8 @@ export interface P1StockEndToEndLagMeasurement {
   pushFinishedAtMs: number;
   measuredLagMs: number;
   withinTwoMinuteSla: boolean;
-  pushReports: ExecutePushJobReport[];
-  executedChannelCalls: ChannelStepExecutorCalls[];
+  pushReports: PushJobReport[];
+  executedChannelCalls: PushChannelCall[];
 }
 
 /**
@@ -455,8 +450,9 @@ export async function executeAndMeasureP1StockFlow(input: {
   webhookSecret: string;
   masterProductId: string;
   variantId: string;
-  freshBalanceItem: BlingStockBalanceItem;
+  freshBalanceItem: StockBalanceItem;
 }): Promise<P1StockEndToEndLagMeasurement> {
+  await loadConnectors();
   const eventReceivedAtMs = Date.now();
 
   const ingest = await ingestWebhookController({
@@ -477,11 +473,11 @@ export async function executeAndMeasureP1StockFlow(input: {
     input.freshBalanceItem
   );
 
-  const pushReports: ExecutePushJobReport[] = [];
-  const executedChannelCalls: ChannelStepExecutorCalls[] = [];
+  const pushReports: PushJobReport[] = [];
+  const executedChannelCalls: PushChannelCall[] = [];
 
   for (const platform of ['mercadolivre', 'nuvemshop'] as const) {
-    const { pushJobId } = await enqueueOrPromotePushJob({
+    const { pushJobId } = await pushPort().enqueueOrPromotePushJob({
       masterProductId: input.masterProductId,
       variantId: input.variantId,
       platform,
@@ -491,7 +487,7 @@ export async function executeAndMeasureP1StockFlow(input: {
     });
 
     const stepStartMs = Date.now();
-    const report = await executePushJobById(pushJobId, {
+    const report = await pushPort().executePushJobById(pushJobId, {
       onExecuteChannelCall: async (call) => {
         executedChannelCalls.push(call);
       },
@@ -538,7 +534,7 @@ export async function executeAndMeasureP1StockFlow(input: {
  */
 export async function replayFailedPushJobById(
   pushJobId: string
-): Promise<ExecutePushJobReport> {
+): Promise<PushJobReport> {
   await withTransaction(async (client: PoolClient) => {
     const jobRes = await client.query<{ id: string; status: string }>(
       `SELECT id, status FROM push_jobs WHERE id = $1 FOR UPDATE`,
@@ -567,7 +563,8 @@ export async function replayFailedPushJobById(
     );
   });
 
-  return executePushJobById(pushJobId);
+  await loadConnectors();
+  return pushPort().executePushJobById(pushJobId);
 }
 
 /**

@@ -55,7 +55,7 @@ interface CatalogSheet {
       label: string;
       percent: number;
       ready: boolean;
-      blockers: Array<{ code: string; title: string; fixHref: string; where: 'bling' | 'hub' }>;
+      blockers: Array<{ code: string; title: string; fixHref: string; where: 'erp' | 'hub' }>;
     }>;
   };
   images: Array<{ url_normalized: string; is_cover_eligible: boolean; rights_status: string; position_ml: number | null; position_ns: number | null }>;
@@ -71,8 +71,8 @@ interface HubCategoryOption {
 interface ProductDetailPayload {
   product: {
     id: string;
-    bling_id: string;
-    bling_sku: string;
+    erp_id: string;
+    erp_sku: string;
     ncm: string | null;
     cest: string | null;
     tax_origin: number | null;
@@ -81,7 +81,7 @@ interface ProductDetailPayload {
     ncm_status: string;
     ncm_fiscal_risk: boolean;
     bling_tipo: string;
-    bling_formato: string;
+    product_format: string;
     name: string | null;
     description: string | null;
     short_description: string | null;
@@ -92,9 +92,9 @@ interface ProductDetailPayload {
   };
   variants: Array<{
     id: string;
-    bling_sku: string;
+    erp_sku: string;
     is_default: boolean;
-    bling_formato: string;
+    product_format: string;
     price: string | null;
     cost_price: string | null;
     stock: string | null;
@@ -173,16 +173,16 @@ function FichaUnicaProdutoPage({
   const [pushAttempts, setPushAttempts] = useState<PushAttemptRow[]>([]);
   const [sheet, setSheet] = useState<CatalogSheet | null>(null);
   const [categories, setCategories] = useState<HubCategoryOption[]>([]);
-  const blingId = params.id;
+  const erpId = params.id;
 
   useEffect(() => {
     void (async () => {
       setLoadState('loading');
       try {
         const [json, push, sheetPayload, categoryPayload] = await Promise.all([
-          apiFetch<ProductDetailPayload>(`/api/dashboard/products/${encodeURIComponent(blingId)}`),
+          apiFetch<ProductDetailPayload>(`/api/dashboard/products/${encodeURIComponent(erpId)}`),
           apiFetch<{ attempts: PushAttemptRow[] }>('/api/dashboard/push-attempts').catch(() => ({ attempts: [] })),
-          apiFetch<CatalogSheet>(`/api/catalog/products/${encodeURIComponent(blingId)}/sheet`).catch(() => null),
+          apiFetch<CatalogSheet>(`/api/catalog/products/${encodeURIComponent(erpId)}/sheet`).catch(() => null),
           apiFetch<{ categories: HubCategoryOption[] }>('/api/catalog/categories').catch(() => ({ categories: [] })),
         ]);
         setDetail(json);
@@ -196,7 +196,7 @@ function FichaUnicaProdutoPage({
         setLoadState(err instanceof ApiError && err.status === 404 ? 'notfound' : 'error');
       }
     })();
-  }, [blingId]);
+  }, [erpId]);
 
   if (loadState !== 'ok' || !detail) {
     return (
@@ -214,7 +214,7 @@ function FichaUnicaProdutoPage({
           }`}
         >
           {loadState === 'loading' && 'Carregando ficha do produto...'}
-          {loadState === 'notfound' && `Produto Bling #${blingId} não encontrado no catálogo do HUB. Execute uma sincronização ou confira o ID.`}
+          {loadState === 'notfound' && `Produto Bling #${erpId} não encontrado no catálogo do HUB. Execute uma sincronização ou confira o ID.`}
           {loadState === 'error' && 'Não foi possível carregar a ficha do produto. Verifique se a API local está em execução.'}
         </div>
       </main>
@@ -242,13 +242,13 @@ function FichaUnicaProdutoPage({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 font-mono text-xs font-semibold text-emerald-300">
-              Bling ID #{prod?.bling_id ?? blingId}
+              Bling ID #{prod?.erp_id ?? erpId}
             </span>
-            {isBlankSku(prod?.bling_sku) ? (
+            {isBlankSku(prod?.erp_sku) ? (
               <EmptySkuNotice />
             ) : (
               <span className="rounded-md border border-border-color bg-bg-surface px-2.5 py-0.5 font-mono text-xs text-text-primary">
-                SKU: {prod?.bling_sku}
+                SKU: {prod?.erp_sku}
               </span>
             )}
             <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-medium text-emerald-300">
@@ -259,7 +259,7 @@ function FichaUnicaProdutoPage({
             </span>
           </div>
           <h1 className="mt-2 text-xl font-bold text-text-primary">
-            {prod.name ?? `Produto Bling #${prod.bling_id}`}
+            {prod.name ?? `Produto Bling #${prod.erp_id}`}
           </h1>
           <p className="mt-1 text-xs text-text-muted">
             Ficha Única comparando Bling, Mercado Livre e Nuvemshop. Explica por que cada valor foi escolhido antes de qualquer escrita.
@@ -268,7 +268,7 @@ function FichaUnicaProdutoPage({
 
         <div className="flex flex-wrap items-center gap-2.5">
           <a
-            href={buildBlingProductUrl(prod?.bling_id ?? blingId)}
+            href={buildBlingProductUrl(prod?.erp_id ?? erpId)}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1.5 rounded-lg border border-border-color bg-bg-surface px-3.5 py-2 text-xs font-medium text-text-primary hover:bg-bg-base"
@@ -276,7 +276,7 @@ function FichaUnicaProdutoPage({
             <span>Abrir no Bling</span>
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
-          {isBlankSku(prod?.bling_sku) ? (
+          {isBlankSku(prod?.erp_sku) ? (
             <span
               className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-semibold text-rose-200"
               title="Produto sem SKU não entra na lista de envio"
@@ -387,8 +387,8 @@ function FichaUnicaProdutoPage({
                         {channel.blockers.map((blocker) => (
                           <li key={blocker.code} className="text-xs text-rose-700 dark:text-rose-300">
                             {blocker.title}
-                            {blocker.where === 'bling' ? (
-                              <a href={buildBlingProductUrl(prod.bling_id)} target="_blank" rel="noreferrer" className="ml-2 font-semibold underline">Corrigir no Bling</a>
+                            {blocker.where === 'erp' ? (
+                              <a href={buildBlingProductUrl(prod.erp_id)} target="_blank" rel="noreferrer" className="ml-2 font-semibold underline">Corrigir no ERP</a>
                             ) : (
                               <Link href={blocker.fixHref} className="ml-2 font-semibold underline">Resolver no HUB</Link>
                             )}
@@ -506,7 +506,7 @@ function FichaUnicaProdutoPage({
               <div className="rounded-lg border border-border-color bg-bg-base p-4">
                 <span className="text-[11px] uppercase text-text-muted">Marca / Formato</span>
                 <p className="mt-1 text-sm font-bold text-text-primary">
-                  {prod?.brand || 'Sem marca'} · Formato {prod?.bling_formato ?? 'S'}
+                  {prod?.brand || 'Sem marca'} · Formato {prod?.product_format ?? 'S'}
                 </p>
                 <span className="text-[11px] text-text-muted">Unidade: {prod?.unit ?? 'UN'}</span>
               </div>

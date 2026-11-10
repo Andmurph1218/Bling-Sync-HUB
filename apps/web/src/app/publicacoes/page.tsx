@@ -32,7 +32,7 @@ interface PushAttemptsPayload {
 
 interface PlannedDiff {
   productId: string;
-  blingId: string;
+  erpId: string;
   sku: string;
   name: string;
   stockPriceAction: string;
@@ -181,7 +181,7 @@ export default function PublicacoesPage() {
             {(simResult?.plannedProductDiffs ?? []).map((diff) => {
               const tone = classifyPublication(diff.stockPriceAction, diff.contentAction);
               return (
-                <tr key={diff.blingId} className="border-b border-border-color">
+                <tr key={diff.erpId} className="border-b border-border-color">
                   <td className="px-4 py-3">
                     <p className="max-w-xs truncate font-medium text-text-primary" title={diff.name}>{diff.name}</p>
                     <p className="font-mono text-[11px] text-text-muted">{diff.sku || 'Sem SKU'}</p>

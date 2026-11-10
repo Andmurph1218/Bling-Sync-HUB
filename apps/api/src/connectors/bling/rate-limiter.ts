@@ -18,13 +18,9 @@
  *   5: full_enrich
  */
 
-export type BlingCallerModule =
-  | 'token'
-  | 'webhook_p1_push_stock'
-  | 'stock_sync'
-  | 'price_check'
-  | 'delta_enrich'
-  | 'full_enrich';
+import type { ErpCallLane } from '../rate-limit-port.js';
+
+export type BlingCallerModule = ErpCallLane;
 
 const MODULE_PRIORITY: Record<BlingCallerModule, number> = {
   token: 0,

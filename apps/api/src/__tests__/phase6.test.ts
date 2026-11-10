@@ -139,14 +139,14 @@ describe('Fase 6 — Motor CQS (Qualidade de Conteúdo, Árvore KEEP/REPLACE/SUG
 
   it('3. Nome e descrição do Bling permanecem intocáveis (canal grava em channel_content_overrides), modo shadow não altera o Bling e linha shadow não pode ser revertida', async () => {
     const prodRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, description, brand, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, description, brand, bling_tipo, product_format)
        VALUES ('6001', 'PROD-CQS-SHADOW', 'Nome Fiscal NF-e Original', 'Descrição original curta', 'sem marca', 'P', 'S')
        RETURNING id`
     );
     const masterId = prodRes.rows[0]!.id;
 
     const varRes = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, net_weight)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, net_weight)
        VALUES ($1, 'PROD-CQS-SHADOW', true, 'S', 99.90, 0)
        RETURNING id`,
       [masterId]
@@ -224,14 +224,14 @@ describe('Fase 6 — Motor CQS (Qualidade de Conteúdo, Árvore KEEP/REPLACE/SUG
 
   it('4. Modo live respeita max_replaces_per_run (rebaixando excedente para SUGGEST), kill_switch bloqueia a origem e reversão restaura old_value gravando hub_writes', async () => {
     const prodRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, brand, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, brand, bling_tipo, product_format)
        VALUES ('6002', 'PROD-CQS-LIVE', 'Nome Intocável NF-e Live', NULL, 'P', 'S')
        RETURNING id`
     );
     const masterId = prodRes.rows[0]!.id;
 
     const varRes = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, net_weight)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, net_weight)
        VALUES ($1, 'PROD-CQS-LIVE', true, 'S', 129.90, NULL)
        RETURNING id`,
       [masterId]

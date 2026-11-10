@@ -98,14 +98,14 @@ describe('Fase 11 — Matching e Fiscal no Dashboard (Dois Usuários Confirmam o
 
     // Cria produto sem NCM no Bling e gera sugestão 9617.00.10 pelo motor NVE
     const prodRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato, ncm)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format, ncm)
        VALUES ('11001', 'GAR-DASH-NCM', 'Garrafa Térmica Dashboard NCM', 'P', 'S', NULL)
        RETURNING id`
     );
     const masterId = prodRes.rows[0]!.id;
 
     const varRes = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, ean)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, ean)
        VALUES ($1, 'GAR-DASH-NCM', true, 'S', 99.90, NULL)
        RETURNING id`,
       [masterId]

@@ -54,7 +54,7 @@ const PRODUCT_TEXT_COLUMN: Record<string, string> = {
   name: 'name',
   brand: 'brand',
   description: 'description',
-  sku: 'bling_sku',
+  sku: 'erp_sku',
   ncm: 'ncm',
 };
 
@@ -86,7 +86,7 @@ export async function loadMappingStudio(platform: MappingPlatform): Promise<{
   channel: StudioChannelNode[];
   fields: MappingField[];
 }> {
-  const [hub, maps, bling, hubCounts, fields] = await Promise.all([
+  const [hub, maps, erpCategories, hubCounts, fields] = await Promise.all([
     query<{ id: string; parent_id: string | null; name: string }>(
       `SELECT id, parent_id, name FROM hub_categories`
     ),
@@ -142,7 +142,7 @@ export async function loadMappingStudio(platform: MappingPlatform): Promise<{
     byPath.set(pathKey(path), row.id);
   }
 
-  for (const row of bling.rows) {
+  for (const row of erpCategories.rows) {
     const parts = row.category.split(/\s*(?:>|\/)\s*/).map((part) => part.trim()).filter(Boolean);
     if (parts.length === 0) continue;
     let parentKey: string | null = null;

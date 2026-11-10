@@ -191,13 +191,13 @@ export async function resolveProductVariantsVir(input: {
   return withTransaction(async (client: PoolClient) => {
     const blingVarsRes = await client.query<{
       id: string;
-      bling_sku: string;
+      erp_sku: string;
       is_default: boolean;
       ean: string | null;
       ean_status: string;
       variant_status: 'active' | 'inactive' | 'discontinued';
     }>(
-      `SELECT id, bling_sku, is_default, ean, ean_status, variant_status
+      `SELECT id, erp_sku, is_default, ean, ean_status, variant_status
        FROM product_variants
        WHERE master_product_id = $1
        FOR UPDATE`,
@@ -234,7 +234,7 @@ export async function resolveProductVariantsVir(input: {
           .join('|');
         blingComboKeyByVar.set(bv.id, key);
       } else {
-        blingComboKeyByVar.set(bv.id, `sku:${bv.bling_sku}`);
+        blingComboKeyByVar.set(bv.id, `sku:${bv.erp_sku}`);
       }
     }
 
@@ -292,7 +292,7 @@ export async function resolveProductVariantsVir(input: {
       if (!matchedVarId && cv.sku) {
         const normSku = normalizeSkuForMatch(cv.sku);
         const skuMatches = activeBlingVars.filter(
-          (bv) => normalizeSkuForMatch(bv.bling_sku) === normSku
+          (bv) => normalizeSkuForMatch(bv.erp_sku) === normSku
         );
         if (skuMatches.length === 1) {
           matchedVarId = skuMatches[0]!.id;

@@ -19,8 +19,8 @@ import { TechTooltip } from './tech-tooltip';
 
 export interface MatchingComparisonItem {
   id: string;
-  blingId: string;
-  blingSku: string;
+  erpId: string;
+  erpSku: string;
   blingName: string;
   blingEan: string;
   blingPrice: string;
@@ -80,7 +80,7 @@ export function MatchDetailsDrawer({
   const titleDiff =
     normalizeCompare(item.blingName) !== normalizeCompare(item.channelTitle);
   const skuDiff =
-    normalizeCompare(item.blingSku) !== normalizeCompare(item.channelSku);
+    normalizeCompare(item.erpSku) !== normalizeCompare(item.channelSku);
   const eanDiff =
     normalizeCompare(item.blingEan) !== normalizeCompare(item.channelEan);
   const priceDiff =
@@ -88,7 +88,7 @@ export function MatchDetailsDrawer({
   const statusDiff =
     normalizeCompare(item.blingStatus) !== normalizeCompare(item.channelStatus);
 
-  const blingUrl = buildBlingProductUrl(item.blingId);
+  const blingUrl = buildBlingProductUrl(item.erpId);
   const channelUrl = item.channelUrl ?? buildChannelAnnouncementUrl(item.platform, item.channelId);
   const canDecide = Boolean(item.masterProductId);
 
@@ -224,7 +224,7 @@ export function MatchDetailsDrawer({
                     Coluna 1 · Fonte Soberana
                   </span>
                   <span className="text-sm font-bold text-text-primary">
-                    Bling ERP v3 (#{item.blingId})
+                    Bling ERP v3 (#{item.erpId})
                   </span>
                 </div>
                 <a
@@ -312,7 +312,7 @@ export function MatchDetailsDrawer({
                     SKU (Bling)
                   </span>
                   <p className="mt-1 font-mono text-xs font-semibold text-emerald-400">
-                    {item.blingSku}
+                    {item.erpSku}
                   </p>
                 </div>
                 <div

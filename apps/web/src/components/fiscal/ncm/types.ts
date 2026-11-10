@@ -7,7 +7,7 @@ export interface NcmReviewer {
 export interface NcmItem {
   id: string;
   productId: string;
-  blingId: string | null;
+  erpId: string | null;
   sku: string | null;
   productName: string | null;
   currentNcm: string | null;

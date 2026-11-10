@@ -18,7 +18,7 @@ type TopView = 'produtos' | 'envio' | 'importacoes' | 'exportacoes';
 
 interface ExistsProduct {
   id: string;
-  blingId: string;
+  erpId: string;
   sku: string;
   name: string | null;
   ean: string | null;
@@ -45,12 +45,12 @@ interface ChannelIntegration {
   tooltip: string;
   percent: number;
   ready: boolean;
-  blockers: Array<{ code: string; title: string; fixHref: string; where: 'bling' | 'hub' }>;
+  blockers: Array<{ code: string; title: string; fixHref: string; where: 'erp' | 'hub' }>;
 }
 
 interface CatalogItem {
   id: string;
-  blingId: string;
+  erpId: string;
   sku: string;
   name: string | null;
   brand: string | null;
@@ -78,7 +78,7 @@ interface SendListItem {
   error_message: string | null;
   sku: string;
   name: string | null;
-  bling_id: string;
+  erp_id: string;
 }
 
 interface PublishPreview {
@@ -266,7 +266,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
   const [draftFor, setDraftFor] = useState<CatalogItem | null>(null);
   const [draftSku, setDraftSku] = useState('');
   const [draftResult, setDraftResult] = useState<string | null>(null);
-  const [existingProduct, setExistingProduct] = useState<{ bling_id: string } | null>(null);
+  const [existingProduct, setExistingProduct] = useState<{ erp_id: string } | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
   const { data: batch } = useSWR<{ status: string; processed: number; total: number; rows_error: number }>(
     batchId ? `/api/catalog/batch-jobs/${batchId}` : null,
@@ -332,22 +332,22 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
   }, [view]);
 
   const toggleVariants = async (item: CatalogItem) => {
-    if (openVariants[item.blingId]) {
+    if (openVariants[item.erpId]) {
       setOpenVariants((prev) => {
         const next = { ...prev };
-        delete next[item.blingId];
+        delete next[item.erpId];
         return next;
       });
       return;
     }
-    setOpenVariants((prev) => ({ ...prev, [item.blingId]: 'loading' }));
+    setOpenVariants((prev) => ({ ...prev, [item.erpId]: 'loading' }));
     try {
       const payload = await apiFetch<{ variants: VariantRow[] }>(
-        `/api/catalog/products/${encodeURIComponent(item.blingId)}/variants`
+        `/api/catalog/products/${encodeURIComponent(item.erpId)}/variants`
       );
-      setOpenVariants((prev) => ({ ...prev, [item.blingId]: payload.variants }));
+      setOpenVariants((prev) => ({ ...prev, [item.erpId]: payload.variants }));
     } catch {
-      setOpenVariants((prev) => ({ ...prev, [item.blingId]: [] }));
+      setOpenVariants((prev) => ({ ...prev, [item.erpId]: [] }));
     }
   };
 
@@ -408,7 +408,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
         title: `Produto ${skuLabel} - ${nameLabel} não foi adicionado`,
         reasons: checklistReasons(item.reason),
         action: local
-          ? { label: 'Corrigir Cadastro', href: `/catalogo/${local.blingId}?aba=geral` }
+          ? { label: 'Corrigir Cadastro', href: `/catalogo/${local.erpId}?aba=geral` }
           : undefined,
       });
     }
@@ -433,7 +433,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
       for (const item of items) {
         const body = await apiFetch<PublishPreview>(`/api/catalog/${item.id}/simulate`, { method: 'POST' });
         entries.push({
-          sku: item.sku || item.blingId,
+          sku: item.sku || item.erpId,
           payload: body.payload,
           missingAttributes: body.missingAttributes,
           attributesComplete: body.attributesComplete,
@@ -571,9 +571,9 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                                 )}
                               </div>
                             </div>
-                            {item.bling_id && (
+                            {item.erp_id && (
                               <Link
-                                href={`/catalogo/${item.bling_id}?aba=geral`}
+                                href={`/catalogo/${item.erp_id}?aba=geral`}
                                 className="rounded-lg bg-amber-950 px-2.5 py-1.5 text-[11px] font-semibold text-amber-50"
                               >
                                 Corrigir Pendências
@@ -784,7 +784,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                                   event.target.checked ? [...prev, item.id] : prev.filter((id) => id !== item.id)
                                 )
                               }
-                              aria-label={`Selecionar ${item.sku || item.blingId}`}
+                              aria-label={`Selecionar ${item.sku || item.erpId}`}
                             />
                           </td>
                           <td className="px-2 py-1">
@@ -828,7 +828,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                           </td>
                           <td className="px-2 py-1">
                             <div className="flex items-center gap-1">
-                              <Link href={`/catalogo/${item.blingId}?aba=geral`} title="Editar" className="rounded border border-border-color p-1 text-text-primary">
+                              <Link href={`/catalogo/${item.erpId}?aba=geral`} title="Editar" className="rounded border border-border-color p-1 text-text-primary">
                                 <Pencil className="h-3.5 w-3.5" />
                               </Link>
                               {(isAdmin || item.checklist.ready || (item.integrations ?? []).some((channel) => channel.ready)) && (
@@ -851,13 +851,13 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                             </div>
                           </td>
                         </tr>
-                        {openVariants[item.blingId] && (
+                        {openVariants[item.erpId] && (
                           <tr>
                             <td colSpan={10} className="bg-bg-surface/70 px-6 py-3 text-[11px] text-text-muted">
-                              {openVariants[item.blingId] === 'loading' && 'Lendo variações...'}
-                              {Array.isArray(openVariants[item.blingId]) && (openVariants[item.blingId] as VariantRow[]).length === 0 && 'Nenhuma variação no banco.'}
-                              {Array.isArray(openVariants[item.blingId]) &&
-                                (openVariants[item.blingId] as VariantRow[]).map((variant) => (
+                              {openVariants[item.erpId] === 'loading' && 'Lendo variações...'}
+                              {Array.isArray(openVariants[item.erpId]) && (openVariants[item.erpId] as VariantRow[]).length === 0 && 'Nenhuma variação no banco.'}
+                              {Array.isArray(openVariants[item.erpId]) &&
+                                (openVariants[item.erpId] as VariantRow[]).map((variant) => (
                                   <div key={variant.id} className="flex gap-4 py-1">
                                     <span className="font-mono">{isBlankSku(variant.sku) ? 'Sem SKU' : variant.sku}</span>
                                     <span>Estoque {variant.stock === null ? '—' : variant.stock}</span>
@@ -927,9 +927,9 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                   {focus?.blockers.map((blocker) => (
                     <li key={blocker.code} className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-800 dark:text-rose-200">
                       <p>{blocker.title}</p>
-                      {blocker.where === 'bling' ? (
-                        <a href={buildBlingProductUrl(channelFocus.item.blingId)} target="_blank" rel="noreferrer" className="mt-1 inline-block font-semibold underline">
-                          Corrigir no Bling
+                      {blocker.where === 'erp' ? (
+                        <a href={buildBlingProductUrl(channelFocus.item.erpId)} target="_blank" rel="noreferrer" className="mt-1 inline-block font-semibold underline">
+                          Corrigir no ERP
                         </a>
                       ) : (
                         <Link href={blocker.fixHref} className="mt-1 inline-block font-semibold underline">Resolver no HUB</Link>
@@ -1045,7 +1045,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
               <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-bg-base" onClick={() => { void archiveIds([menuItem.id], !menuItem.archived).catch(() => setNotice('Não foi possível alterar o arquivamento.')); setRowMenu(null); }}>
                 {menuItem.archived ? 'Desarquivar' : 'Arquivar'}
               </button>
-              <a href={buildBlingProductUrl(menuItem.blingId)} target="_blank" rel="noreferrer" className="block px-3 py-1.5 hover:bg-bg-base" onClick={() => setRowMenu(null)}>
+              <a href={buildBlingProductUrl(menuItem.erpId)} target="_blank" rel="noreferrer" className="block px-3 py-1.5 hover:bg-bg-base" onClick={() => setRowMenu(null)}>
                 Ver no Bling
               </a>
               <button type="button" className="block w-full px-3 py-1.5 text-left hover:bg-bg-base" onClick={() => { void toggleVariants(menuItem); setRowMenu(null); }}>
@@ -1088,7 +1088,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
             {lookupHit && lookupHit !== 'free' && (
               <div className="mt-3 space-y-2 text-xs text-amber-100">
                 <p>Já existe: {lookupHit.name ?? lookupHit.sku}. A criação deste SKU está bloqueada.</p>
-                <Link href={`/catalogo/${lookupHit.blingId}`} className="inline-block rounded-lg bg-text-primary px-3 py-1.5 font-semibold text-bg-base">
+                <Link href={`/catalogo/${lookupHit.erpId}`} className="inline-block rounded-lg bg-text-primary px-3 py-1.5 font-semibold text-bg-base">
                   Ir para o produto existente
                 </Link>
               </div>
@@ -1149,7 +1149,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                           const price = Number(createPrice.replace(',', '.'));
                           const stock = Number(createStock.replace(',', '.'));
                           setConfirmCreate(false);
-                          void apiFetch<{ blingId: string; stockWarning?: string | null }>('/api/catalog/products', {
+                          void apiFetch<{ erpId: string; stockWarning?: string | null }>('/api/catalog/products', {
                             method: 'POST',
                             json: {
                               sku: lookupSku.trim(),
@@ -1161,13 +1161,13 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                           }).then((created) => {
                             if (created.stockWarning) {
                               setStockNotice(created.stockWarning);
-                              setCreatedBlingId(created.blingId);
+                              setCreatedBlingId(created.erpId);
                               setNotice(created.stockWarning);
                               return;
                             }
                             setLookupOpen(false);
                             setNotice(`Produto ${lookupSku.trim()} criado no Bling e salvo no HUB.`);
-                            window.location.assign(`/catalogo/${created.blingId}`);
+                            window.location.assign(`/catalogo/${created.erpId}`);
                           }).catch((error: unknown) => {
                             const message = error instanceof ApiError && typeof error.body === 'object' && error.body !== null && 'message' in error.body
                               ? String((error.body as { message: unknown }).message)
@@ -1203,11 +1203,11 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
               type="button"
               className="mt-3 rounded-lg border border-border-color px-3 py-1.5 text-xs text-text-primary"
               onClick={() => {
-                void apiFetch<{ found: boolean; product?: { bling_id: string } }>(
+                void apiFetch<{ found: boolean; product?: { erp_id: string } }>(
                   `/api/catalog/lookup?sku=${encodeURIComponent(draftSku.trim())}`
                 ).then((result) => {
-                  if (result.found && result.product?.bling_id) {
-                    setExistingProduct({ bling_id: result.product.bling_id });
+                  if (result.found && result.product?.erp_id) {
+                    setExistingProduct({ erp_id: result.product.erp_id });
                     setDraftResult('SKU já existe no Bling.');
                     return;
                   }
@@ -1221,7 +1221,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
             {draftResult && <p className="mt-3 text-xs font-semibold text-text-primary">{draftResult}</p>}
             {existingProduct && (
               <div className="mt-3 flex flex-col gap-2">
-                <Link href={`/catalogo/${existingProduct.bling_id}`} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-center text-xs font-semibold text-text-primary">
+                <Link href={`/catalogo/${existingProduct.erp_id}`} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-center text-xs font-semibold text-text-primary">
                   Ir para o produto existente
                 </Link>
                 <Link href={`/matching?sku=${encodeURIComponent(draftSku.trim())}&platform=nuvemshop`} className="rounded-lg border border-border-color px-3 py-1.5 text-center text-xs font-semibold text-text-primary">

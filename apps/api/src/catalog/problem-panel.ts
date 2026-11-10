@@ -2,10 +2,11 @@ import { query } from '../db/pool.js';
 import { MERCADO_LIVRE_ACTIVE } from '../config/channels.js';
 import { QUALITY_GAP_SQL, QUALITY_SCOPE_SQL } from './list.js';
 import { ProblemType, translateProblemMessage } from './problems.js';
+import { erpRecordUrl } from '../connectors/strategy/factory.js';
 
 export type ProblemSeverity = 'critico' | 'aviso' | 'erro';
 export type ProblemSource = 'completude' | 'publish_queue' | 'webhook_events';
-export type ProblemActionKind = 'reprocess' | 'bling' | 'fiscal';
+export type ProblemActionKind = 'reprocess' | 'erp' | 'fiscal';
 
 export interface ProblemGroupRow {
   key: string;
@@ -25,14 +26,13 @@ export interface ProblemGroupRow {
 export interface ProblemItemRow {
   id: string;
   productId: string | null;
-  blingId: string | null;
+  erpId: string | null;
   sku: string;
   name: string;
   message: string;
   occurredAt: string | null;
 }
 
-const BLING_PRODUCTS_URL = 'https://www.bling.com.br/produtos.php';
 const STORE_CHANNEL = MERCADO_LIVRE_ACTIVE ? 'Mercado Livre e Nuvemshop' : 'Nuvemshop';
 const MAX_SOURCE_GROUPS = 200;
 const MAX_SINGLE_INLINE = 100;
@@ -57,7 +57,7 @@ const GAP_META: Record<
     message: 'Estoque não lido do ERP',
     groupMessage: (n) => `${n} produtos aguardando leitura de estoque do ERP`,
     action: 'reprocess',
-    channel: 'Bling',
+    channel: 'ERP',
   },
   sku: {
     type: 'cadastro',
@@ -65,8 +65,8 @@ const GAP_META: Record<
     failureType: 'Cadastro',
     message: 'Sem SKU — não sincroniza',
     groupMessage: (n) => `${n} produtos sem SKU no ERP`,
-    action: 'bling',
-    channel: 'Bling',
+    action: 'erp',
+    channel: 'ERP',
   },
   duplicate: {
     type: 'cadastro',
@@ -74,8 +74,8 @@ const GAP_META: Record<
     failureType: 'Cadastro',
     message: 'Possível duplicata por EAN',
     groupMessage: (n) => `${n} produtos com EAN repetido em outro cadastro`,
-    action: 'bling',
-    channel: 'Bling',
+    action: 'erp',
+    channel: 'ERP',
   },
   price: {
     type: 'preco',
@@ -83,8 +83,8 @@ const GAP_META: Record<
     failureType: 'Preço',
     message: 'Preço ausente ou zero',
     groupMessage: (n) => `${n} produtos sem preço de venda`,
-    action: 'bling',
-    channel: 'Bling',
+    action: 'erp',
+    channel: 'ERP',
   },
   ncm: {
     type: 'cadastro',
@@ -93,7 +93,7 @@ const GAP_META: Record<
     message: 'NCM ausente ou inválido',
     groupMessage: (n) => `${n} produtos sem NCM válido`,
     action: 'fiscal',
-    channel: 'Bling',
+    channel: 'ERP',
   },
   ean: {
     type: 'cadastro',
@@ -102,7 +102,7 @@ const GAP_META: Record<
     message: 'Falta EAN válido exigido pelo canal',
     groupMessage: (n) => `${n} produtos sem EAN válido exigido pelo canal`,
     action: 'fiscal',
-    channel: 'Bling',
+    channel: 'ERP',
   },
   cover: {
     type: 'anuncio',
@@ -139,7 +139,7 @@ const CHANNEL_NAME: Record<string, string> = {
   shopee: 'Shopee',
   amazon: 'Amazon',
   tiktok: 'TikTok',
-  bling: 'Bling',
+  erp: 'ERP',
 };
 
 function channelName(value: string): string {
@@ -335,8 +335,8 @@ export async function listGroupItems(
     const meta = GAP_META[group.code]!;
     const [count, rows] = await Promise.all([
       query<{ count: number }>(`SELECT count(*)::int AS count FROM master_products mp WHERE ${gapWhere(group.code)}`),
-      query<{ id: string; bling_id: string; bling_sku: string | null; name: string | null; updated_at: Date }>(
-        `SELECT mp.id, mp.bling_id, mp.bling_sku, mp.name, mp.updated_at
+      query<{ id: string; erp_id: string; erp_sku: string | null; name: string | null; updated_at: Date }>(
+        `SELECT mp.id, mp.erp_id, mp.erp_sku, mp.name, mp.updated_at
          FROM master_products mp
          WHERE ${gapWhere(group.code)}
          ORDER BY mp.updated_at DESC, mp.id
@@ -348,8 +348,8 @@ export async function listGroupItems(
       items: rows.rows.map((row) => ({
         id: `gap:${group.code}:${row.id}`,
         productId: row.id,
-        blingId: row.bling_id,
-        sku: row.bling_sku || 'Sem SKU',
+        erpId: row.erp_id,
+        sku: row.erp_sku || 'Sem SKU',
         name: row.name ?? 'Sem nome',
         message: meta.message,
         occurredAt: iso(row.updated_at),
@@ -362,8 +362,8 @@ export async function listGroupItems(
     const params = [group.channel, group.message];
     const [count, rows] = await Promise.all([
       query<{ count: number }>(`SELECT count(*)::int AS count FROM publish_queue q WHERE ${where}`, params),
-      query<{ id: string; product_id: string; bling_id: string; bling_sku: string | null; name: string | null; updated_at: Date }>(
-        `SELECT q.id, q.product_id, mp.bling_id, mp.bling_sku, mp.name, q.updated_at
+      query<{ id: string; product_id: string; erp_id: string; erp_sku: string | null; name: string | null; updated_at: Date }>(
+        `SELECT q.id, q.product_id, mp.erp_id, mp.erp_sku, mp.name, q.updated_at
          FROM publish_queue q
          INNER JOIN master_products mp ON mp.id = q.product_id
          WHERE ${where}
@@ -378,8 +378,8 @@ export async function listGroupItems(
       items: rows.rows.map((row) => ({
         id: `pq:${row.id}`,
         productId: row.product_id,
-        blingId: row.bling_id,
-        sku: row.bling_sku || 'Sem SKU',
+        erpId: row.erp_id,
+        sku: row.erp_sku || 'Sem SKU',
         name: row.name ?? 'Sem nome',
         message,
         occurredAt: iso(row.updated_at),
@@ -396,13 +396,13 @@ export async function listGroupItems(
       resource_id: string;
       created_at: Date;
       product_id: string | null;
-      bling_id: string | null;
-      bling_sku: string | null;
+      erp_id: string | null;
+      erp_sku: string | null;
       name: string | null;
     }>(
-      `SELECT w.id, w.resource_id, w.created_at, mp.id AS product_id, mp.bling_id, mp.bling_sku, mp.name
+      `SELECT w.id, w.resource_id, w.created_at, mp.id AS product_id, mp.erp_id, mp.erp_sku, mp.name
        FROM webhook_events w
-       LEFT JOIN master_products mp ON mp.bling_id = w.resource_id
+       LEFT JOIN master_products mp ON mp.erp_id = w.resource_id
        WHERE ${where}
        ORDER BY w.created_at DESC, w.id
        LIMIT ${pageSize} OFFSET ${offset}`,
@@ -417,8 +417,8 @@ export async function listGroupItems(
     items: rows.rows.map((row) => ({
       id: `wh:${row.id}`,
       productId: row.product_id,
-      blingId: row.bling_id ?? row.resource_id,
-      sku: row.bling_sku || row.resource_id || 'Sem SKU',
+      erpId: row.erp_id ?? row.resource_id,
+      sku: row.erp_sku || row.resource_id || 'Sem SKU',
       name: row.name ?? `Evento ${group.eventType}`,
       message,
       occurredAt: iso(row.created_at),
@@ -521,7 +521,7 @@ export async function dismissProblems(groupKeys: string[], itemIds: string[], us
 export async function buildProblemsCsv(groupKeys: string[], itemIds: string[]): Promise<string> {
   const groups = await listProblemGroups();
   const severityLabel: Record<ProblemSeverity, string> = { critico: 'Crítico', aviso: 'Aviso', erro: 'Erro' };
-  const lines = ['gravidade;tipo;canal;sku;bling_id;produto;mensagem;data'];
+  const lines = ['gravidade;tipo;canal;sku;erp_id;produto;mensagem;data'];
   const cell = (value: string | null) => {
     const text = value ?? '';
     return /[";\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -537,7 +537,7 @@ export async function buildProblemsCsv(groupKeys: string[], itemIds: string[]): 
         group?.failureType ?? '',
         group?.channel ?? '',
         item.sku,
-        item.blingId,
+        item.erpId,
         item.name,
         item.message,
         item.occurredAt,
@@ -561,16 +561,16 @@ export async function buildProblemsCsv(groupKeys: string[], itemIds: string[]): 
 export interface ReprocessContext {
   allowErpSync: boolean;
   erpSyncRequested: boolean;
-  startErpSync: () => boolean;
+  startErpSync: () => boolean | Promise<boolean>;
   recalculate: (productId: string) => Promise<void>;
   republish: (publishQueueId: string) => Promise<void>;
   replayWebhook: (webhookEventId: string) => Promise<void>;
 }
 
-export const ERP_SYNC_DENIED = 'Apenas administradores podem forçar a leitura do Bling.';
-export const ERP_SYNC_BUSY = 'Já existe uma leitura completa do Bling em andamento.';
+export const ERP_SYNC_DENIED = 'Apenas administradores podem forçar a leitura do ERP.';
+export const ERP_SYNC_BUSY = 'Já existe uma leitura completa do ERP em andamento.';
 
-/** Reprocessa um item. Estoque vira uma única leitura completa do Bling por lote. */
+/** Reprocessa um item. Estoque vira uma única leitura completa do ERP por lote. */
 export async function reprocessProblemItem(id: string, ctx: ReprocessContext): Promise<string | null> {
   const item = parseItemId(id);
   if (!item) return 'Item inválido.';
@@ -578,7 +578,7 @@ export async function reprocessProblemItem(id: string, ctx: ReprocessContext): P
     if (!ctx.allowErpSync) return ERP_SYNC_DENIED;
     if (ctx.erpSyncRequested) return null;
     ctx.erpSyncRequested = true;
-    return ctx.startErpSync() ? null : ERP_SYNC_BUSY;
+    return (await ctx.startErpSync()) ? null : ERP_SYNC_BUSY;
   }
   if (item.kind === 'gap') {
     await ctx.recalculate(item.productId);
@@ -601,8 +601,8 @@ export async function readProblemLog(
 
   if (item.kind === 'gap') {
     const meta = GAP_META[item.code]!;
-    const product = await query<Record<string, unknown> & { id: string; bling_id: string; bling_sku: string | null; name: string | null; updated_at: Date }>(
-      `SELECT mp.id, mp.bling_id, mp.bling_sku, mp.name, mp.ncm, mp.ncm_status, mp.ncm_fiscal_risk,
+    const product = await query<Record<string, unknown> & { id: string; erp_id: string; erp_sku: string | null; name: string | null; updated_at: Date }>(
+      `SELECT mp.id, mp.erp_id, mp.erp_sku, mp.name, mp.ncm, mp.ncm_status, mp.ncm_fiscal_risk,
               mp.hub_category_id, mp.worst_score, mp.catalog_status, mp.updated_at
        FROM master_products mp WHERE mp.id = $1`,
       [item.productId]
@@ -610,7 +610,7 @@ export async function readProblemLog(
     const row = product.rows[0];
     if (!row) return null;
     const variant = await query(
-      `SELECT bling_sku, price::text AS price, stock::text AS stock, ean, ean_status,
+      `SELECT erp_sku, price::text AS price, stock::text AS stock, ean, ean_status,
               gross_weight::text AS gross_weight, width::text AS width, height::text AS height, depth::text AS depth
        FROM product_variants WHERE master_product_id = $1 AND is_default = true`,
       [item.productId]
@@ -620,8 +620,8 @@ export async function readProblemLog(
       item: {
         id,
         productId: row.id,
-        blingId: row.bling_id,
-        sku: row.bling_sku || 'Sem SKU',
+        erpId: row.erp_id,
+        sku: row.erp_sku || 'Sem SKU',
         name: row.name ?? 'Sem nome',
         message: meta.message,
         occurredAt: iso(row.updated_at),
@@ -629,7 +629,7 @@ export async function readProblemLog(
       technical: {
         origem: 'completude',
         regra: item.code,
-        corrigirEm: meta.action === 'bling' ? BLING_PRODUCTS_URL : 'HUB',
+        corrigirEm: meta.action === 'erp' ? erpRecordUrl(row.erp_id) : 'HUB',
         produto: row,
         variantePadrao: variant.rows[0] ?? null,
       },
@@ -646,12 +646,12 @@ export async function readProblemLog(
       payload_json: unknown;
       created_at: Date;
       updated_at: Date;
-      bling_id: string;
-      bling_sku: string | null;
+      erp_id: string;
+      erp_sku: string | null;
       name: string | null;
     }>(
       `SELECT q.id, q.product_id, q.channel, q.status, q.error_message, q.payload_json, q.created_at, q.updated_at,
-              mp.bling_id, mp.bling_sku, mp.name
+              mp.erp_id, mp.erp_sku, mp.name
        FROM publish_queue q INNER JOIN master_products mp ON mp.id = q.product_id
        WHERE q.id = $1`,
       [item.id]
@@ -663,8 +663,8 @@ export async function readProblemLog(
       item: {
         id,
         productId: row.product_id,
-        blingId: row.bling_id,
-        sku: row.bling_sku || 'Sem SKU',
+        erpId: row.erp_id,
+        sku: row.erp_sku || 'Sem SKU',
         name: row.name ?? 'Sem nome',
         message: translateProblemMessage(row.channel, row.error_message),
         occurredAt: iso(row.updated_at),
@@ -694,12 +694,12 @@ export async function readProblemLog(
     created_at: Date;
     processed_at: Date | null;
     product_id: string | null;
-    bling_sku: string | null;
+    erp_sku: string | null;
     name: string | null;
   }>(
     `SELECT w.id, w.source, w.event_type, w.resource_id, w.status, w.error_detail, w.idempotency_key,
-            w.raw_payload, w.created_at, w.processed_at, mp.id AS product_id, mp.bling_sku, mp.name
-     FROM webhook_events w LEFT JOIN master_products mp ON mp.bling_id = w.resource_id
+            w.raw_payload, w.created_at, w.processed_at, mp.id AS product_id, mp.erp_sku, mp.name
+     FROM webhook_events w LEFT JOIN master_products mp ON mp.erp_id = w.resource_id
      WHERE w.id = $1`,
     [item.id]
   );
@@ -711,8 +711,8 @@ export async function readProblemLog(
     item: {
       id,
       productId: row.product_id,
-      blingId: row.resource_id,
-      sku: row.bling_sku || row.resource_id || 'Sem SKU',
+      erpId: row.resource_id,
+      sku: row.erp_sku || row.resource_id || 'Sem SKU',
       name: row.name ?? `Evento ${row.event_type}`,
       message: detail ? translateProblemMessage(row.source, detail) : webhookMessage(row.event_type, detail),
       occurredAt: iso(row.created_at),

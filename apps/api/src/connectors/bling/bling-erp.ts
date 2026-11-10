@@ -1,6 +1,9 @@
 import https from 'node:https';
 import { OAuthTokenManager } from '../oauth-token-manager.js';
-import { refreshBlingTokenViaHttp } from '../../routes/oauth.js';
+async function refreshBlingToken(currentRefreshToken: string) {
+  const oauth = await import('../../routes/oauth.js');
+  return oauth.refreshBlingTokenViaHttp(currentRefreshToken);
+}
 import { query } from '../../db/pool.js';
 import {
   CreateProductDTO,
@@ -11,10 +14,10 @@ import {
   ErpRejectedError,
   ErpStockBalance,
   ErpStockSnapshot,
-} from './types.js';
+  STOCK_LAUNCH_WARNING,
+} from '../strategy/types.js';
 
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
-export const STOCK_LAUNCH_WARNING = 'Produto criado no Bling, mas falha ao lançar estoque inicial';
 
 export interface BlingCatalogReader {
   list(page: number, pageSize: number): Promise<ErpCatalogPage>;
@@ -124,7 +127,7 @@ export class LiveBlingCatalogReader implements BlingCatalogReader {
       if (wait > 0) await sleep(wait);
       this.lastCallAt = Date.now();
       try {
-        const token = await this.tokens.getValidAccessToken('bling', refreshBlingTokenViaHttp);
+        const token = await this.tokens.getValidAccessToken('bling', refreshBlingToken);
         const res = await httpsSend(method, `${BLING_BASE}${path}`, token, body);
         lastStatus = res.status;
         lastData = res.text ? (JSON.parse(res.text) as T) : (null as T);
@@ -215,11 +218,11 @@ export class LiveBlingCatalogReader implements BlingCatalogReader {
       },
     });
     if (created.status >= 400) throw new ErpRejectedError(blingRejectionMessage(created.data, created.status));
-    const id = created.data?.data?.id;
-    if (id === undefined || id === null || String(id).length === 0) {
-      throw new ErpRejectedError('O Bling não devolveu o ID do produto.');
+    const identity = blingRecordToErpIdentity({ id: created.data?.data?.id, codigo: input.sku });
+    if (!identity.erpId) {
+      throw new ErpRejectedError('O ERP não devolveu o ID do produto.');
     }
-    const erpId = String(id);
+    const erpId = identity.erpId;
     if (input.stock <= 0) return { erp_id: erpId, stockWarning: null };
     try {
       const deposits = await this.get<{ data?: Array<{ id?: number | string; situacao?: string }> }>(
@@ -247,16 +250,30 @@ export class LiveBlingCatalogReader implements BlingCatalogReader {
 }
 
 /** Espelho local para leitura. O cadastro novo sai por createProduct na API do Bling. */
+export function blingRecordToErpIdentity(record: { id?: number | string | null; codigo?: string | null }): {
+  erpId: string;
+  erpSku: string;
+} {
+  return {
+    erpId: record.id === undefined || record.id === null ? '' : String(record.id),
+    erpSku: record.codigo ?? '',
+  };
+}
+
 export class BlingErpConnector implements ErpConnector {
   readonly id = 'bling';
+
+  recordUrl(erpId: string): string {
+    return `https://www.bling.com.br/produtos.php#edit/${encodeURIComponent(erpId)}`;
+  }
 
   constructor(private readonly reader: BlingCatalogReader = new LiveBlingCatalogReader()) {}
 
   async syncProduct(productId: string): Promise<ErpProductSnapshot> {
-    const found = await query<{ id: string; bling_id: string; bling_sku: string; name: string | null }>(
-      `SELECT id, bling_id, bling_sku, name
+    const found = await query<{ id: string; erp_id: string; erp_sku: string; name: string | null }>(
+      `SELECT id, erp_id, erp_sku, name
        FROM master_products
-       WHERE id::text = $1 OR bling_id = $1
+       WHERE id::text = $1 OR erp_id = $1
        LIMIT 1`,
       [productId]
     );
@@ -264,7 +281,7 @@ export class BlingErpConnector implements ErpConnector {
     if (!row) {
       return { found: false, productId: null, externalId: null, sku: null, name: null };
     }
-    return { found: true, productId: row.id, externalId: row.bling_id, sku: row.bling_sku, name: row.name };
+    return { found: true, productId: row.id, externalId: row.erp_id, sku: row.erp_sku, name: row.name };
   }
 
   async getStock(productId: string): Promise<ErpStockSnapshot> {
@@ -272,7 +289,7 @@ export class BlingErpConnector implements ErpConnector {
       `SELECT pv.stock::text AS stock
        FROM product_variants pv
        INNER JOIN master_products mp ON mp.id = pv.master_product_id
-       WHERE (mp.id::text = $1 OR mp.bling_id = $1) AND pv.is_default = true
+       WHERE (mp.id::text = $1 OR mp.erp_id = $1) AND pv.is_default = true
        LIMIT 1`,
       [productId]
     );
@@ -285,7 +302,7 @@ export class BlingErpConnector implements ErpConnector {
       `SELECT pv.price::text AS price
        FROM product_variants pv
        INNER JOIN master_products mp ON mp.id = pv.master_product_id
-       WHERE (mp.id::text = $1 OR mp.bling_id = $1) AND pv.is_default = true
+       WHERE (mp.id::text = $1 OR mp.erp_id = $1) AND pv.is_default = true
        LIMIT 1`,
       [productId]
     );

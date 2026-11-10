@@ -7,7 +7,7 @@ import { API_BASE_URL, apiFetch, ApiError } from '../../../utils/api-client';
 
 interface EanItem {
   id: string;
-  blingId: string | null;
+  erpId: string | null;
   productName: string | null;
   variantSku: string | null;
   currentEan: string | null;

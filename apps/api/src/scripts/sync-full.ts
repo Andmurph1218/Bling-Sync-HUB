@@ -1,9 +1,11 @@
 import { runFullCatalogSync } from '../catalog/full-sync.js';
+import { loadConnectors } from '../connectors/load.js';
 import { createErpConnector } from '../connectors/strategy/factory.js';
 import { getPool } from '../db/pool.js';
 
 async function main(): Promise<void> {
   const startPage = Number(process.argv[2] ?? '1');
+  await loadConnectors();
   const report = await runFullCatalogSync(createErpConnector('bling'), {
     startPage: Number.isFinite(startPage) && startPage > 0 ? startPage : 1,
     skipExisting: true,

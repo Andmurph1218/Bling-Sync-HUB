@@ -1,4 +1,4 @@
-import { BlingProductPayload, BlingStockBalanceItem, BlingVariacaoPayload } from '../contracts/fixtures/bling.fixtures.js';
+import { InboundProduct, InboundStockBalance, InboundVariant } from '../connectors/strategy/inbound.js';
 import { ErpConnector } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { isAllowedImageHost, EnqueueImageCandidate } from '../engines/iqre.js';
@@ -30,8 +30,8 @@ export interface FullSyncReport {
 
 export interface FullSyncHooks {
   upsertProduct?: (
-    payload: BlingProductPayload,
-    stockBySku: Record<string, BlingStockBalanceItem>
+    payload: InboundProduct,
+    stockBySku: Record<string, InboundStockBalance>
   ) => Promise<{ masterProductId: string; variantIdsBySku: Record<string, string> }>;
   scoreProduct?: (masterProductId: string) => Promise<boolean>;
   pageSize?: number;
@@ -73,32 +73,32 @@ function note(report: FullSyncReport, message: string, countsAsFailure: boolean)
   if (report.errors.length < MAX_ERRORS) report.errors.push(message.slice(0, 240));
 }
 
-function asProduct(raw: unknown): BlingProductPayload | null {
+function asProduct(raw: unknown): InboundProduct | null {
   if (!raw || typeof raw !== 'object' || !('id' in raw)) return null;
-  const payload = raw as BlingProductPayload;
+  const payload = raw as InboundProduct;
   if (payload.codigo == null || String(payload.codigo).trim() === '') {
     payload.codigo = `BLING-${payload.id}`;
   }
   return payload;
 }
 
-function parentId(payload: BlingProductPayload): string | null {
+function parentId(payload: InboundProduct): string | null {
   const parent = (payload as { variacao?: { produtoPai?: { id?: number | string } } }).variacao?.produtoPai?.id;
   if (parent === undefined || parent === null || String(parent).trim() === '') return null;
   return String(parent);
 }
 
 async function defaultAlreadyImported(externalId: string): Promise<boolean> {
-  const found = await query(`SELECT 1 FROM master_products WHERE bling_id = $1 LIMIT 1`, [externalId]);
+  const found = await query(`SELECT 1 FROM master_products WHERE erp_id = $1 LIMIT 1`, [externalId]);
   return Boolean(found.rows[0]);
 }
 
-async function hydrateVariations(erp: ErpConnector, payload: BlingProductPayload): Promise<void> {
+async function hydrateVariations(erp: ErpConnector, payload: InboundProduct): Promise<void> {
   if (payload.formato !== 'V' || (payload.variacoes ?? []).length > 0 || !erp.listChildIds) return;
   const childIds = await erp.listChildIds(String(payload.id));
-  const variations: BlingVariacaoPayload[] = [];
+  const variations: InboundVariant[] = [];
   for (const childId of childIds) {
-    let child: BlingProductPayload | null = null;
+    let child: InboundProduct | null = null;
     try {
       child = asProduct(await erp.pullCatalogProduct(childId));
     } catch (error) {
@@ -106,7 +106,7 @@ async function hydrateVariations(erp: ErpConnector, payload: BlingProductPayload
       continue;
     }
     if (!child || child.tipo !== 'P') continue;
-    const named = child as BlingProductPayload & { variacao?: { nome?: string; ordem?: number } };
+    const named = child as InboundProduct & { variacao?: { nome?: string; ordem?: number } };
     variations.push({
       id: named.id,
       nome: named.nome,
@@ -132,22 +132,22 @@ async function hydrateVariations(erp: ErpConnector, payload: BlingProductPayload
   if (variations.length === 0) payload.formato = 'S';
 }
 
-function imageCandidates(payload: BlingProductPayload): EnqueueImageCandidate[] {
+function imageCandidates(payload: InboundProduct): EnqueueImageCandidate[] {
   const midia = (payload as {
     midia?: { imagens?: { externas?: Array<{ link?: string }>; internas?: Array<{ link?: string }> } };
   }).midia;
   const links = [...(midia?.imagens?.internas ?? []), ...(midia?.imagens?.externas ?? [])]
     .map((image) => image.link?.trim() ?? '')
     .filter((link) => link.length > 0 && isAllowedImageHost(link));
-  return links.map((source_url) => ({ source_url, source_platform: 'bling' }));
+  return links.map((source_url) => ({ source_url, source_platform: 'erp' }));
 }
 
 async function defaultUpsert(
-  payload: BlingProductPayload,
-  stockBySku: Record<string, BlingStockBalanceItem>
+  payload: InboundProduct,
+  stockBySku: Record<string, InboundStockBalance>
 ): Promise<{ masterProductId: string; variantIdsBySku: Record<string, string> }> {
   const report = await runFullProductCatalogPipeline({
-    blingPayload: payload,
+    inboundPayload: payload,
     stockBalancesBySku: stockBySku,
     imagesToEnqueue: imageCandidates(payload),
   });
@@ -156,8 +156,8 @@ async function defaultUpsert(
 
 async function defaultScore(masterProductId: string): Promise<boolean> {
   const found = await query<{
-    bling_id: string;
-    bling_sku: string | null;
+    erp_id: string;
+    erp_sku: string | null;
     ncm_status: string;
     ncm_fiscal_risk: boolean;
     hub_category_id: string | null;
@@ -165,7 +165,7 @@ async function defaultScore(masterProductId: string): Promise<boolean> {
     ean_status: string | null;
     has_cover: boolean;
   }>(
-    `SELECT mp.bling_id, mp.bling_sku, mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id,
+    `SELECT mp.erp_id, mp.erp_sku, mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id,
             pv.price::text AS price, pv.ean_status,
             EXISTS (
               SELECT 1 FROM product_images pi
@@ -179,8 +179,8 @@ async function defaultScore(masterProductId: string): Promise<boolean> {
   const row = found.rows[0];
   if (!row) return false;
   const checklist = evaluateCatalogChecklist({
-    blingId: row.bling_id,
-    sku: row.bling_sku,
+    erpId: row.erp_id,
+    sku: row.erp_sku,
     hasCoverImage: row.has_cover,
     hubCategoryId: row.hub_category_id,
     mappedPlatforms: [],
@@ -206,7 +206,7 @@ async function recordSyncFailure(externalId: string, error: unknown): Promise<vo
   const message = error instanceof Error ? error.message : String(error);
   try {
     const product = await query<{ id: string }>(
-      `SELECT id FROM master_products WHERE bling_id = $1 LIMIT 1`,
+      `SELECT id FROM master_products WHERE erp_id = $1 LIMIT 1`,
       [externalId]
     );
     const productId = product.rows[0]?.id ?? null;
@@ -215,8 +215,8 @@ async function recordSyncFailure(externalId: string, error: unknown): Promise<vo
     }
     await query(
       `INSERT INTO sync_logs (product_id, platform, direction, status, error_detail, idempotency_key)
-       VALUES ($1, 'bling', 'pull', 'failed', $2, $3)`,
-      [productId, message.slice(0, 500), `bling-detail:${externalId}:${Date.now()}`]
+       VALUES ($1, 'erp', 'pull', 'failed', $2, $3)`,
+      [productId, message.slice(0, 500), `erp-detail:${externalId}:${Date.now()}`]
     );
   } catch {
     // A falha de log não pode interromper o cursor da sync.
@@ -225,9 +225,9 @@ async function recordSyncFailure(externalId: string, error: unknown): Promise<vo
 
 async function stockForBatch(
   erp: ErpConnector,
-  batch: BlingProductPayload[]
-): Promise<Map<string, BlingStockBalanceItem>> {
-  const balances = new Map<string, BlingStockBalanceItem>();
+  batch: InboundProduct[]
+): Promise<Map<string, InboundStockBalance>> {
+  const balances = new Map<string, InboundStockBalance>();
   if (!erp.pullStockBalances) return balances;
   const ids: string[] = [];
   for (const payload of batch) {
@@ -238,14 +238,14 @@ async function stockForBatch(
     const chunk = ids.slice(offset, offset + STOCK_CHUNK);
     const rows = await erp.pullStockBalances(chunk);
     for (const row of rows) {
-      balances.set(row.externalId, row.raw as BlingStockBalanceItem);
+      balances.set(row.externalId, row.raw as InboundStockBalance);
     }
   }
   return balances;
 }
 
-function stockBySku(payload: BlingProductPayload, balances: Map<string, BlingStockBalanceItem>): Record<string, BlingStockBalanceItem> {
-  const mapped: Record<string, BlingStockBalanceItem> = {};
+function stockBySku(payload: InboundProduct, balances: Map<string, InboundStockBalance>): Record<string, InboundStockBalance> {
+  const mapped: Record<string, InboundStockBalance> = {};
   const parent = balances.get(String(payload.id));
   if (parent && payload.codigo) mapped[payload.codigo] = parent;
   for (const variation of payload.variacoes ?? []) {
@@ -287,7 +287,7 @@ export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks
       }
       previousFirst = listed.externalIds[0] ?? '';
 
-      const batch: BlingProductPayload[] = [];
+      const batch: InboundProduct[] = [];
       for (const externalId of listed.externalIds) {
         report.seen += 1;
         try {
@@ -318,7 +318,7 @@ export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks
         }
       }
 
-      let balances = new Map<string, BlingStockBalanceItem>();
+      let balances = new Map<string, InboundStockBalance>();
       try {
         balances = await stockForBatch(erp, batch);
       } catch (error) {

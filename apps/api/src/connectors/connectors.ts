@@ -5,11 +5,7 @@
 import crypto from 'node:crypto';
 import { query } from '../db/pool.js';
 import { classifyApiHttpError } from '../contracts/mappers.js';
-import {
-  BlingCallerModule,
-  BlingRateLimiter,
-  sharedBlingRateLimiter,
-} from './bling-rate-limiter.js';
+import { ErpCallLane, ScheduledLimiter, rateLimiter } from './rate-limit-port.js';
 import { OAuthRefreshFn, OAuthTokenManager } from './oauth-token-manager.js';
 
 export interface HttpTransportRequest {
@@ -31,7 +27,7 @@ export type HttpTransport = <T = unknown>(
 
 export interface BlingConnectorOptions {
   baseUrl?: string;
-  limiter?: BlingRateLimiter;
+  limiter?: ScheduledLimiter;
   tokenManager: OAuthTokenManager;
   refreshFn: OAuthRefreshFn;
   transport: HttpTransport;
@@ -39,14 +35,14 @@ export interface BlingConnectorOptions {
 
 export class BlingConnector {
   private readonly baseUrl: string;
-  private readonly limiter: BlingRateLimiter;
+  private readonly limiter: ScheduledLimiter;
   private readonly tokenManager: OAuthTokenManager;
   private readonly refreshFn: OAuthRefreshFn;
   private readonly transport: HttpTransport;
 
   constructor(options: BlingConnectorOptions) {
     this.baseUrl = options.baseUrl ?? 'https://api.bling.com.br/Api/v3';
-    this.limiter = options.limiter ?? sharedBlingRateLimiter;
+    this.limiter = options.limiter ?? rateLimiter();
     this.tokenManager = options.tokenManager;
     this.refreshFn = (refreshToken, provider) =>
       this.limiter.schedule('token', () => options.refreshFn(refreshToken, provider));
@@ -54,7 +50,7 @@ export class BlingConnector {
   }
 
   public async request<T = unknown>(
-    callerModule: BlingCallerModule,
+    callerModule: ErpCallLane,
     method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
     path: string,
     body?: unknown
@@ -111,8 +107,8 @@ export class BlingConnector {
    * e grava em hub_writes para evitar eco no WIG (Seção 4 e 8.5).
    */
   public async applyToBling(
-    blingId: string,
-    callerModule: BlingCallerModule,
+    erpId: string,
+    callerModule: ErpCallLane,
     allowedFieldsPayload: {
       marca?: string;
       pesoLiquido?: number;
@@ -124,15 +120,15 @@ export class BlingConnector {
     const requestId = crypto.randomUUID();
 
     await query(
-      `INSERT INTO hub_writes (bling_id, request_id, changed_fields)
+      `INSERT INTO hub_writes (erp_id, request_id, changed_fields)
        VALUES ($1, $2, $3)`,
-      [blingId, requestId, changedFields]
+      [erpId, requestId, changedFields]
     );
 
     const res = await this.request(
       callerModule,
       'PATCH',
-      `/produtos/${blingId}`,
+      `/produtos/${erpId}`,
       allowedFieldsPayload
     );
 

@@ -1,4 +1,5 @@
 import { query } from '../db/pool.js';
+import { DEFAULT_ERP_ID } from '../connectors/strategy/factory.js';
 import { CatalogListItem, listCatalog } from './list.js';
 
 export type ProblemType = 'estoque' | 'preco' | 'anuncio' | 'cadastro';
@@ -9,7 +10,7 @@ export interface ProblemItem {
   sku: string;
   name: string;
   productId: string;
-  blingId: string;
+  erpId: string;
   channel: string;
   message: string;
   source: 'publish_queue' | 'webhook_events' | 'completude';
@@ -46,7 +47,7 @@ const CHECKLIST_META: Record<string, { type: ProblemType; label: string; message
   cover: { type: 'anuncio', label: 'produtos sem imagem', message: 'Falta imagem de capa elegível', channel: 'Mercado Livre e Nuvemshop' },
   channel_category: { type: 'anuncio', label: 'produtos sem categoria no canal', message: 'Categoria do canal ainda não está verde', channel: 'Mercado Livre e Nuvemshop' },
   attributes: { type: 'anuncio', label: 'produtos com atributos pendentes', message: 'Atributos obrigatórios do anúncio ainda não resolvidos', channel: 'Mercado Livre e Nuvemshop' },
-  stock: { type: 'estoque', label: 'produtos sem leitura de estoque', message: 'Estoque ainda não foi lido do ERP', channel: 'Bling' },
+  stock: { type: 'estoque', label: 'produtos sem leitura de estoque', message: 'Estoque ainda não foi lido do ERP', channel: 'ERP' },
 };
 
 const CHANNEL_NAME: Record<string, string> = {
@@ -55,10 +56,11 @@ const CHANNEL_NAME: Record<string, string> = {
   shopee: 'Shopee',
   amazon: 'Amazon',
   tiktok: 'TikTok',
-  bling: 'Bling',
+  erp: 'ERP',
 };
 
 function channelName(value: string): string {
+  if (value === DEFAULT_ERP_ID) return 'ERP';
   return CHANNEL_NAME[value] ?? value;
 }
 
@@ -69,7 +71,7 @@ export function translateProblemMessage(channel: string, raw: string | null): st
   if (text === 'escrita_ao_vivo_desligada') {
     return `O envio para ${name} não saiu: a publicação ao vivo está desligada.`;
   }
-  if (text === 'estoque_na_integracao_nativa') return 'O estoque continua na integração nativa do Bling.';
+  if (text === 'estoque_na_integracao_nativa') return 'O estoque continua na integração nativa do ERP.';
   if (text === 'modo_catalogo') return 'Pedido ou nota fiscal fora do modo catálogo.';
   if (/image|imagem|picture/i.test(text) && /small|pequena|size|tamanho|min/i.test(text)) {
     return `Rejeitado pelo ${name}: imagem pequena.`;
@@ -106,7 +108,7 @@ function fromChecklist(code: string, item: CatalogListItem): ProblemItem | null 
     sku: item.sku || 'Sem SKU',
     name: item.name ?? 'Sem nome',
     productId: item.id,
-    blingId: item.blingId,
+    erpId: item.erpId,
     channel: meta.channel,
     message: meta.message,
     source: 'completude',
@@ -131,11 +133,11 @@ export async function listProblems(): Promise<{ groups: ProblemGroup[]; pendenci
     channel: string;
     error_message: string | null;
     product_id: string;
-    bling_id: string;
-    bling_sku: string;
+    erp_id: string;
+    erp_sku: string;
     name: string | null;
   }>(
-    `SELECT q.id, q.channel, q.error_message, mp.id AS product_id, mp.bling_id, mp.bling_sku, mp.name
+    `SELECT q.id, q.channel, q.error_message, mp.id AS product_id, mp.erp_id, mp.erp_sku, mp.name
      FROM publish_queue q
      INNER JOIN master_products mp ON mp.id = q.product_id
      WHERE q.status = 'failed'
@@ -149,10 +151,10 @@ export async function listProblems(): Promise<{ groups: ProblemGroup[]; pendenci
     items.push({
       id: `publish:${row.id}`,
       type,
-      sku: row.bling_sku || 'Sem SKU',
+      sku: row.erp_sku || 'Sem SKU',
       name: row.name ?? 'Sem nome',
       productId: row.product_id,
-      blingId: row.bling_id,
+      erpId: row.erp_id,
       channel: channelName(row.channel),
       message: translateProblemMessage(row.channel, row.error_message),
       source: 'publish_queue',
@@ -166,14 +168,14 @@ export async function listProblems(): Promise<{ groups: ProblemGroup[]; pendenci
     resource_id: string;
     error_detail: string | null;
     product_id: string | null;
-    bling_id: string | null;
-    bling_sku: string | null;
+    erp_id: string | null;
+    erp_sku: string | null;
     name: string | null;
   }>(
     `SELECT w.id, w.source, w.event_type, w.resource_id, w.error_detail,
-            mp.id AS product_id, mp.bling_id, mp.bling_sku, mp.name
+            mp.id AS product_id, mp.erp_id, mp.erp_sku, mp.name
      FROM webhook_events w
-     LEFT JOIN master_products mp ON mp.bling_id = w.resource_id
+     LEFT JOIN master_products mp ON mp.erp_id = w.resource_id
      WHERE w.status = 'failed'
      ORDER BY w.created_at DESC
      LIMIT 80`
@@ -182,10 +184,10 @@ export async function listProblems(): Promise<{ groups: ProblemGroup[]; pendenci
     items.push({
       id: `webhook:${row.id}`,
       type: webhookType(row.event_type),
-      sku: row.bling_sku || row.resource_id || 'Sem SKU',
+      sku: row.erp_sku || row.resource_id || 'Sem SKU',
       name: row.name ?? `Evento ${row.event_type}`,
       productId: row.product_id ?? '',
-      blingId: row.bling_id ?? row.resource_id,
+      erpId: row.erp_id ?? row.resource_id,
       channel: channelName(row.source),
       message: webhookMessage(row.event_type, row.error_detail, row.source),
       source: 'webhook_events',

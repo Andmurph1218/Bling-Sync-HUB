@@ -8,7 +8,7 @@ import { runAllMigrationsUp } from '../db/migrator.js';
 import { createUser } from '../auth/service.js';
 import { runFullProductCatalogPipeline } from '../orchestrator/pipeline.js';
 import { resolvePlatformItemPire } from '../engines/pire.js';
-import { BLING_SIMPLE_PRODUCT_FIXTURE, BLING_STOCK_BALANCES_TWO_SELLERS_FIXTURE } from '../contracts/fixtures/bling.fixtures.js';
+import { BLING_SIMPLE_PRODUCT_FIXTURE, BLING_STOCK_BALANCES_TWO_SELLERS_FIXTURE } from '../connectors/bling/fixtures.js';
 
 const SIMPLE_PRODUCT = BLING_SIMPLE_PRODUCT_FIXTURE.data;
 const SIMPLE_BALANCE = BLING_STOCK_BALANCES_TWO_SELLERS_FIXTURE.data[0]!;
@@ -69,7 +69,7 @@ describe('Evolução do Dashboard (docs/bling_sync_hub_evolucao_dashboard.md —
     operatorCookie = await loginCookie(app, 'op_evol@blingsync.local', 'Password!OpEvol1');
 
     await runFullProductCatalogPipeline({
-      blingPayload: SIMPLE_PRODUCT,
+      inboundPayload: SIMPLE_PRODUCT,
       stockBalancesBySku: {
         [SIMPLE_PRODUCT.codigo]: SIMPLE_BALANCE,
       },
@@ -154,7 +154,7 @@ describe('Evolução do Dashboard (docs/bling_sync_hub_evolucao_dashboard.md —
       .get(`/api/dashboard/products/${SIMPLE_PRODUCT.id}`)
       .set('Cookie', adminCookie);
     expect(prodRes.status).toBe(200);
-    expect(prodRes.body.product.bling_sku).toBe(SIMPLE_PRODUCT.codigo);
+    expect(prodRes.body.product.erp_sku).toBe(SIMPLE_PRODUCT.codigo);
     expect(prodRes.body.variants.length).toBeGreaterThanOrEqual(1);
 
     const simRes = await request(app).post('/api/dashboard/simulate-sync').set('Cookie', operatorCookie);
@@ -194,6 +194,6 @@ describe('Evolução do Dashboard (docs/bling_sync_hub_evolucao_dashboard.md —
     const item = res.body.items.find((i: { platformProductId: string }) => i.platformProductId === 'NS-EVOL-1');
     expect(item).toBeDefined();
     expect(item.channel.title).toBeTruthy();
-    expect(item.candidate?.blingSku).toBe(SIMPLE_PRODUCT.codigo);
+    expect(item.candidate?.erpSku).toBe(SIMPLE_PRODUCT.codigo);
   });
 });

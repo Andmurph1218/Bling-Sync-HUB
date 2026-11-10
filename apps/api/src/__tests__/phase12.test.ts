@@ -9,7 +9,7 @@ import {
   BLING_STOCK_BALANCES_WITH_ML_FULL_FIXTURE,
   BLING_VARIABLE_PRODUCT_FIXTURE,
   BLING_WEBHOOK_STOCK_FIXTURE,
-} from '../contracts/fixtures/bling.fixtures.js';
+} from '../connectors/bling/fixtures.js';
 import {
   executeAndMeasureP1StockFlow,
   getOperationalMetrics,
@@ -73,7 +73,7 @@ describe('Fase 12 — Ensaio com Recorte Real do Catálogo e Medição de Lag de
 
     // 1. Executa pipeline para Produto Simples (formato S), Produto com Variações (formato V) e Kit (formato E)
     const simpleRun = await runFullProductCatalogPipeline({
-      blingPayload: BLING_SIMPLE_PRODUCT_FIXTURE.data,
+      inboundPayload: BLING_SIMPLE_PRODUCT_FIXTURE.data,
       stockBalancesBySku: {
         'GAR-INOX-500-PT': BLING_STOCK_BALANCES_WITH_ML_FULL_FIXTURE.data[0]!,
       },
@@ -111,7 +111,7 @@ describe('Fase 12 — Ensaio com Recorte Real do Catálogo e Medição de Lag de
     });
 
     const variableRun = await runFullProductCatalogPipeline({
-      blingPayload: BLING_VARIABLE_PRODUCT_FIXTURE.data,
+      inboundPayload: BLING_VARIABLE_PRODUCT_FIXTURE.data,
       mlFamily: {
         familyId: 'MLBF990011',
         familyName: 'Camiseta Dry Fit Performance',
@@ -149,7 +149,7 @@ describe('Fase 12 — Ensaio com Recorte Real do Catálogo e Medição de Lag de
     });
 
     const kitRun = await runFullProductCatalogPipeline({
-      blingPayload: BLING_KIT_PRODUCT_FIXTURE.data,
+      inboundPayload: BLING_KIT_PRODUCT_FIXTURE.data,
     });
 
     expect(simpleRun.masterProductId).toBeDefined();

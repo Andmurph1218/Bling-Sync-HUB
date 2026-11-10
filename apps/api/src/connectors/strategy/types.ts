@@ -59,6 +59,8 @@ export interface CreateProductDTO {
   stock: number;
 }
 
+export const STOCK_LAUNCH_WARNING = 'Produto criado no ERP, mas falha ao lançar estoque inicial';
+
 export class ErpRejectedError extends Error {
   constructor(message: string) {
     super(message);
@@ -77,6 +79,7 @@ export interface ErpConnector {
   pullStockBalances?(externalIds: string[]): Promise<ErpStockBalance[]>;
   listChildIds?(parentId: string): Promise<string[]>;
   createProduct(productData: CreateProductDTO): Promise<{ erp_id: string; stockWarning: string | null }>;
+  recordUrl?(erpId: string): string;
 }
 
 export interface ListingDraft {

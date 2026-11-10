@@ -77,14 +77,14 @@ describe('Fase 10 — Gerenciador de Ciclo de Vida de Dados DLM (Coordenação e
     });
 
     const prodRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('10001', 'PROD-DLM-1', 'Produto Permanente DLM', 'P', 'S')
        RETURNING id`
     );
     const masterId = prodRes.rows[0]!.id;
 
     const varRes = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price)
        VALUES ($1, 'PROD-DLM-1', true, 'S', 79.90)
        RETURNING id`,
       [masterId]
@@ -197,7 +197,7 @@ describe('Fase 10 — Gerenciador de Ciclo de Vida de Dados DLM (Coordenação e
 
   it('3. Arquivamento fiscal (MOVE para *_archive) e plano de manutenção de partições (12m e 3m)', async () => {
     const prodRes = await query<{ id: string }>(
-      `SELECT id FROM master_products WHERE bling_id = '10001'`
+      `SELECT id FROM master_products WHERE erp_id = '10001'`
     );
     const masterId = prodRes.rows[0]!.id;
 

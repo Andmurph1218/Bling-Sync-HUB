@@ -24,6 +24,7 @@ import * as m022 from './migrations/1729080000022_problem-dismissals.js';
 import * as m023 from './migrations/1729080000023_viewer-role.js';
 import * as m024 from './migrations/1729080000024_import-job-progress.js';
 import * as m025 from './migrations/1729080000025_governance.js';
+import * as m026 from './migrations/1729080000026_erp-identity.js';
 
 export interface MigrationStep {
   id: number;
@@ -58,6 +59,7 @@ export const ALL_MIGRATIONS: MigrationStep[] = [
   { id: 23, name: '1729080000023_viewer-role', upSql: m023.UP_SQL, downSql: m023.DOWN_SQL },
   { id: 24, name: '1729080000024_import-job-progress', upSql: m024.UP_SQL, downSql: m024.DOWN_SQL },
   { id: 25, name: '1729080000025_governance', upSql: m025.UP_SQL, downSql: m025.DOWN_SQL },
+  { id: 26, name: '1729080000026_erp-identity', upSql: m026.UP_SQL, downSql: m026.DOWN_SQL },
 ];
 
 /**

@@ -27,12 +27,12 @@ interface CategoryOption {
 }
 
 export function ProductFixModal({
-  blingId,
+  erpId,
   reason,
   onClose,
   onSaved,
 }: {
-  blingId: string;
+  erpId: string;
   reason: string;
   onClose: () => void;
   onSaved: () => void;
@@ -45,7 +45,7 @@ export function ProductFixModal({
 
   const load = async () => {
     const [nextSheet, nextCategories] = await Promise.all([
-      apiFetch<SheetPayload>(`/api/catalog/products/${blingId}/sheet`),
+      apiFetch<SheetPayload>(`/api/catalog/products/${erpId}/sheet`),
       apiFetch<{ categories: CategoryOption[] }>('/api/catalog/categories'),
     ]);
     setSheet(nextSheet);
@@ -54,7 +54,7 @@ export function ProductFixModal({
 
   useEffect(() => {
     void load().catch(() => setError('Não foi possível abrir a ficha deste produto.'));
-  }, [blingId]);
+  }, [erpId]);
 
   const saveCategory = async (hubCategoryId: string) => {
     if (!sheet) return;

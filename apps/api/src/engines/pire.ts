@@ -120,7 +120,7 @@ export interface PireExternalItemInput {
 
 export interface CandidateEvaluation {
   master_product_id: string;
-  bling_sku: string;
+  erp_sku: string;
   name: string | null;
   strongSignals: Array<'sku' | 'ean' | 'name_jw_90'>;
   auxiliarySignals: Array<'name_jw_70_89' | 'price_10pct' | 'weight_15pct'>;
@@ -143,10 +143,10 @@ export interface PireResolutionResult {
 async function loadActiveCatalogForPire(client: PoolClient) {
   const prodsRes = await client.query<{
     id: string;
-    bling_sku: string;
+    erp_sku: string;
     name: string | null;
   }>(
-    `SELECT id, bling_sku, name
+    `SELECT id, erp_sku, name
      FROM master_products
      WHERE catalog_status = 'active'`
   );
@@ -154,13 +154,13 @@ async function loadActiveCatalogForPire(client: PoolClient) {
   const varsRes = await client.query<{
     id: string;
     master_product_id: string;
-    bling_sku: string;
+    erp_sku: string;
     ean: string | null;
     ean_status: string;
     price: string | number | null;
     net_weight: string | number | null;
   }>(
-    `SELECT id, master_product_id, bling_sku, ean, ean_status, price, net_weight
+    `SELECT id, master_product_id, erp_sku, ean, ean_status, price, net_weight
      FROM product_variants
      WHERE variant_status <> 'discontinued'`
   );
@@ -187,7 +187,7 @@ function evaluateItemSignalsAgainstCatalog(
   const eanOwners = new Map<string, Set<string>>();
 
   for (const p of catalog.products) {
-    const normSku = normalizeSkuForMatch(p.bling_sku);
+    const normSku = normalizeSkuForMatch(p.erp_sku);
     if (normSku) {
       const set = skuOwners.get(normSku) ?? new Set<string>();
       set.add(p.id);
@@ -196,7 +196,7 @@ function evaluateItemSignalsAgainstCatalog(
   }
 
   for (const v of catalog.variants) {
-    const normSku = normalizeSkuForMatch(v.bling_sku);
+    const normSku = normalizeSkuForMatch(v.erp_sku);
     if (normSku) {
       const set = skuOwners.get(normSku) ?? new Set<string>();
       set.add(v.master_product_id);
@@ -315,7 +315,7 @@ function evaluateItemSignalsAgainstCatalog(
 
     candidates.push({
       master_product_id: p.id,
-      bling_sku: p.bling_sku,
+      erp_sku: p.erp_sku,
       name: p.name,
       strongSignals,
       auxiliarySignals,
@@ -427,7 +427,7 @@ export async function resolvePlatformItemPire(
       sharedEansAcrossProducts,
       candidates: candidates.map((c) => ({
         master_product_id: c.master_product_id,
-        bling_sku: c.bling_sku,
+        erp_sku: c.erp_sku,
         strongSignals: c.strongSignals,
         auxiliarySignals: c.auxiliarySignals,
         nameSimilarity: c.nameSimilarity,

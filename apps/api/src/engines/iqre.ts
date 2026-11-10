@@ -96,7 +96,7 @@ export function hammingDistance64(hashA: string, hashB: string): number {
 export function computeImageQualityScore(input: {
   width: number;
   height: number;
-  sourcePlatform: 'bling' | 'mercadolivre' | 'nuvemshop';
+  sourcePlatform: 'bling' | 'erp' | 'mercadolivre' | 'nuvemshop';
   format: string;
   rightsStatus: 'owned' | 'third_party_risk' | 'watermark_suspect' | 'approved' | 'rejected';
 }): number {
@@ -108,7 +108,7 @@ export function computeImageQualityScore(input: {
   else if (minDim >= 200) resPoints = 12;
 
   let sourcePoints = 20;
-  if (input.sourcePlatform === 'bling') sourcePoints = 25;
+  if (input.sourcePlatform === 'bling' || input.sourcePlatform === 'erp') sourcePoints = 25;
   else if (input.sourcePlatform === 'nuvemshop') sourcePoints = 22;
 
   const fmt = input.format.toLowerCase();
@@ -146,7 +146,7 @@ export function isEligibleForCover(input: {
 
 export interface EnqueueImageCandidate {
   source_url: string;
-  source_platform: 'bling' | 'mercadolivre' | 'nuvemshop';
+  source_platform: 'bling' | 'erp' | 'mercadolivre' | 'nuvemshop';
   variant_id?: string | null;
 }
 
@@ -232,7 +232,7 @@ export async function processQueuedImagesWorkerBatch(options: {
       variant_id: string | null;
       source_url: string;
       url_normalized: string;
-      source_platform: 'bling' | 'mercadolivre' | 'nuvemshop';
+      source_platform: 'bling' | 'erp' | 'mercadolivre' | 'nuvemshop';
       attempts: number;
       max_attempts: number;
     }>(
@@ -292,6 +292,7 @@ export async function processQueuedImagesWorkerBatch(options: {
 
       if (
         row.source_platform !== 'bling' &&
+        row.source_platform !== 'erp' &&
         probe.sellerId &&
         options.ourSellerIds?.[row.source_platform] &&
         probe.sellerId !== options.ourSellerIds[row.source_platform]

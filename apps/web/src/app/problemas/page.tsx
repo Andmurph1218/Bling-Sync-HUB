@@ -37,7 +37,7 @@ function systemicMessage(group: ProblemGroup): string {
   if (group.key === ERP_SYNC_GROUP) {
     return "Falha Sistêmica Detectada: O job de leitura de estoque parece estar parado. Verifique a conexão com o Bling ou clique em 'Reprocessar Todos'.";
   }
-  const fix = group.action === 'bling' ? "clique em 'Corrigir no Bling'" : "clique em 'Reprocessar Todos'";
+  const fix = group.action === 'erp' ? "clique em 'Corrigir no ERP'" : "clique em 'Reprocessar Todos'";
   return `Falha Sistêmica Detectada: ${group.count.toLocaleString('pt-BR')} itens com o mesmo erro (${group.message}). Verifique a conexão com ${group.channel} ou ${fix}.`;
 }
 

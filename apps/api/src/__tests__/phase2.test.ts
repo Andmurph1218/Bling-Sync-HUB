@@ -6,7 +6,7 @@ import { runAllMigrationsUp } from '../db/migrator.js';
 import {
   BlingQuotaExhaustedError,
   BlingRateLimiter,
-} from '../connectors/bling-rate-limiter.js';
+} from '../connectors/bling/rate-limiter.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
 import {
   BlingConnector,
@@ -229,13 +229,13 @@ describe('Fase 2 — Conectores, Rate Limiter Global (3 req/s + 120k/dia) e OAut
     expect(executedRequests).toHaveLength(2);
 
     const hubWriteRow = await query<{
-      bling_id: string;
+      erp_id: string;
       changed_fields: string[];
     }>(
-      `SELECT bling_id, changed_fields FROM hub_writes WHERE request_id = $1`,
+      `SELECT erp_id, changed_fields FROM hub_writes WHERE request_id = $1`,
       [writeRes.requestId]
     );
-    expect(hubWriteRow.rows[0]?.bling_id).toBe('100101');
+    expect(hubWriteRow.rows[0]?.erp_id).toBe('100101');
     expect(hubWriteRow.rows[0]?.changed_fields).toEqual([
       'marca',
       'pesoLiquido',

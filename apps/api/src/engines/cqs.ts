@@ -311,7 +311,7 @@ export async function evaluateAndApplyCqsEnrichment(input: {
   candidate: ExternalChannelContentCandidate;
   currentRunReplaceCounter?: { count: number };
   applyToBlingCallback?: (
-    blingId: string,
+    erpId: string,
     payload: Record<string, unknown>
   ) => Promise<void>;
 }): Promise<ProductCqsRunReport> {
@@ -376,13 +376,13 @@ export async function evaluateAndApplyCqsEnrichment(input: {
 
     const prodRes = await client.query<{
       id: string;
-      bling_id: string;
+      erp_id: string;
       name: string | null;
       description: string | null;
       brand: string | null;
       category: string | null;
     }>(
-      `SELECT id, bling_id, name, description, brand, category
+      `SELECT id, erp_id, name, description, brand, category
        FROM master_products
        WHERE id = $1
        FOR UPDATE`,
@@ -733,12 +733,12 @@ export async function evaluateAndApplyCqsEnrichment(input: {
     const changedBlingKeys = Object.keys(blingPatchPayload);
     if (changedBlingKeys.length > 0) {
       await client.query(
-        `INSERT INTO hub_writes (bling_id, request_id, changed_fields)
+        `INSERT INTO hub_writes (erp_id, request_id, changed_fields)
          VALUES ($1, $2, $3)`,
-        [prod.bling_id, crypto.randomUUID(), changedBlingKeys]
+        [prod.erp_id, crypto.randomUUID(), changedBlingKeys]
       );
       if (input.applyToBlingCallback) {
-        await input.applyToBlingCallback(prod.bling_id, blingPatchPayload);
+        await input.applyToBlingCallback(prod.erp_id, blingPatchPayload);
       }
     }
 
@@ -794,11 +794,11 @@ export async function revertCqsQualityHistoryChange(input: {
       throw new Error('Linha de shadow (applied = false) não pode ser revertida porque não foi escrita no Bling');
     }
 
-    const prodRes = await client.query<{ bling_id: string }>(
-      `SELECT bling_id FROM master_products WHERE id = $1`,
+    const prodRes = await client.query<{ erp_id: string }>(
+      `SELECT erp_id FROM master_products WHERE id = $1`,
       [row.master_product_id]
     );
-    const blingId = prodRes.rows[0]!.bling_id;
+    const erpId = prodRes.rows[0]!.erp_id;
 
     if (row.field_name === 'brand') {
       await client.query(
@@ -822,9 +822,9 @@ export async function revertCqsQualityHistoryChange(input: {
     }
 
     await client.query(
-      `INSERT INTO hub_writes (bling_id, request_id, changed_fields)
+      `INSERT INTO hub_writes (erp_id, request_id, changed_fields)
        VALUES ($1, $2, $3)`,
-      [blingId, crypto.randomUUID(), [row.field_name]]
+      [erpId, crypto.randomUUID(), [row.field_name]]
     );
 
     await client.query(

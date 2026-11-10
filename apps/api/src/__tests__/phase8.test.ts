@@ -131,10 +131,10 @@ describe('Fase 8 — Guarda de Idempotência de Webhook WIG (HMAC Constante, INS
     expect(recovered[0]?.outcome).toBe('processed');
 
     // Confirma que o produto foi criado via upsert, stock da variante nasceu NULL e sync_logs gravou a mesma idempotency_key
-    const prodCheck = await query<{ id: string; bling_sku: string }>(
-      `SELECT id, bling_sku FROM master_products WHERE bling_id = '800101'`
+    const prodCheck = await query<{ id: string; erp_sku: string }>(
+      `SELECT id, erp_sku FROM master_products WHERE erp_id = '800101'`
     );
-    expect(prodCheck.rows[0]?.bling_sku).toBe('GAR-WIG-800');
+    expect(prodCheck.rows[0]?.erp_sku).toBe('GAR-WIG-800');
 
     const varCheck = await query<{ stock: number | null }>(
       `SELECT stock FROM product_variants WHERE master_product_id = $1`,
@@ -157,7 +157,7 @@ describe('Fase 8 — Guarda de Idempotência de Webhook WIG (HMAC Constante, INS
   it('2. WIG: Eco de escrita do hub (hub_writes), evento fora de ordem mais antigo que o watermark (> 1s) e conteúdo idêntico ficam ignored', async () => {
     // Registra uma escrita feita pelo próprio hub em hub_writes para o produto 800101 alterando 'marca'
     await query(
-      `INSERT INTO hub_writes (bling_id, request_id, changed_fields)
+      `INSERT INTO hub_writes (erp_id, request_id, changed_fields)
        VALUES ('800101', $1, ARRAY['marca'])`,
       [crypto.randomUUID()]
     );
@@ -256,7 +256,7 @@ describe('Fase 8 — Guarda de Idempotência de Webhook WIG (HMAC Constante, INS
     // Webhook Nuvemshop product/deleted (assinado com x-linkedstore-hmac-sha256):
     // marca platform_links.sync_status = 'channel_deleted' e preserva o produto no Bling
     const prodRes = await query<{ id: string }>(
-      `SELECT id FROM master_products WHERE bling_id = '800101'`
+      `SELECT id FROM master_products WHERE erp_id = '800101'`
     );
     const masterId = prodRes.rows[0]!.id;
 

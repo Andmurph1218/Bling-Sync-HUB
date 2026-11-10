@@ -1,8 +1,10 @@
 # JH Sync Hub
 
-Hub de sincronização de catálogo entre **Bling ERP v3**, **Mercado Livre** e **Nuvemshop**.
+HUB / iPaaS de normalização de catálogo. Sistemas internos (ERP e apps) entregam o cadastro. O HUB padroniza produto, variante, categoria e atributo. Os canais de venda recebem só o que passou na validação.
 
-O Bling é a fonte soberana de preço, estoque e dados fiscais. Mercado Livre e Nuvemshop enriquecem conteúdo e mídia quando o dado do Bling está vazio ou com qualidade baixa. O hub publica preço, estoque e catálogo de volta nos canais, com push atômico e webhook idempotente.
+O ERP instalado hoje é o Bling. Os canais com código são Nuvemshop (ativo) e Mercado Livre (código presente, produto inativo). Shopee, Amazon e TikTok Shop aparecem na loja como em breve. Preço, estoque e fiscal continuam soberanos no ERP. O canal enriquece conteúdo e mídia. Pedido e NF-e ficam fora.
+
+O painel público é `https://hub.jhshopping.com.br`. O acompanhamento está em [docs/status-implantacao.md](docs/status-implantacao.md), seção 12.
 
 ## Escopo
 
@@ -18,12 +20,48 @@ Entra neste sistema:
 
 Fica de fora: pedidos, financeiro, emissão de NF-e e frete. O Bling já cobre a nota.
 
+## Arquitetura iPaaS
+
+```text
+Sistemas internos          HUB                         Canais de venda
+ERP, apps        ->        recebe                      catálogo e preço
+                           normaliza atributos   ->    estoque
+                           sincroniza e envia    <-    status de catálogo
+```
+
+O modelo do meio é `master_products` + `product_variants` + mapas de categoria e atributo por canal. A fábrica de conectores é `apps/api/src/connectors/strategy/factory.ts`. A fila de distribuição é `publish_queue` (BullMQ). Com `ENABLE_LIVE_PUBLISHING` diferente de `true`, o worker simula e não chama o marketplace.
+
+A volta desenhada no diagrama (preço, estoque e pedido saindo do canal e entrando no ERP) não está ligada. Webhook de catálogo é aceito. Webhook de pedido ou nota é recusado. `updateStock` do conector de canal devolve `estoque_na_integracao_nativa`.
+
+## Módulos
+
+| Módulo | Rota |
+|---|---|
+| Catálogo | `/catalogo` |
+| Completude | `/completude` |
+| Atributos | `/atributos` |
+| Vínculos | `/vinculos` |
+| Problemas | `/problemas` |
+| Lista de envio | `/publicacoes` |
+| Loja de apps | `/admin/integracoes` |
+| Fiscal | `/fiscal` |
+| Governança | `/configuracoes` |
+
+## Fases da evolução v2
+
+| Fase | Estado | Pendência |
+|---|---|---|
+| P0 | No ar | Ajustes externos de OAuth do Mercado Livre e de webhook de pedido no Bling |
+| P1 | No ar | Lista lê o espelho do HUB, não o ERP ao vivo |
+| P2 | No ar, em sombra | Escrita ao vivo desligada. Checklist verde é a porta do envio real |
+| P3 | Aberto | Shopee e Amazon, publicação automática do checklist verde, série de qualidade, CI/CD |
+
 ## Princípios
 
-1. Dado fiscal e financeiro do Bling não é sobrescrito por canal.
+1. Dado fiscal, preço e estoque do ERP não são sobrescritos por canal.
 2. Campo preenchido com lixo vale menos que campo vazio.
 3. Identidade é multi-sinal. SKU sozinho não decide o vínculo.
-4. Um produto gera um job de push por plataforma. O payload é lido do Bling na execução.
+4. Um produto gera um job por canal. O payload sai do modelo do HUB, com preço e estoque lidos do ERP.
 5. Toda operação pode ser reexecutada com o mesmo resultado.
 6. EAN inválido, NCM divergente ou preço zero bloqueiam publicação. Estoque de anúncio já publicado continua.
 7. NCM e EAN não são apagados. O arquivo fiscal permanece por 5 anos.
@@ -32,7 +70,7 @@ Fica de fora: pedidos, financeiro, emissão de NF-e e frete. O Bling já cobre a
 
 TypeScript estrito, Node.js 20, Express, Next.js, PostgreSQL 16, Redis 7, BullMQ, Sharp, Docker.
 
-Premissa de operação: uma conta Bling, um seller Mercado Livre, uma loja Nuvemshop.
+Premissa de operação atual: uma conta de ERP, os canais que estiverem conectados. O segundo ERP e os canais em breve entram por classe nova na fábrica.
 
 ## Migrations
 
@@ -72,7 +110,7 @@ O build da API grava `apps/api/dist/db/migrations/package.json` com `{"type":"co
 
 ## Estado
 
-O briefing de desenvolvimento é [docs/plano-mestre.md](docs/plano-mestre.md). Ele já incorpora os ajustes da [revisão](docs/revisao-plano-mestre.md), e o acompanhamento detalhado do que já foi estruturado, implantado, o que falta e o que fica de fora está em [docs/status-implantacao.md](docs/status-implantacao.md).
+A espinha das fases 0 a 12 do plano-mestre está concluída. A evolução v2 (P0 a P2) está no ar em sombra. O P3 não começou. O detalhe, com veredito de alinhamento ao diagrama, está na seção 12 de [docs/status-implantacao.md](docs/status-implantacao.md). O plano normativo continua em [docs/plano-mestre.md](docs/plano-mestre.md). As fases abaixo são a espinha desse plano, não o recorte da evolução v2.
 
 - **Fase 0 concluída**: monorepo (`apps/api`, `apps/web`), Docker Compose (PostgreSQL 16 + Redis 7), migration 001 (identidade, sessões opacas SHA-256, senhas Argon2id, `oauth_tokens` AES-256-GCM e trilha imutável `control_changes`), healthcheck e RBAC (`operator`, `fiscal_approver`, `admin`).
 - **Fase 0.5 concluída**: fixtures sanitizados de Bling v3, Mercado Livre (Legado, Família User Product, Estoque Full `meli_facility` / `seller_warehouse` com `x-version`, Migração UPtin) e Nuvemshop (`inventory_levels`) + mappers puros cobrindo produto simples, variação, kit, variação-kit, saldos, preço de loja, 429 e `product.deleted`.

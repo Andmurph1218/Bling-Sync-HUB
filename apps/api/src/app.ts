@@ -15,8 +15,10 @@ import { matchingRouter } from './routes/matching.js';
 import { integrationCatalogRouter } from './routes/integration-catalog.js';
 import { usersAdminRouter } from './routes/users-admin.js';
 import { logger } from './lib/logger.js';
+import { loadConnectors } from './connectors/load.js';
 
 export function createApp(): Express {
+  void loadConnectors();
   const app = express();
 
   app.disable('x-powered-by');

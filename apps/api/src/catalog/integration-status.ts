@@ -6,7 +6,7 @@ export interface ChannelBlocker {
   code: string;
   title: string;
   fixHref: string;
-  where: 'bling' | 'hub';
+  where: 'erp' | 'hub';
 }
 
 export interface ChannelIntegrationView {
@@ -27,7 +27,7 @@ const LABEL: Record<IntegrationVisual, string> = {
 };
 
 function bottleneckTitle(code: string, fallback: string, percent: number): string {
-  if (code === 'ncm') return 'Falta preencher NCM no ERP (Bling)';
+  if (code === 'ncm') return 'Falta preencher NCM no ERP';
   if (code === 'cover') return `Falta imagem com fundo branco (completude ${percent}%)`;
   if (code === 'hub_category' || code === 'channel_category') return 'Falta vincular categoria no HUB';
   if (code === 'ean') return 'Aguardando aprovação de EAN';
@@ -35,8 +35,8 @@ function bottleneckTitle(code: string, fallback: string, percent: number): strin
   return fallback;
 }
 
-function fixPlace(code: string): 'bling' | 'hub' {
-  return code === 'sku' || code === 'ncm' || code === 'price' ? 'bling' : 'hub';
+function fixPlace(code: string): 'erp' | 'hub' {
+  return code === 'sku' || code === 'ncm' || code === 'price' ? 'erp' : 'hub';
 }
 
 /**

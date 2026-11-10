@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { createUser } from '../auth/service.js';
 import { CATALOG_MODE, isOrderOrInvoiceEvent } from '../connectors/strategy/catalog-mode.js';
+import { loadConnectors } from '../connectors/load.js';
 import { createErpConnector, createMarketplaceConnector, resolveInstallStatus } from '../connectors/strategy/factory.js';
 import { ConnectorNotInstalledError } from '../connectors/strategy/types.js';
 import { getPublicBaseUrl, webhookUrl } from '../config/public-url.js';
@@ -29,6 +30,7 @@ describe('P0.6 — fábrica de conectores', () => {
   it('pedido e nota fiscal ficam fora do modo catálogo', async () => {
     expect(isOrderOrInvoiceEvent('order.created')).toBe(true);
     expect(isOrderOrInvoiceEvent('product.updated')).toBe(false);
+    await loadConnectors();
     const bling = createErpConnector('bling');
     expect(bling.id).toBe('bling');
     const ml = createMarketplaceConnector('mercadolivre');

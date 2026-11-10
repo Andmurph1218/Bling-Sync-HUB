@@ -8,7 +8,7 @@ import { buildBlingProductUrl } from '../../utils/matching-signals';
 import { MERCADO_LIVRE_ACTIVE } from '../../config/channels';
 
 interface MarginItem {
-  blingId: string;
+  erpId: string;
   sku: string;
   skuBlank?: boolean;
   productName: string;
@@ -135,9 +135,9 @@ export default function QualidadeMargemPage() {
   }), [items, filter]);
 
   const exportMissingCost = () => {
-    const lines = ['sku;nome;preco;bling_id'];
+    const lines = ['sku;nome;preco;erp_id'];
     for (const item of items.filter((row) => row.costPrice === null)) {
-      lines.push([item.sku, item.productName, String(item.salePrice), item.blingId].map((value) => /[;\n"]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value).join(';'));
+      lines.push([item.sku, item.productName, String(item.salePrice), item.erpId].map((value) => /[;\n"]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value).join(';'));
     }
     const url = URL.createObjectURL(new Blob([`\uFEFF${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8' }));
     const anchor = document.createElement('a');
@@ -228,7 +228,7 @@ export default function QualidadeMargemPage() {
             {visible.map((row) => {
               const state = readiness(row);
               return (
-                <tr key={row.blingId} className={`border-b border-border-color ${row.belowCost ? 'bg-rose-500/5' : ''}`}>
+                <tr key={row.erpId} className={`border-b border-border-color ${row.belowCost ? 'bg-rose-500/5' : ''}`}>
                   <td className="px-4 py-3">
                     <p className="font-mono text-xs text-text-muted">{row.skuBlank || isBlankSku(row.sku) ? <EmptySkuNotice /> : row.sku}</p>
                     <p className="max-w-xs truncate text-sm text-text-primary" title={row.productName}>{row.productName}</p>
@@ -239,12 +239,12 @@ export default function QualidadeMargemPage() {
                       <button
                         type="button"
                         className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-200"
-                        onClick={() => setCostTip((current) => (current === row.blingId ? null : row.blingId))}
+                        onClick={() => setCostTip((current) => (current === row.erpId ? null : row.erpId))}
                       >
                         Custo ausente
                       </button>
                     )}
-                    {costTip === row.blingId && (
+                    {costTip === row.erpId && (
                       <span className="absolute left-3 top-10 z-10 w-56 rounded-lg border border-border-color bg-bg-base p-2 text-[11px] text-text-muted shadow-lg">
                         Cadastre o custo no Bling para calcular a margem.
                       </span>
@@ -262,7 +262,7 @@ export default function QualidadeMargemPage() {
                     <span title={state.detail} className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${state.className}`}>{state.label}</span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <a href={buildBlingProductUrl(row.blingId)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold underline">
+                    <a href={buildBlingProductUrl(row.erpId)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold underline">
                       Editar no Bling
                       <ExternalLink className="h-3 w-3" />
                     </a>

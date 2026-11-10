@@ -58,41 +58,41 @@ describe('Fase 4 — Motores de Identidade PIRE e VIR (Predicado Multi-Sinal, EA
   it('1. PIRE: EAN sozinho não chega a 95 (fica em suggestion <= 80); dois sinais fortes concordantes fazem auto-vínculo (score 95); EAN compartilhado entre dois produtos cai em quarentena', async () => {
     // Produto A e Produto B compartilham o mesmo EAN 7891234567895 (GTIN compartilhado entre produtos diferentes)
     const prodARes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('4001', 'GAR-THERMO-500', 'Garrafa Térmica Inox 500ml Preta', 'P', 'S')
        RETURNING id`
     );
     const prodAId = prodARes.rows[0]!.id;
 
     await query(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, ean, ean_status)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, ean, ean_status)
        VALUES ($1, 'GAR-THERMO-500', true, 'S', 89.90, '7891234567895', 'valid')`,
       [prodAId]
     );
 
     const prodBRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('4002', 'GAR-OUTRA-750', 'Copo Térmico Aço Escovado 750ml', 'P', 'S')
        RETURNING id`
     );
     const prodBId = prodBRes.rows[0]!.id;
 
     await query(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, ean, ean_status)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, ean, ean_status)
        VALUES ($1, 'GAR-OUTRA-750', true, 'S', 99.90, '7891234567895', 'valid')`,
       [prodBId]
     );
 
     // Produto C com EAN único 7891000100011 e SKU único MOCH-IMP-40L
     const prodCRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('4003', 'MOCH-IMP-40L', 'Mochila Impermeável Notebook 40 Litros', 'P', 'S')
        RETURNING id`
     );
     const prodCId = prodCRes.rows[0]!.id;
 
     await query(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, ean, ean_status)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, ean, ean_status)
        VALUES ($1, 'MOCH-IMP-40L', true, 'S', 149.90, '7891000100011', 'valid')`,
       [prodCId]
     );
@@ -136,25 +136,25 @@ describe('Fase 4 — Motores de Identidade PIRE e VIR (Predicado Multi-Sinal, EA
 
   it('2. PIRE: Família User Product com sinais em dois pais diferentes cai em quarentena sem partir a família; família concordante vincula com family_confidence = 95', async () => {
     const prodXRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('4010', 'TENIS-RUN-X', 'Tênis Corrida Leve Pro X', 'P', 'S')
        RETURNING id`
     );
     const prodXId = prodXRes.rows[0]!.id;
     await query(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, ean, ean_status)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, ean, ean_status)
        VALUES ($1, 'TENIS-RUN-X', true, 'S', 299.90, '7891000100028', 'valid')`,
       [prodXId]
     );
 
     const prodYRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('4011', 'TENIS-TRAIL-Y', 'Tênis Trilha Grip Master Y', 'P', 'S')
        RETURNING id`
     );
     const prodYId = prodYRes.rows[0]!.id;
     await query(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price, ean, ean_status)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, ean, ean_status)
        VALUES ($1, 'TENIS-TRAIL-Y', true, 'S', 349.90, '7908123456786', 'valid')`,
       [prodYId]
     );
@@ -229,13 +229,13 @@ describe('Fase 4 — Motores de Identidade PIRE e VIR (Predicado Multi-Sinal, EA
     });
 
     const prodRRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('4020', 'KIT-CAFE-01', 'Kit Cafeteira Italiana Inox 6 Xícaras', 'P', 'S')
        RETURNING id`
     );
     const prodRId = prodRRes.rows[0]!.id;
     await query(
-      `INSERT INTO product_variants (master_product_id, bling_sku, is_default, bling_formato, price)
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price)
        VALUES ($1, 'KIT-CAFE-01', true, 'S', 119.90)`,
       [prodRId]
     );
@@ -277,7 +277,7 @@ describe('Fase 4 — Motores de Identidade PIRE e VIR (Predicado Multi-Sinal, EA
 
   it('4. VIR: Normaliza comboKey por aliases (Medium -> M), consolida condições de venda por user_product_id com trilha em control_changes, detecta missing_ml/extra_ml e conta user_product_seller não publica variations', async () => {
     const prodVRes = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('4030', 'CAM-GRADE-VIR', 'Camiseta Treino VIR', 'P', 'V')
        RETURNING id`
     );
@@ -292,7 +292,7 @@ describe('Fase 4 — Motores de Identidade PIRE e VIR (Predicado Multi-Sinal, EA
 
     // Variante 1 no Bling: cor:Azul|tamanho:M
     const vAzMRes = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_variant_id, bling_sku, is_default, bling_formato, price)
+      `INSERT INTO product_variants (master_product_id, bling_variant_id, erp_sku, is_default, product_format, price)
        VALUES ($1, '4030-1', 'CAM-VIR-AZ-M', false, 'S', 79.90)
        RETURNING id`,
       [masterId]
@@ -307,7 +307,7 @@ describe('Fase 4 — Motores de Identidade PIRE e VIR (Predicado Multi-Sinal, EA
 
     // Variante 2 no Bling: cor:Preto|tamanho:G (vai faltar no ML -> missing_ml)
     const vPtGRes = await query<{ id: string }>(
-      `INSERT INTO product_variants (master_product_id, bling_variant_id, bling_sku, is_default, bling_formato, price)
+      `INSERT INTO product_variants (master_product_id, bling_variant_id, erp_sku, is_default, product_format, price)
        VALUES ($1, '4030-2', 'CAM-VIR-PT-G', false, 'S', 79.90)
        RETURNING id`,
       [masterId]

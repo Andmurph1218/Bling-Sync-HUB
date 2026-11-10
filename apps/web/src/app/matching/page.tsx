@@ -44,8 +44,8 @@ interface QueueApiItem {
   };
   candidate: {
     masterProductId: string;
-    blingId: string | null;
-    blingSku: string;
+    erpId: string | null;
+    erpSku: string;
     name: string | null;
     ean: string | null;
     price: string | null;
@@ -61,8 +61,8 @@ function toComparisonItem(q: QueueApiItem): MatchingComparisonItem {
   const quarantine = q.itemStatus === 'quarantine';
   return {
     id: q.queueId,
-    blingId: q.candidate?.blingId ?? '',
-    blingSku: q.candidate ? q.candidate.blingSku || '(Sem SKU)' : '(sem candidato)',
+    erpId: q.candidate?.erpId ?? '',
+    erpSku: q.candidate ? q.candidate.erpSku || '(Sem SKU)' : '(sem candidato)',
     blingName: q.candidate?.name ?? 'Nenhum produto do Bling sugerido',
     blingEan: q.candidate?.ean ?? 'Ausente',
     blingPrice: money(q.candidate?.price ?? null),
@@ -184,7 +184,7 @@ export default function MatchingPage() {
       pushToast(
         'success',
         'Vínculo confirmado e gravado em platform_links.',
-        `${row.blingSku} ↔ ${row.channelId} (${row.platform}). Nenhuma escrita foi feita no canal.`
+        `${row.erpSku} ↔ ${row.channelId} (${row.platform}). Nenhuma escrita foi feita no canal.`
       );
     }
   };
@@ -196,7 +196,7 @@ export default function MatchingPage() {
         'Par rejeitado. O produto não voltará a ser sugerido para este anúncio.',
         reason
           ? `Motivo gravado em match_rejections: ${reason}`
-          : `Par (${row.blingSku}, ${row.channelId}) gravado em match_rejections.`
+          : `Par (${row.erpSku}, ${row.channelId}) gravado em match_rejections.`
       );
     }
   };
@@ -364,7 +364,7 @@ export default function MatchingPage() {
               {rows.filter((row) => platformFilter === 'mercadolivre' ? row.platformKey === 'mercadolivre' : row.platformKey !== 'mercadolivre').map((row) => {
                 const isQuarantine = row.status === 'Quarentena';
                 const isSelected = selectedIds.includes(row.id);
-                const blingUrl = buildBlingProductUrl(row.blingId);
+                const blingUrl = buildBlingProductUrl(row.erpId);
                 const channelUrl = buildChannelAnnouncementUrl(
                   row.platform,
                   row.channelId
@@ -392,7 +392,7 @@ export default function MatchingPage() {
                         disabled={Boolean(row.resolution) || !row.masterProductId || busy}
                         checked={isSelected}
                         onChange={() => toggleSelectRow(row.id)}
-                        aria-label={`Selecionar ${row.blingSku}`}
+                        aria-label={`Selecionar ${row.erpSku}`}
                         className="h-4 w-4 cursor-pointer rounded border-border-color bg-bg-surface accent-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
                       />
                     </td>
@@ -401,7 +401,7 @@ export default function MatchingPage() {
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-1.5">
                         <span className="font-mono text-xs font-semibold text-emerald-400">
-                          {row.blingSku}
+                          {row.erpSku}
                         </span>
                         <a
                           href={blingUrl}

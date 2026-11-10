@@ -10,8 +10,8 @@ export interface OperationalKpiMetric {
 
 export interface CatalogProductSummary {
   id: string;
-  bling_id: string;
-  bling_sku: string;
+  erp_id: string;
+  erp_sku: string;
   name: string | null;
   brand: string | null;
   ncm: string | null;

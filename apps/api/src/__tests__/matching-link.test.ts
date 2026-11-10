@@ -65,7 +65,7 @@ describe('vínculo de anúncio existente', () => {
 
   it('busca o produto do HUB e o anúncio, e vincular não enfileira publicação', async () => {
     const created = await query<{ id: string }>(
-      `INSERT INTO master_products (bling_id, bling_sku, name, bling_tipo, bling_formato)
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
        VALUES ('vinc-1', 'SKU-VINC', 'Produto já no ML', 'P', 'S')
        RETURNING id`
     );

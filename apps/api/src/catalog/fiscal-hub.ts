@@ -20,7 +20,7 @@ export interface FiscalHubItem {
 const ORIGIN: Record<string, string> = {
   mercadolivre: 'Mercado Livre',
   nuvemshop: 'Nuvemshop',
-  bling: 'Bling',
+  erp: 'ERP',
 };
 
 function origin(value: string): string {
@@ -60,11 +60,11 @@ export async function buildEanHistoryCsv(): Promise<string> {
     action: string;
     ean: string | null;
     new_status: string;
-    bling_sku: string | null;
+    erp_sku: string | null;
     name: string | null;
     email: string | null;
   }>(
-    `SELECT h.created_at, h.action, h.ean, h.new_status, mp.bling_sku, mp.name, u.email
+    `SELECT h.created_at, h.action, h.ean, h.new_status, mp.erp_sku, mp.name, u.email
      FROM ean_validation_history h
      LEFT JOIN master_products mp ON mp.id = h.master_product_id
      LEFT JOIN users u ON u.id = h.actor_id
@@ -83,7 +83,7 @@ export async function buildEanHistoryCsv(): Promise<string> {
         row.action,
         row.ean,
         row.new_status,
-        row.bling_sku,
+        row.erp_sku,
         row.name,
         row.email,
       ]
@@ -105,10 +105,10 @@ export async function loadFiscalHub(): Promise<{
       id: string;
       proposed_ean: string;
       source_platform: string;
-      bling_sku: string | null;
+      erp_sku: string | null;
       name: string | null;
     }>(
-      `SELECT epv.id, epv.proposed_ean, epv.source_platform, pv.bling_sku, mp.name
+      `SELECT epv.id, epv.proposed_ean, epv.source_platform, pv.erp_sku, mp.name
        FROM ean_pending_validation epv
        INNER JOIN product_variants pv ON pv.id = epv.variant_id
        INNER JOIN master_products mp ON mp.id = epv.master_product_id
@@ -122,10 +122,10 @@ export async function loadFiscalHub(): Promise<{
       source_platform: string;
       status: string;
       first_review_by: string | null;
-      bling_sku: string | null;
+      erp_sku: string | null;
       name: string | null;
     }>(
-      `SELECT s.id, s.proposed_ncm, s.source_platform, s.status, s.first_review_by, mp.bling_sku, mp.name
+      `SELECT s.id, s.proposed_ncm, s.source_platform, s.status, s.first_review_by, mp.erp_sku, mp.name
        FROM ncm_manual_suggestions s
        INNER JOIN master_products mp ON mp.id = s.master_product_id
        WHERE s.status IN ('pending_first', 'pending_second')
@@ -133,14 +133,14 @@ export async function loadFiscalHub(): Promise<{
        LIMIT 200`
     ),
     query<{ id: string; email: string }>(`SELECT id, email FROM users`),
-    query<{ id: string; bling_sku: string | null; name: string | null; ncm: string | null }>(
-      `SELECT id, bling_sku, name, ncm FROM master_products
+    query<{ id: string; erp_sku: string | null; name: string | null; ncm: string | null }>(
+      `SELECT id, erp_sku, name, ncm FROM master_products
        WHERE catalog_status = 'active' AND archived_at IS NULL AND ncm_status = 'conflict'
        ORDER BY updated_at DESC
        LIMIT 200`
     ),
-    query<{ master_product_id: string; conflict_ncms: string[] | null; bling_sku: string | null; name: string | null }>(
-      `SELECT a.master_product_id, a.conflict_ncms, mp.bling_sku, mp.name
+    query<{ master_product_id: string; conflict_ncms: string[] | null; erp_sku: string | null; name: string | null }>(
+      `SELECT a.master_product_id, a.conflict_ncms, mp.erp_sku, mp.name
        FROM ncm_divergence_alerts a
        INNER JOIN master_products mp ON mp.id = a.master_product_id
        WHERE a.alert_type = 'variant_conflict' AND a.status = 'open'
@@ -170,7 +170,7 @@ export async function loadFiscalHub(): Promise<{
     items.push({
       id: row.id,
       queue: 'ean',
-      sku: row.bling_sku || 'Sem SKU',
+      sku: row.erp_sku || 'Sem SKU',
       name: row.name ?? 'Sem nome',
       proposed: row.proposed_ean,
       origin: origin(row.source_platform),
@@ -185,7 +185,7 @@ export async function loadFiscalHub(): Promise<{
     items.push({
       id: row.id,
       queue: 'ncm',
-      sku: row.bling_sku || 'Sem SKU',
+      sku: row.erp_sku || 'Sem SKU',
       name: row.name ?? 'Sem nome',
       proposed: row.proposed_ncm,
       origin: origin(row.source_platform),
@@ -201,7 +201,7 @@ export async function loadFiscalHub(): Promise<{
     items.push({
       id: row.id,
       queue: 'conflitos',
-      sku: row.bling_sku || 'Sem SKU',
+      sku: row.erp_sku || 'Sem SKU',
       name: row.name ?? 'Sem nome',
       proposed: row.ncm || 'NCM divergente entre variantes',
       origin: 'Variantes do produto',
@@ -216,7 +216,7 @@ export async function loadFiscalHub(): Promise<{
     items.push({
       id: row.master_product_id,
       queue: 'conflitos',
-      sku: row.bling_sku || 'Sem SKU',
+      sku: row.erp_sku || 'Sem SKU',
       name: row.name ?? 'Sem nome',
       proposed: (row.conflict_ncms ?? []).filter(Boolean).join(', ') || 'NCM divergente entre variantes',
       origin: 'Variantes do produto',

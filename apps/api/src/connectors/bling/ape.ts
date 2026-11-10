@@ -19,11 +19,11 @@
  */
 
 import { PoolClient } from 'pg';
-import { query, withTransaction } from '../db/pool.js';
-import { resolveVariantChannelPrice } from '../contracts/mappers.js';
-import { isBlankSku } from '../catalog/blank-sku.js';
-import { loadMappedAttributePayload } from '../catalog/list.js';
-import { checkStepReadinessGate, PushStepType } from './cre.js';
+import { query, withTransaction } from '../../db/pool.js';
+import { resolveVariantChannelPrice } from '../../contracts/mappers.js';
+import { isBlankSku } from '../../catalog/blank-sku.js';
+import { loadMappedAttributePayload } from '../../catalog/list.js';
+import { checkStepReadinessGate, PushStepType } from '../../engines/cre.js';
 
 export type PushJobKind = 'STOCK_PRICE' | 'CONTENT' | 'CREATE';
 export type PushPriority = 'P1' | 'P2' | 'P3' | 'P4';
@@ -104,10 +104,8 @@ export function deriveStepsForJob(
 }
 
 /**
- * Abre ou promove um job pendente em push_jobs (usando a semântica do índice push_jobs_active):
- * - Se já existir um job 'pending' para (master_product_id, variant_id, platform, job_kind),
- *   promove a prioridade (ex: P2 -> P1) e mescla changed_fields e push_job_steps no mesmo job.
- * - Se o job anterior estiver 'locked' (em execução), cria um NOVO job 'pending' para a janela seguinte!
+ * O envio novo entra na publish_queue. push_jobs fica como livro de passos do estoque/preço
+ * até o worker único absorver esses passos. O processo da API não sobe um worker desta fila.
  */
 export async function enqueueOrPromotePushJob(input: {
   masterProductId: string;
@@ -118,13 +116,23 @@ export async function enqueueOrPromotePushJob(input: {
   changedFields: string[];
 }): Promise<{ pushJobId: string; promotedExisting: boolean }> {
   return withTransaction(async (client: PoolClient) => {
-    const skuRes = await client.query<{ bling_sku: string }>(
-      `SELECT bling_sku FROM product_variants WHERE id = $1`,
+    const skuRes = await client.query<{ erp_sku: string }>(
+      `SELECT erp_sku FROM product_variants WHERE id = $1`,
       [input.variantId]
     );
-    if (isBlankSku(skuRes.rows[0]?.bling_sku)) {
+    if (isBlankSku(skuRes.rows[0]?.erp_sku)) {
       throw new Error('empty_sku_not_syncable');
     }
+    await client.query(
+      `INSERT INTO publish_queue (product_id, channel, payload_json, error_message)
+       VALUES ($1, $2, $3::jsonb, $4)`,
+      [
+        input.masterProductId,
+        input.platform,
+        JSON.stringify({ sku: skuRes.rows[0]?.erp_sku ?? '', kind: input.jobKind }),
+        'fila única',
+      ]
+    );
 
     const existingPending = await client.query<{
       id: string;
@@ -327,7 +335,7 @@ export async function executePushJobById(
 
     const varRes = await client.query<{
       id: string;
-      bling_sku: string;
+      erp_sku: string;
       price: string | number | null;
       promotional_price: string | number | null;
       use_promotional: boolean;
@@ -339,7 +347,7 @@ export async function executePushJobById(
       depth: string | number | null;
       variant_status: 'active' | 'inactive' | 'discontinued';
     }>(
-      `SELECT id, bling_sku, price, promotional_price, use_promotional, cost_price,
+      `SELECT id, erp_sku, price, promotional_price, use_promotional, cost_price,
               stock, net_weight, width, height, depth, variant_status
        FROM product_variants
        WHERE id = $1`,
@@ -475,7 +483,7 @@ export async function executePushJobById(
         if (options?.findExistingChannelListingBySku) {
           const found = await options.findExistingChannelListingBySku(
             job.platform,
-            variant.bling_sku
+            variant.erp_sku
           );
           if (found) {
             await client.query(
@@ -532,7 +540,7 @@ export async function executePushJobById(
 
         const initialStockFloor =
           variant.stock !== null ? Math.max(0, Math.floor(Number(variant.stock))) : 0;
-        const createdItemId = `${job.platform === 'mercadolivre' ? 'MLB' : 'NS'}-CREATED-${variant.bling_sku}`;
+        const createdItemId = `${job.platform === 'mercadolivre' ? 'MLB' : 'NS'}-CREATED-${variant.erp_sku}`;
 
         const mappedAttributes = await loadMappedAttributePayload(
           client,
@@ -546,7 +554,7 @@ export async function executePushJobById(
           endpoint: job.platform === 'mercadolivre' ? '/items' : '/products',
           method: 'POST',
           payload: {
-            sku: variant.bling_sku,
+            sku: variant.erp_sku,
             price: resolvedPrice.effectivePrice,
             stock: initialStockFloor,
             ...(mappedAttributes.length > 0 ? { attributes: mappedAttributes } : {}),
