@@ -22,9 +22,9 @@ O HUB ficou complexo demais para produção. Quem opera logística e estoque pre
 - Plugg.to — [demo](https://youtu.be/239wfkYZD2Q)
 - Moovin HUB — [demo](https://www.youtube.com/watch?v=Yx0fuxKGQE0)
 
-## Estado em 06/11/2026
+## Estado em 11/11/2026
 
-O painel público está em `https://hub.jhshopping.com.br`. O operador troca tema claro e escuro no cabeçalho. Produto incompleto na lista de envio recebe um aviso com as pendências e o atalho para a ficha, sem o banner verde de texto corrido. O acompanhamento está em [status-implantacao.md](status-implantacao.md).
+O painel público está em `https://hub.jhshopping.com.br`. A home mostra progresso da sync do ERP, duplicidades e o que pede ação. Problemas separa duplicidade e divergência de canal. Preço e estoque do ERP não são sobrescritos pelo anúncio. O acompanhamento está em [status-implantacao.md](status-implantacao.md), seção 13. As regras da volta estão em [arquitetura-reversa.md](arquitetura-reversa.md).
 
 ## Fora do escopo (alinhado ao plano-mestre)
 

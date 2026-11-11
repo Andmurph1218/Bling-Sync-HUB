@@ -128,11 +128,30 @@ export interface ListingSearchInput {
   ean: string | null;
 }
 
+/** Produto do HUB usado na leitura do anúncio. Preço e estoque vêm do ERP e não são gravados de volta. */
+export interface MasterProduct {
+  id: string;
+  sku: string;
+  ean: string | null;
+  price: number | null;
+  stock: number | null;
+}
+
+export interface MarketplaceListing {
+  externalId: string;
+  title: string;
+  price: number | null;
+  stock: number | null;
+  images: string[];
+  status: string;
+}
+
 /** Contrato do marketplace. A publicação do P2 chama estes métodos, não a classe HTTP do canal. */
 export interface MarketplaceConnector {
   readonly id: string;
   getCategoryAttributes(channelCategoryId: string): Promise<Array<{ id: string; name: string; required: boolean }>>;
   searchListings(input: ListingSearchInput): Promise<RemoteListing[]>;
+  fetchListings(product: MasterProduct): Promise<MarketplaceListing | null>;
   createListing(draft: ListingDraft): Promise<ListingResult>;
   updateStock(update: StockUpdate): Promise<StockUpdateResult>;
   receiveWebhook(event: IncomingWebhook): Promise<WebhookReceipt>;

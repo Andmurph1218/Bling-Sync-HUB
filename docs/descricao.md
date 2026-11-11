@@ -1,5 +1,7 @@
 # Resumo Simples do Projeto
 
+Estado em 11/11/2026: o painel está em `https://hub.jhshopping.com.br`. O detalhe operacional está em [status-implantacao.md](status-implantacao.md), seção 13. A volta do canal está em [arquitetura-reversa.md](arquitetura-reversa.md).
+
 ## O Que É
 
 O **JH Sync Hub** sincroniza produtos entre o **Bling (ERP)** e os marketplaces **Mercado Livre** e **Nuvemshop**.
@@ -25,8 +27,8 @@ Hoje você tem produtos cadastrados em três lugares diferentes, com informaçõ
    - Fiscal/financeiro? → Bling sempre
    - Conteúdo vazio ou ruim no Bling? → pega do marketplace
    - Imagens? → junta todas, sem repetir
-4. Se algo divergir em campo crítico → gera alerta, nunca sobrescreve
-5. Atualiza o Bling e publica nos canais
+4. Se preço, estoque ou fiscal divergirem → gera alerta. O HUB não grava isso de volta no Bling
+5. Publica nos canais a partir do HUB, com preço e estoque lidos do ERP. A escrita ao vivo só liga com `ENABLE_LIVE_PUBLISHING=true`
 ```
 
 ## Os 4 Grupos de Dados

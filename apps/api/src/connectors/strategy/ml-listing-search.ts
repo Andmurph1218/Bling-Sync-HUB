@@ -1,6 +1,6 @@
 import { OAuthTokenManager } from '../oauth-token-manager.js';
 import { refreshMlTokenViaHttp } from '../../routes/oauth.js';
-import { RemoteListing } from './types.js';
+import { ListingSearchInput, MarketplaceListing, RemoteListing } from './types.js';
 
 const ML_API = 'https://api.mercadolibre.com';
 
@@ -81,4 +81,53 @@ export async function searchMercadoLivreListings(input: {
   const item = await mlGet(`/items/${encodeURIComponent(found[0]!)}`, token);
   const listing = toListing(item);
   return listing ? [listing] : [];
+}
+
+function toMarketplaceListing(payload: unknown): MarketplaceListing | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const item = payload as {
+    id?: unknown;
+    title?: unknown;
+    price?: unknown;
+    status?: unknown;
+    available_quantity?: unknown;
+    pictures?: Array<{ secure_url?: string; url?: string }>;
+  };
+  if (typeof item.id !== 'string' || typeof item.title !== 'string') return null;
+  const images = (item.pictures ?? [])
+    .map((picture) => picture.secure_url || picture.url || '')
+    .filter((url) => url.startsWith('http'));
+  return {
+    externalId: item.id,
+    title: item.title,
+    price: typeof item.price === 'number' ? item.price : null,
+    stock: typeof item.available_quantity === 'number' ? item.available_quantity : null,
+    images,
+    status: typeof item.status === 'string' ? labelListingStatus(item.status) : 'Sem status',
+  };
+}
+
+/** Lê o anúncio ativo do vendedor. Não grava preço nem estoque no ERP. */
+export async function fetchMercadoLivreListing(input: ListingSearchInput): Promise<MarketplaceListing | null> {
+  const tokens = new OAuthTokenManager();
+  const token = await tokens.getValidAccessToken('mercadolivre', refreshMlTokenViaHttp);
+  const me = await mlGet('/users/me', token);
+  const sellerId =
+    me && typeof me === 'object' && 'id' in me && (typeof (me as { id: unknown }).id === 'number' || typeof (me as { id: unknown }).id === 'string')
+      ? String((me as { id: number | string }).id)
+      : '';
+  if (!sellerId) return null;
+  const candidates = [input.sku, input.ean ?? ''].map((value) => value.trim()).filter(Boolean);
+  let found: string[] = [];
+  for (const value of candidates) {
+    found = await searchIds(sellerId, token, value);
+    if (found.length > 0) break;
+  }
+  if (found.length === 0 || !found[0]) return null;
+  const item = await mlGet(`/items/${encodeURIComponent(found[0])}`, token);
+  const listing = toMarketplaceListing(item);
+  if (!listing) return null;
+  const status = listing.status.toLowerCase();
+  if (status !== 'ativo' && status !== 'active') return null;
+  return listing;
 }

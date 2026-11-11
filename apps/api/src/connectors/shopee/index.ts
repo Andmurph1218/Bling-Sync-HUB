@@ -7,6 +7,8 @@ import {
   ListingResult,
   ListingSearchInput,
   MarketplaceConnector,
+  MarketplaceListing,
+  MasterProduct,
   RemoteListing,
   StockUpdate,
   StockUpdateResult,
@@ -171,6 +173,10 @@ export class ShopeeConnector implements MarketplaceConnector {
 
   async searchListings(_input: ListingSearchInput): Promise<RemoteListing[]> {
     return [];
+  }
+
+  async fetchListings(_product: MasterProduct): Promise<MarketplaceListing | null> {
+    return null;
   }
 
   async createListing(draft: ListingDraft): Promise<ListingResult> {

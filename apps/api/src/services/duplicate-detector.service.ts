@@ -3,6 +3,7 @@ import { getMarketplaceConnector } from '../connectors/strategy/factory.js';
 import { ListingSearchInput, RemoteListing } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
+import { reconcileListings } from './reconciliation.service.js';
 
 const CHANNELS = ['mercadolivre', 'nuvemshop'] as const;
 const READY_LIMIT = 40;
@@ -199,6 +200,11 @@ export function startDuplicateDetector(): void {
   const run = () => {
     void detectDuplicates().catch((error: unknown) => {
       logger.error('Detector de duplicidade falhou', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    void reconcileListings().catch((error: unknown) => {
+      logger.error('Reconciliação do canal falhou', {
         error: error instanceof Error ? error.message : String(error),
       });
     });

@@ -172,8 +172,25 @@ function FichaUnicaProdutoPage({
   const [loadState, setLoadState] = useState<'loading' | 'ok' | 'notfound' | 'error'>('loading');
   const [pushAttempts, setPushAttempts] = useState<PushAttemptRow[]>([]);
   const [sheet, setSheet] = useState<CatalogSheet | null>(null);
+  const [channelSnapshots, setChannelSnapshots] = useState<Array<{
+    marketplace: string;
+    externalId: string;
+    price: number | null;
+    stock: number | null;
+    title: string | null;
+    images: string[];
+    status: string | null;
+  }>>([]);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
   const [categories, setCategories] = useState<HubCategoryOption[]>([]);
   const erpId = params.id;
+
+  useEffect(() => {
+    if (activeTab !== 'canais' || !sheet?.item.id) return;
+    void apiFetch<{ snapshots: typeof channelSnapshots }>(`/api/catalog/products/${sheet.item.id}/channel-snapshots`)
+      .then((payload) => setChannelSnapshots(payload.snapshots))
+      .catch(() => setChannelSnapshots([]));
+  }, [activeTab, sheet?.item.id]);
 
   useEffect(() => {
     void (async () => {
@@ -401,6 +418,39 @@ function FichaUnicaProdutoPage({
                 {(sheet?.item.integrations ?? []).length === 0 && (
                   <p className="text-xs text-text-muted">A prontidão aparece depois da leitura do catálogo.</p>
                 )}
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-border-color bg-bg-surface/50 p-5">
+              <h2 className="text-sm font-bold text-text-primary">Anúncio lido do canal</h2>
+              <p className="mt-1 text-xs text-text-muted">Retrato da última reconciliação. Preço e estoque do ERP não mudam.</p>
+              {importNotice && <p className="mt-2 text-xs text-text-muted" role="status">{importNotice}</p>}
+              {channelSnapshots.length === 0 && <p className="mt-3 text-xs text-text-muted">Nenhum anúncio reconciliado para este produto.</p>}
+              <div className="mt-3 space-y-3">
+                {channelSnapshots.map((snapshot) => (
+                  <article key={snapshot.marketplace} className="rounded-lg border border-border-color p-3">
+                    <p className="text-xs font-semibold uppercase text-text-muted">{snapshot.marketplace === 'mercadolivre' ? 'Mercado Livre' : 'Nuvemshop'} · {snapshot.externalId}</p>
+                    <p className="mt-1 text-sm text-text-primary">{snapshot.title ?? 'Sem título'}</p>
+                    <p className="mt-1 text-xs text-text-muted">
+                      Preço no canal: {snapshot.price ?? '—'} · Estoque no canal: {snapshot.stock ?? '—'} · {snapshot.status ?? 'Sem status'}
+                    </p>
+                    {(sheet?.images.length ?? 0) === 0 && snapshot.images[0] && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void apiFetch(`/api/catalog/products/${sheet?.item.id}/images/import-channel`, {
+                            method: 'POST',
+                            json: { marketplace: snapshot.marketplace, url: snapshot.images[0] },
+                          }).then(() => setImportNotice('Imagem importada para o HUB. O ERP não foi alterado.'))
+                            .catch(() => setImportNotice('Não foi possível importar a imagem.'));
+                        }}
+                        className="mt-2 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white"
+                      >
+                        Importar Imagem do Canal
+                      </button>
+                    )}
+                  </article>
+                ))}
               </div>
             </section>
 

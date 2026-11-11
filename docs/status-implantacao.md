@@ -1,7 +1,7 @@
 # Documentação de Implantação — JH Sync Hub
 
-Data de referência: **10 de novembro de 2026**  
-Estado publicado em `https://hub.jhshopping.com.br` (commit `cccef5a`). O estado atual da arquitetura iPaaS está na seção 12. O histórico de 6 de novembro permanece nas seções 11 e anteriores.  
+Data de referência: **11 de novembro de 2026**  
+Estado publicado em `https://hub.jhshopping.com.br`. O estado atual está na seção 13. A seção 12 registra a auditoria de 10 de novembro. O histórico de 6 de novembro permanece nas seções 11 e anteriores.  
 Especificação normativa: [plano-mestre.md](plano-mestre.md)  
 Resumo executivo: [descricao.md](descricao.md)  
 Registro de revisão e maturidade: [revisao-plano-mestre.md](revisao-plano-mestre.md)  
@@ -483,10 +483,10 @@ O diagrama de fluxo trata o HUB como a camada do meio: sistemas internos (ERP e 
 
 | Ponto | Veredito | Evidência |
 |---|---|---|
-| Modelo canônico entre o ERP e os canais | **Parcialmente alinhado** | `master_products`, `product_variants`, `hub_categories` e os mapas `channel_category_maps` / `channel_attribute_maps` / `channel_attribute_value_maps` são o catálogo do HUB. Os mappers em `apps/api/src/contracts` traduzem Bling, Mercado Livre e Nuvemshop para esse modelo. A publicação lê o HUB e materializa atributos. O núcleo ainda conhece colunas e rotas do Bling (`bling_id`, `bling_sku`, `BlingErpConnector`). |
+| Modelo canônico entre o ERP e os canais | **Alinhado no catálogo** | `master_products.erp_id` / `erp_sku` e `product_variants.erp_sku` são a identidade do HUB. Mapas de categoria e atributo continuam o de-para. O conector do ERP atual mora em `connectors/bling`. O teste `architecture.test.ts` falha se o restante da API importar essa pasta. |
 | Soberania e enriquecimento | **Alinhado com a regra de produto; parcial frente ao diagrama** | Preço, estoque e fiscal nascem no ERP. `channel_sync_owners.stock_price` nasce `bling_native`. Nome e descrição do ERP não são substituídos por texto de canal (`channel_content_overrides`). O diagrama desenha volta de preço, estoque e pedido. O código recusa pedido e NF (`modo_catalogo` em `catalog-mode.ts`) e `updateStock` devolve `estoque_na_integracao_nativa`. |
 | Orquestração | **Parcialmente alinhado** | A fila `publish_queue` e o worker BullMQ em `apps/api/src/queues/publish-queue.ts` publicam em simulação enquanto `ENABLE_LIVE_PUBLISHING` não é `true`. Falhas de fila, webhook e lacuna de cadastro aparecem em `/problemas` (`problem-panel.ts`). Convive com a fila antiga `push_jobs` do motor APE. Não há um único tratador de erro para todo o fluxo. |
-| Conector novo sem mexer no núcleo | **Parcialmente alinhado** | `ErpConnector` e `MarketplaceConnector` estão em `apps/api/src/connectors/strategy/types.ts`. A fábrica `factory.ts` registra Bling, Mercado Livre e Nuvemshop. Shopee, Amazon e TikTok Shop são `UnavailableMarketplaceConnector`. Existe uma segunda fábrica em `connectors/ipaas/connector.ts`, com `if` por provedor. Catálogo, atributos e o worker ainda citam canal pelo nome. |
+| Conector novo sem mexer no núcleo | **Alinhado na fábrica de canal** | `MarketplaceConnector` está em `connectors/strategy/types.ts`. A fábrica instancia Mercado Livre, Nuvemshop e Shopee. Amazon e TikTok Shop seguem `UnavailableMarketplaceConnector`. A Shopee lê atributos e monta `add_item` sem o catálogo importar o conector. |
 
 ### Módulos no painel
 
@@ -496,7 +496,7 @@ O diagrama de fluxo trata o HUB como a camada do meio: sistemas internos (ERP e 
 | Completude | `/completude` | O que falta para o produto servir a um canal. |
 | Atributos | `/atributos` | De-para de categoria, atributo e valor. O mapa verde entra no payload de publicação. |
 | Vínculos | `/vinculos` | Liga o SKU do HUB ao anúncio que já existe no canal, sem criar outro. |
-| Problemas | `/problemas` | Falha de publicação, webhook e lacuna de cadastro, agrupados. |
+| Problemas | `/problemas` | Falha de publicação, webhook, lacuna de cadastro, duplicidade e divergência de canal. |
 | Lista de envio | `/publicacoes` | Fila de distribuição. Simula. Não chama o marketplace com a escrita ao vivo desligada. |
 | Loja de apps | `/admin/integracoes` e `/integracoes` | Catálogo de conectores. Conectado, configurar, desconectar, ou em breve. |
 | Fiscal | `/fiscal`, `/fiscal/ean`, `/fiscal/ncm` | Fila humana de EAN e dupla confirmação de NCM. |
@@ -507,18 +507,43 @@ O diagrama de fluxo trata o HUB como a camada do meio: sistemas internos (ERP e 
 | Fase | Estado em 10/11/2026 | Pendência que ainda importa |
 |---|---|---|
 | P0 | No ar | `offline_access` do Mercado Livre e o recurso de pedido no app do Bling continuam nos painéis externos. O Mercado Livre está inativo no produto (`MERCADO_LIVRE_ACTIVE=false`). |
-| P1 | No ar | A lista lê o espelho do HUB, não o ERP a cada abertura. A sync do Bling parou perto de 10.000 itens. |
-| P2 | No ar, em sombra | Publicação ao vivo desligada. Checklist verde barra o envio real. Importação grava nome, descrição, categoria e capa, e ignora preço, estoque, NCM e EAN. |
-| P3 | Não iniciado | Segundo ERP, Shopee e Amazon de verdade, publicação automática, série histórica de qualidade e deploy por pipeline. |
+| P1 | No ar | A lista lê o espelho do HUB. A leitura completa do ERP virou fila `erp-sync-queue`, em páginas de 50, com checkpoint. |
+| P2 | No ar, em sombra | Publicação ao vivo desligada. Com `AUTO_PUBLISH_ENABLED=true`, completude 100% entra sozinha na `publish_queue`. |
+| P3 | Em parte | Conector Shopee na fábrica. CI no GitHub Actions. Falta Amazon, série de qualidade e deploy por pipeline. |
 
 ### Sincronização de volta
 
-O HUB **não** aceita estoque nem preço do marketplace como fonte. O contrato `MarketplaceConnector.updateStock` existe e, hoje, recusa a escrita. Webhooks de catálogo são gravados por `wig.ts` antes do HTTP 200. Evento de pedido ou NF é ignorado de propósito. Estoque Full do Mercado Livre é só leitura. Para o diagrama ficar bidirecional de ponta a ponta faltam três decisões: qual número vence quando o canal e o ERP divergem, se pedido entra no HUB, e quando a escrita ao vivo pode ligar.
+O HUB **não** aceita estoque nem preço do marketplace como fonte. A leitura do anúncio existe e gera alerta. A regra está em [arquitetura-reversa.md](arquitetura-reversa.md). Pedido e NF continuam fora. Estoque Full do Mercado Livre é só leitura. A escrita ao vivo continua desligada até as condições daquele documento.
 
 ### Próximo passo do P3
 
-1. Um conector Shopee e um Amazon que implementem `MarketplaceConnector` e entrem só na fábrica.
-2. Publicação automática do produto cujo checklist do canal está verde, ainda em simulação até a flag ligar.
-3. Série de completude por canal, lendo `quality_history` e `channel_readiness_history`, com período.
-4. Pipeline de deploy que rode teste, build e `deploy/update-hub.sh`, sem apagar o `.env`.
+1. Conector Amazon na mesma fábrica, no padrão da Shopee.
+2. Série de completude por canal, lendo `quality_history` e `channel_readiness_history`, com período.
+3. Pipeline de deploy que rode teste, build e `deploy/update-hub.sh`, sem apagar o `.env`.
+
+---
+
+## 13. Operação em 11/11/2026
+
+O painel público continua `https://hub.jhshopping.com.br`. A suíte da API sobe com as migrations até a 029. O Postgres de produção aplica o que ainda não está em `pgmigrations`. O CI em `.github/workflows/ci.yml` roda `npm ci`, `npm run build` e `npm run test` em push e pull request para `main`.
+
+### Leitura do ERP
+
+`POST /api/admin/sync-full` só enfileira um job na `erp-sync-queue` e responde 202. O worker lê 50 produtos por página, espera 450 ms entre chamadas e grava a página em `sync_status`. Se o processo cair, a mesma página recomeça e a anterior não é recontada. `GET /api/admin/sync-status` alimenta o card Saúde da fila de sync. Enquanto `status` é `processing`, o botão fica desabilitado e a home mostra o progresso.
+
+### Publicação automática
+
+`recalculateCompleteness` mede o canal ativo. Com `AUTO_PUBLISH_ENABLED` exatamente `true` e completude 100%, grava um item `pending` na `publish_queue`. A flag ausente não enfileira. `ENABLE_LIVE_PUBLISHING` continua decidindo se o worker chama o marketplace ou só simula.
+
+### Duplicidade
+
+`duplicate-detector.service.ts` roda a cada 6 horas e ao fim de um Full Sync. Usa a fábrica, não importa `connectors/bling`. EAN repetido entre produtos ativos vira `duplicate_alerts`. Anúncio ativo com o mesmo SKU ou EAN também. O índice único de `erp_sku` não vazio impede dois cadastros ativos com o mesmo SKU. A home tem o card Duplicidades detectadas. Em Problemas, o filtro Duplicidades oferece vincular o anúncio ou arquivar o produto do ERP.
+
+### Reconciliação do canal
+
+`reconciliation.service.ts` roda no mesmo relógio. `fetchListings` lê o anúncio por SKU ou EAN. O retrato fica em `marketplace_listings_snapshot`. Preço ou estoque diferente, e canal com imagem enquanto o HUB tem zero, aparecem em Problemas no filtro Divergências de Canal. O vínculo por SKU ou EAN é automático. A ficha, aba Canais, mostra o retrato. Importar Imagem do Canal grava a URL em `product_images` e não altera o Bling.
+
+### Conectores
+
+Nuvemshop é o canal ativo. Mercado Livre permanece no código e inativo no produto. Shopee está implementada na fábrica (Open Platform v2) e ainda não tem checklist de publicação. Amazon e TikTok Shop seguem em breve.
 

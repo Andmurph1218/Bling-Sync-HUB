@@ -1,40 +1,46 @@
-# Volta do diagrama — decisões ainda abertas
+# Volta do marketplace para o HUB
 
-O diagrama de fluxo desenha setas nos dois sentidos: o ERP troca o cadastro inteiro com o HUB, e os marketplaces devolvem catálogo, estoque e pedido.
+O HUB lê o anúncio do canal para alinhar o catálogo. Preço, estoque e fiscal continuam no ERP. O HUB não grava esses campos de volta no Bling.
 
-O código de hoje faz a ida. O ERP é a fonte de preço, estoque e fiscal. O canal enriquece conteúdo e mídia. A volta está fechada de propósito. Estas três decisões precisam ser tomadas antes de abrir essa volta.
+## Estoque e preço
 
-## 1. Conflito de estoque e preço
+O ERP é soberano absoluto.
 
-Quando o número do marketplace diverge do número do ERP, quem vence?
+Se o marketplace divergir — vendeu e o Bling não baixou, ou aplicou uma promoção — o HUB não sobrescreve o ERP. A reconciliação grava o retrato em `marketplace_listings_snapshot` e abre um alerta em Problemas, filtro Divergências de Canal. O operador ajusta o número no Bling.
 
-Hoje vence o ERP. `channel_sync_owners.stock_price` nasce `bling_native`. `MarketplaceConnector.updateStock` responde `estoque_na_integracao_nativa` e não grava saldo. Estoque Full do Mercado Livre é só leitura.
+`MarketplaceConnector.updateStock` continua respondendo `estoque_na_integracao_nativa`.
 
-Para ligar a volta, a regra tem de dizer, por campo:
+## Dados fiscais
 
-- estoque do vendedor: ERP, canal, ou o mais recente com carimbo de hora;
-- preço de loja: ERP, canal, ou o mais recente;
-- o que acontece com o saldo que o canal já baixou por um pedido que o HUB não viu.
+NCM, EAN e SKU nascem no ERP.
 
-Sem essa regra, gravar o webhook de estoque do canal por cima do ERP cria dois saldos verdadeiros.
+Se o anúncio tiver um EAN válido que falta no ERP, o HUB pode sugerir a correção. Quem aplica é o operador, no Bling. O HUB não escreve NCM, EAN nem SKU no ERP.
 
-## 2. Escopo de pedidos
+## Enriquecimento
 
-O HUB processa pedido ou só catálogo?
+Imagem, descrição e atributo podem entrar na camada do HUB.
 
-Hoje é só catálogo. `catalog-mode.ts` recusa evento de pedido e de NF (`modo_catalogo`). O plano-mestre deixa pedido, NF-e e frete fora do HUB. O diagrama mostra o marketplace devolvendo pedido.
+Se o anúncio tiver uma imagem melhor, ou uma descrição mais completa, o operador importa esse conteúdo para `product_images` e para o enriquecimento do HUB. Essa cópia não altera o cadastro do Bling.
 
-Se a resposta for só catálogo, a seta de pedido do diagrama não será implementada. Se a resposta for processar pedido, isso é um módulo novo: ele não entra no conector de catálogo e não altera preço nem NCM.
+## Duplicidade
 
-## 3. Quando ligar `ENABLE_LIVE_PUBLISHING`
+O detector de duplicidade continua avisando SKU ou EAN repetido e anúncio já publicado.
 
-A flag só publica quando o valor é exatamente `true`. Qualquer outro valor faz o worker da `publish_queue` gravar `simulado com sucesso` e não chamar `createListing`.
+A reconciliação, quando acha um anúncio ativo com o mesmo SKU ou EAN, vincula esse anúncio ao produto do HUB. Não cria outro cadastro e não cria outro anúncio.
+
+## Pedidos
+
+O HUB não processa pedido nem NF. `catalog-mode.ts` recusa esses eventos. A seta de pedido do diagrama permanece fora deste módulo.
+
+## Quando ligar a publicação ao vivo
+
+`ENABLE_LIVE_PUBLISHING` só publica quando o valor é exatamente `true`. Fora isso, a fila simula.
 
 Condições para ligar, todas ao mesmo tempo:
 
 1. O checklist do canal está verde para o produto que vai sair.
 2. A conta do canal renova o token sozinha.
-3. O conflito da seção 1 está decidido e implementado, ou a volta continua desligada e o envio é só HUB → canal.
+3. A volta de preço e estoque continua só como alerta, sem escrita no ERP.
 4. Um lote pequeno foi simulado e conferido no painel de problemas, sem falha aberta.
 5. Há uma pessoa com permissão `push:execute` acompanhando a primeira hora.
 

@@ -1,12 +1,15 @@
 import { lookupChannelAttributeSpecs } from '../../catalog/channel-attributes.js';
-import { searchMercadoLivreListings } from './ml-listing-search.js';
+import { fetchMercadoLivreListing, searchMercadoLivreListings } from './ml-listing-search.js';
 import { isOrderOrInvoiceEvent } from './catalog-mode.js';
+import { fetchNuvemshopListing } from './nuvemshop-listing.js';
 import {
   IncomingWebhook,
   ListingDraft,
   ListingResult,
   ListingSearchInput,
   MarketplaceConnector,
+  MarketplaceListing,
+  MasterProduct,
   RemoteListing,
   StockUpdate,
   StockUpdateResult,
@@ -50,6 +53,24 @@ export class MercadoLivreMarketplaceConnector implements MarketplaceConnector {
     return searchMercadoLivreListings(input);
   }
 
+  async fetchListings(product: MasterProduct): Promise<MarketplaceListing | null> {
+    if (listingSearchOverride) {
+      const found = await listingSearchOverride({ sku: product.sku, ean: product.ean });
+      const active = found.find((item) => item.status.toLowerCase() === 'ativo' || item.status.toLowerCase() === 'active');
+      if (!active) return null;
+      return {
+        externalId: active.id,
+        title: active.title,
+        price: active.price,
+        stock: null,
+        images: [],
+        status: active.status,
+      };
+    }
+    if (process.env.VITEST === 'true') return null;
+    return fetchMercadoLivreListing({ sku: product.sku, ean: product.ean });
+  }
+
   async createListing(draft: ListingDraft): Promise<ListingResult> {
     return refuseListing(draft);
   }
@@ -72,6 +93,11 @@ export class NuvemshopMarketplaceConnector implements MarketplaceConnector {
 
   async searchListings(): Promise<RemoteListing[]> {
     return [];
+  }
+
+  async fetchListings(product: MasterProduct): Promise<MarketplaceListing | null> {
+    if (process.env.VITEST === 'true') return null;
+    return fetchNuvemshopListing(product);
   }
 
   async createListing(draft: ListingDraft): Promise<ListingResult> {

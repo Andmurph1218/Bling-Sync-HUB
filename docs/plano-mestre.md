@@ -1,5 +1,7 @@
 # Plano Mestre — JH Sync Hub
 
+Leitura em 11/11/2026: este arquivo continua sendo a spec dos motores e da soberania. O código de hoje nomeia a identidade do catálogo como `erp_id` e `erp_sku`. O ERP instalado segue o Bling, isolado em `connectors/bling`. A volta do marketplace, a sync em fila e as flags de publicação estão em [arquitetura-reversa.md](arquitetura-reversa.md) e na seção 13 de [status-implantacao.md](status-implantacao.md). Onde este plano ainda diz `bling_sku`, leia o campo atual `erp_sku`.
+
 Versão de desenvolvimento. Substitui o briefing `PLANO MESTRE REVISADO`.
 As regras que se contradiziam naquele texto estão unificadas aqui.
 Os prompts por motor ficam de fora: a implementação segue este documento.

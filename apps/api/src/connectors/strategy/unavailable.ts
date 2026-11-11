@@ -5,6 +5,8 @@ import {
   ListingResult,
   ListingSearchInput,
   MarketplaceConnector,
+  MarketplaceListing,
+  MasterProduct,
   RemoteListing,
   StockUpdate,
   StockUpdateResult,
@@ -20,6 +22,10 @@ export class UnavailableMarketplaceConnector implements MarketplaceConnector {
   }
 
   async searchListings(_input: ListingSearchInput): Promise<RemoteListing[]> {
+    throw new ConnectorNotInstalledError(this.id);
+  }
+
+  async fetchListings(_product: MasterProduct): Promise<MarketplaceListing | null> {
     throw new ConnectorNotInstalledError(this.id);
   }
 

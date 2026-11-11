@@ -16,6 +16,7 @@ import { integrationCatalogRouter } from './routes/integration-catalog.js';
 import { marketplaceAttributesRouter } from './routes/marketplace-attributes.js';
 import { usersAdminRouter } from './routes/users-admin.js';
 import { duplicatesRouter } from './routes/duplicates.js';
+import { reconciliationRouter } from './routes/reconciliation.js';
 import { logger } from './lib/logger.js';
 import { loadConnectors } from './connectors/load.js';
 
@@ -51,6 +52,7 @@ export function createApp(): Express {
   app.use(marketplaceAttributesRouter);
   app.use(usersAdminRouter);
   app.use(duplicatesRouter);
+  app.use(reconciliationRouter);
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     const message = err instanceof Error ? err.message : 'Erro interno do servidor';

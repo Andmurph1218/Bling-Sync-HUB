@@ -1,5 +1,7 @@
 # Revisão do Plano Mestre
 
+A revisão abaixo é de 22 de outubro de 2026. O estado no ar em 11 de novembro de 2026 está na seção 13 de [status-implantacao.md](status-implantacao.md). Esta revisão não reabre a soberania do ERP.
+
 Estado em 22 de outubro de 2026.
 
 A spec de desenvolvimento é [plano-mestre.md](plano-mestre.md). Este arquivo é o registro da revisão. Não é prompt de motor e não reabre regra que o plano já fechou.

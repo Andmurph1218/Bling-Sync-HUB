@@ -1,14 +1,25 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { AlertTriangle, Archive, Download, RefreshCw, RotateCw } from 'lucide-react';
 import { API_BASE_URL, apiFetch } from '../../utils/api-client';
+import { BrandLogo } from '../../components/brand-logo';
 import { useCurrentRole } from '../../components/app-shell';
 import { ProblemDataGrid } from '../../components/problems/problem-data-grid';
 import { ProblemLogDrawer } from '../../components/problems/problem-log-drawer';
 import { ERP_SYNC_GROUP, ProblemGroup, ProblemSelection, ProblemType } from '../../components/problems/types';
 
-type Filter = ProblemType | 'todos' | 'duplicidades';
+type Filter = ProblemType | 'todos' | 'duplicidades' | 'divergencias';
+
+interface DivergenceItem {
+  id: string;
+  erpId: string;
+  sku: string;
+  name: string;
+  marketplace: string;
+  message: string;
+}
 
 interface DuplicateItem {
   id: string;
@@ -39,6 +50,7 @@ const FILTERS: Array<{ type: Filter; label: string }> = [
   { type: 'anuncio', label: 'Problemas de Anúncio' },
   { type: 'cadastro', label: 'Problemas de Cadastro' },
   { type: 'duplicidades', label: 'Duplicidades' },
+  { type: 'divergencias', label: 'Divergências de Canal' },
 ];
 
 const SYSTEMIC_THRESHOLD = 100;
@@ -66,11 +78,13 @@ export default function ProblemasPage() {
   const [drawer, setDrawer] = useState<{ itemId: string | null; group: ProblemGroup | null } | null>(null);
   const [batch, setBatch] = useState<BatchStatus | null>(null);
   const [duplicates, setDuplicates] = useState<DuplicateItem[]>([]);
+  const [divergences, setDivergences] = useState<DivergenceItem[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     let panelFailed = false;
     let duplicatesFailed = false;
+    let divergencesFailed = false;
     try {
       setPanel(await apiFetch<PanelPayload>('/api/problems/panel'));
     } catch {
@@ -81,7 +95,12 @@ export default function ProblemasPage() {
     } catch {
       duplicatesFailed = true;
     }
-    setError(panelFailed || duplicatesFailed ? 'Não foi possível ler as exceções do HUB.' : null);
+    try {
+      setDivergences((await apiFetch<{ items: DivergenceItem[] }>('/api/divergences')).items);
+    } catch {
+      divergencesFailed = true;
+    }
+    setError(panelFailed || duplicatesFailed || divergencesFailed ? 'Não foi possível ler as exceções do HUB.' : null);
     setLoading(false);
   }, []);
 
@@ -91,6 +110,7 @@ export default function ProblemasPage() {
     const file = params.get('importacao');
     if (sku || file) setImportFilter({ sku: sku ?? '', file: file ?? '' });
     if (params.get('filtro') === 'duplicidades') setFilter('duplicidades');
+    if (params.get('filtro') === 'divergencias') setFilter('divergencias');
     void load();
   }, [load]);
 
@@ -251,7 +271,11 @@ export default function ProblemasPage() {
         <aside className="h-fit rounded-xl border border-border-color bg-bg-surface p-2">
           <ul className="space-y-0.5">
             {FILTERS.map((item) => {
-              const count = item.type === 'duplicidades' ? duplicates.length : (panel?.counts[item.type] ?? 0);
+              const count = item.type === 'duplicidades'
+                ? duplicates.length
+                : item.type === 'divergencias'
+                  ? divergences.length
+                  : (panel?.counts[item.type] ?? 0);
               const active = filter === item.type;
               return (
                 <li key={item.type}>
@@ -331,13 +355,38 @@ export default function ProblemasPage() {
             </div>
           )}
 
-          {filter !== 'duplicidades' && !loading && visible.length === 0 && !error && (
+          {filter === 'divergencias' && (
+            <div className="space-y-2">
+              {!loading && divergences.length === 0 && (
+                <p className="rounded-xl border border-border-color bg-bg-surface px-4 py-8 text-center text-sm text-text-muted">
+                  Nenhuma divergência aberta. Preço e estoque do ERP não foram alterados.
+                </p>
+              )}
+              {divergences.map((item) => (
+                <article key={item.id} className="flex flex-col gap-3 rounded-xl border border-border-color bg-bg-surface px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <BrandLogo id={item.marketplace} name={item.marketplace} size={32} />
+                    <div>
+                      <p className="text-sm font-semibold text-text-primary">{item.name}</p>
+                      <p className="text-xs text-text-muted">{item.sku}</p>
+                      <p className="mt-1 text-sm text-text-primary">{item.message}</p>
+                    </div>
+                  </div>
+                  <Link href={`/catalogo/${item.erpId}`} className="rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold text-text-primary">
+                    Ir para o Produto
+                  </Link>
+                </article>
+              ))}
+            </div>
+          )}
+
+          {filter !== 'duplicidades' && filter !== 'divergencias' && !loading && visible.length === 0 && !error && (
             <p className="rounded-xl border border-border-color bg-bg-surface px-4 py-8 text-center text-sm text-text-muted">
               Nenhuma exceção neste filtro.
             </p>
           )}
 
-          {filter !== 'duplicidades' && visible.length > 0 && (
+          {filter !== 'duplicidades' && filter !== 'divergencias' && visible.length > 0 && (
             <ProblemDataGrid
               groups={visible}
               selection={{ groupKeys: selectedGroups, itemIds: selectedItems }}

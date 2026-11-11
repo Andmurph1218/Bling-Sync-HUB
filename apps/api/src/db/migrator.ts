@@ -27,6 +27,7 @@ import * as m025 from './migrations/1729080000025_governance.js';
 import * as m026 from './migrations/1729080000026_erp-identity.js';
 import * as m027 from './migrations/1729080000027_sync-status.js';
 import * as m028 from './migrations/1729080000028_duplicate-alerts.js';
+import * as m029 from './migrations/1729080000029_marketplace-reconciliation.js';
 
 export interface MigrationStep {
   id: number;
@@ -64,6 +65,7 @@ export const ALL_MIGRATIONS: MigrationStep[] = [
   { id: 26, name: '1729080000026_erp-identity', upSql: m026.UP_SQL, downSql: m026.DOWN_SQL },
   { id: 27, name: '1729080000027_sync-status', upSql: m027.UP_SQL, downSql: m027.DOWN_SQL },
   { id: 28, name: '1729080000028_duplicate-alerts', upSql: m028.UP_SQL, downSql: m028.DOWN_SQL },
+  { id: 29, name: '1729080000029_marketplace-reconciliation', upSql: m029.UP_SQL, downSql: m029.DOWN_SQL },
 ];
 
 /**
