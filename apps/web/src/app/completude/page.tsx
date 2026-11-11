@@ -126,6 +126,7 @@ export default function CompletudePage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
+          <Link href="/relatorios/completude" className={OUTLINE_BUTTON}>Completude no tempo</Link>
           <button type="button" onClick={() => void load()} className={OUTLINE_BUTTON}>
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Atualizar

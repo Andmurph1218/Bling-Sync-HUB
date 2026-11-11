@@ -182,6 +182,7 @@ function FichaUnicaProdutoPage({
     status: string | null;
   }>>([]);
   const [importNotice, setImportNotice] = useState<string | null>(null);
+  const [places, setPlaces] = useState<Array<{ locationType: string; storeId: string; quantity: number; label: string; readOnly: boolean }>>([]);
   const [categories, setCategories] = useState<HubCategoryOption[]>([]);
   const erpId = params.id;
 
@@ -190,6 +191,9 @@ function FichaUnicaProdutoPage({
     void apiFetch<{ snapshots: typeof channelSnapshots }>(`/api/catalog/products/${sheet.item.id}/channel-snapshots`)
       .then((payload) => setChannelSnapshots(payload.snapshots))
       .catch(() => setChannelSnapshots([]));
+    void apiFetch<{ supported: boolean; places: typeof places }>(`/api/catalog/products/${sheet.item.id}/places`)
+      .then((payload) => setPlaces(payload.supported ? payload.places : []))
+      .catch(() => setPlaces([]));
   }, [activeTab, sheet?.item.id]);
 
   useEffect(() => {
@@ -453,6 +457,21 @@ function FichaUnicaProdutoPage({
                 ))}
               </div>
             </section>
+
+            {places.length > 0 && (
+              <section className="rounded-xl border border-border-color bg-bg-surface/50 p-5">
+                <h2 className="text-sm font-bold text-text-primary">Depósitos do anúncio</h2>
+                <p className="mt-1 text-xs text-text-muted">O Mercado Livre aceita mais de um centro. Full continua somente leitura.</p>
+                <ul className="mt-3 space-y-2">
+                  {places.map((place) => (
+                    <li key={`${place.locationType}-${place.storeId}`} className="flex items-center justify-between text-sm">
+                      <span className="text-text-primary">{place.label}{place.storeId ? ` · ${place.storeId}` : ''}</span>
+                      <span className="text-text-muted">{place.quantity} un.{place.readOnly ? ' · sem edição' : ''}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             {mainReadiness?.blockers && mainReadiness.blockers.length > 0 && (
               <div className="rounded-xl border border-border-color bg-bg-surface/50 p-5">

@@ -1,7 +1,7 @@
 # JH Sync Hub — Evolução v2: Catálogo, Atributos e UX Operacional
 
 Data do plano: **5 de novembro de 2026**  
-Estado no ar em 11/11/2026: [status-implantacao.md](status-implantacao.md), seção 13. O plano abaixo permanece o desenho da evolução v2. P0 e P1 estão no ar. P2 está em sombra. P3 tem o conector Shopee e o CI; Amazon, série de qualidade e deploy por pipeline continuam abertos.  
+Estado no ar em 11/11/2026: [status-implantacao.md](status-implantacao.md), seção 13. O plano abaixo permanece o desenho da evolução v2. P0, P1 e P3 estão no ar. P2 está em sombra. Amazon e o deploy por pipeline não fazem parte da tabela P3.  
 Spec normativa (regras de soberania e motores): [plano-mestre.md](plano-mestre.md)  
 Brief de intenção: [Hub sync v2.md](Hub%20sync%20v2.md) *(diretrizes, não regras fixas)*  
 Referências de produto: [demo Plugg.to](https://youtu.be/239wfkYZD2Q) · [demo Moovin HUB](https://www.youtube.com/watch?v=Yx0fuxKGQE0)  
@@ -417,6 +417,8 @@ A publicação entra por `MarketplaceConnector` (`createListing`, `updateStock`,
 | P3.3 | Estrutura para novos canais (Shopee, TikTok) no serviço de atributos | Serviço de atributos | Adicionar canal não exige mudar a tela Atributos |
 | P3.4 | Relatórios de qualidade do catálogo por canal e evolução da completude | Home / relatórios | Gráfico de completude no tempo com fonte e período |
 | P3.5 | Depósitos por anúncio (“Places” do Plugg) quando o canal aceitar mais de um centro de distribuição | Ficha → Canais | Só aparece para canal que suporta; Full continua só leitura |
+
+Fechamento em 11/11/2026: P3.1 está no isolamento de `connectors/bling`. P3.2 está em [contrato-erp.md](contrato-erp.md). P3.3 é a tela Atributos lendo os canais implementados na fábrica. P3.4 é `/relatorios/completude`. P3.5 lista `ml_stock_locations` na aba Canais e marca Full como somente leitura.
 
 ### Ordem de execução sugerida
 

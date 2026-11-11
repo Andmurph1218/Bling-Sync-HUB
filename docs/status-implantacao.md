@@ -509,17 +509,16 @@ O diagrama de fluxo trata o HUB como a camada do meio: sistemas internos (ERP e 
 | P0 | No ar | `offline_access` do Mercado Livre e o recurso de pedido no app do Bling continuam nos painéis externos. O Mercado Livre está inativo no produto (`MERCADO_LIVRE_ACTIVE=false`). |
 | P1 | No ar | A lista lê o espelho do HUB. A leitura completa do ERP virou fila `erp-sync-queue`, em páginas de 50, com checkpoint. |
 | P2 | No ar, em sombra | Publicação ao vivo desligada. Com `AUTO_PUBLISH_ENABLED=true`, completude 100% entra sozinha na `publish_queue`. |
-| P3 | Em parte | Conector Shopee na fábrica. CI no GitHub Actions. Falta Amazon, série de qualidade e deploy por pipeline. |
+| P3 | No ar | ERP isolado, contrato do segundo ERP, Atributos lê a fábrica, série de completude e depósitos do anúncio. Amazon e o deploy por pipeline ficam fora desta etapa. |
 
 ### Sincronização de volta
 
 O HUB **não** aceita estoque nem preço do marketplace como fonte. A leitura do anúncio existe e gera alerta. A regra está em [arquitetura-reversa.md](arquitetura-reversa.md). Pedido e NF continuam fora. Estoque Full do Mercado Livre é só leitura. A escrita ao vivo continua desligada até as condições daquele documento.
 
-### Próximo passo do P3
+### Depois da P3
 
 1. Conector Amazon na mesma fábrica, no padrão da Shopee.
-2. Série de completude por canal, lendo `quality_history` e `channel_readiness_history`, com período.
-3. Pipeline de deploy que rode teste, build e `deploy/update-hub.sh`, sem apagar o `.env`.
+2. Pipeline de deploy que rode teste, build e `deploy/update-hub.sh`, sem apagar o `.env`.
 
 ---
 

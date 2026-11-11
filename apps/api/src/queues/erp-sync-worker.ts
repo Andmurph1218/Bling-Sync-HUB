@@ -152,7 +152,37 @@ export async function processErpSyncPage(
     delayMs: options.delayMs ?? 0,
     skipExisting: options.hooks?.skipExisting ?? true,
   });
+  const catalog = await query<{ total: number }>(
+    `SELECT count(*)::int AS total
+     FROM master_products
+     WHERE catalog_status = 'active' AND archived_at IS NULL`
+  );
+  const catalogActive = Number(catalog.rows[0]?.total ?? 0);
+  const parentsOnPage = report.upserted + report.skippedExisting;
+  logger.info('erp-sync página', {
+    page,
+    stopReason: report.stopReason,
+    status: report.status,
+    idsNaPagina: report.seen,
+    pais: parentsOnPage,
+    gravados: report.upserted,
+    jaExistiam: report.skippedExisting,
+    variacoesIgnoradas: report.skippedChild,
+    variacoesArquivadas: report.archivedVariations,
+    servicosIgnorados: report.skippedService,
+    semPayload: report.skippedMissing,
+    estoqueAtualizado: report.stockUpdated,
+    falhas: report.failed,
+    erros: report.errors,
+    catalogoAtivo: catalogActive,
+    totalInformadoPeloErp: report.catalogTotal,
+  });
   if (report.status === 'failed') {
+    logger.error('erp-sync paginação interrompida por erro', {
+      page,
+      stopReason: report.stopReason,
+      erros: report.errors,
+    });
     await query(
       `UPDATE sync_status SET status = 'failed', error_message = $1, updated_at = now() WHERE id = 1`,
       [report.errors[report.errors.length - 1] ?? 'Falha ao ler o ERP.']
@@ -161,12 +191,23 @@ export async function processErpSyncPage(
   }
   const latest = await readErpSyncStatus();
   if (latest.lastCompletedPage >= page) return;
-  const processed = latest.processed + report.seen;
+  const processed = latest.processed + parentsOnPage;
   const total = report.catalogTotal && report.catalogTotal > 0
     ? report.catalogTotal
     : report.catalogDone
       ? processed
       : Math.max(latest.total, processed);
+  if (report.catalogDone) {
+    logger.info('erp-sync contagem final', {
+      stopReason: report.stopReason,
+      paisNoErp: processed,
+      catalogoAtivo: catalogActive,
+      diferenca: catalogActive - processed,
+      leitura: report.stopReason === 'pagina_vazia' || report.stopReason === 'ultima_pagina_curta'
+        ? 'A lista do ERP terminou nesta página. A diferença são produtos do HUB que não voltaram na lista, como variação arquivada ou cadastro criado aqui.'
+        : 'A lista parou antes do fim. Veja o motivo em stopReason.',
+    });
+  }
   await query(
     `UPDATE sync_status
      SET processed = $1, total = $2, last_completed_page = $3, page = $4,

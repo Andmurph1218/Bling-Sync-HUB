@@ -2,7 +2,8 @@ import { InboundProduct, InboundStockBalance, InboundVariant } from '../connecto
 import { ErpConnector } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { isAllowedImageHost, EnqueueImageCandidate } from '../engines/iqre.js';
-import { runFullProductCatalogPipeline } from '../orchestrator/pipeline.js';
+import { applyVariantStockBalancesFromBling, runFullProductCatalogPipeline } from '../orchestrator/pipeline.js';
+import { StockBalanceItem } from '../contracts/mappers.js';
 import { evaluateCatalogChecklist } from './completeness.js';
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -28,6 +29,9 @@ export interface FullSyncReport {
   errors: string[];
   catalogDone: boolean;
   catalogTotal: number | null;
+  stopReason: string | null;
+  stockUpdated: number;
+  archivedVariations: number;
 }
 
 export interface FullSyncHooks {
@@ -64,6 +68,9 @@ function emptyReport(): FullSyncReport {
     errors: [],
     catalogDone: false,
     catalogTotal: null,
+    stopReason: null,
+    stockUpdated: 0,
+    archivedVariations: 0,
   };
 }
 
@@ -252,6 +259,14 @@ async function stockForBatch(
 
 function stockBySku(payload: InboundProduct, balances: Map<string, InboundStockBalance>): Record<string, InboundStockBalance> {
   const mapped: Record<string, InboundStockBalance> = {};
+  const attached = (payload as { estoqueSaldos?: unknown }).estoqueSaldos;
+  if (Array.isArray(attached)) {
+    for (const raw of attached) {
+      const item = raw as StockBalanceItem;
+      const id = item.produto?.id;
+      if (id !== undefined && id !== null) balances.set(String(id), raw);
+    }
+  }
   const parent = balances.get(String(payload.id));
   if (parent && payload.codigo) mapped[payload.codigo] = parent;
   for (const variation of payload.variacoes ?? []) {
@@ -259,6 +274,44 @@ function stockBySku(payload: InboundProduct, balances: Map<string, InboundStockB
     if (balance && variation.codigo) mapped[variation.codigo] = balance;
   }
   return mapped;
+}
+
+async function archiveVariationProduct(externalId: string): Promise<number> {
+  try {
+    const updated = await query(
+      `UPDATE master_products
+       SET archived_at = COALESCE(archived_at, now())
+       WHERE erp_id = $1 AND archived_at IS NULL`,
+      [externalId]
+    );
+    return updated.rowCount ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function refreshStoredStock(balances: Map<string, InboundStockBalance>): Promise<number> {
+  let updated = 0;
+  for (const [externalId, raw] of balances) {
+    try {
+      const found = await query<{ id: string }>(
+        `SELECT pv.id
+         FROM product_variants pv
+         JOIN master_products mp ON mp.id = pv.master_product_id
+         WHERE mp.archived_at IS NULL
+           AND (pv.bling_variant_id = $1 OR (mp.erp_id = $1 AND pv.is_default = true))
+         LIMIT 1`,
+        [externalId]
+      );
+      const variantId = found.rows[0]?.id;
+      if (!variantId) continue;
+      await applyVariantStockBalancesFromBling(variantId, raw as StockBalanceItem);
+      updated += 1;
+    } catch {
+      // A página segue mesmo se um saldo não puder ser gravado. O relatório guarda o erro.
+    }
+  }
+  return updated;
 }
 
 /**
@@ -293,22 +346,32 @@ export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks
       report.pages = page;
       if (typeof listed.total === 'number' && listed.total > 0) report.catalogTotal = listed.total;
       if (listed.externalIds.length === 0) {
+        report.stopReason = 'pagina_vazia';
         catalogDone = true;
         break;
       }
       if (listed.externalIds[0] === previousFirst) {
+        report.stopReason = 'pagina_repetida';
         note(report, `A página ${page} repetiu o primeiro produto. A paginação parou.`, true);
         catalogDone = true;
         break;
       }
       previousFirst = listed.externalIds[0] ?? '';
+      const childIds = new Set(listed.childIds ?? []);
 
       const batch: InboundProduct[] = [];
+      const existingIds: string[] = [];
       for (const externalId of listed.externalIds) {
         report.seen += 1;
         try {
+          if (childIds.has(externalId)) {
+            report.skippedChild += 1;
+            report.archivedVariations += await archiveVariationProduct(externalId);
+            continue;
+          }
           if (hooks.skipExisting && (await alreadyImported(externalId))) {
             report.skippedExisting += 1;
+            existingIds.push(externalId);
             continue;
           }
           process.stderr.write(`pull ${externalId}\n`);
@@ -325,6 +388,7 @@ export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks
           }
           if (parentId(payload)) {
             report.skippedChild += 1;
+            report.archivedVariations += await archiveVariationProduct(String(payload.id));
             continue;
           }
           await hydrateVariations(erp, payload);
@@ -338,6 +402,12 @@ export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks
       let balances = new Map<string, InboundStockBalance>();
       try {
         balances = await stockForBatch(erp, batch);
+        if (existingIds.length > 0 && erp.pullStockBalances) {
+          const existingProducts = existingIds.map((id) => ({ id, variacoes: [] }) as unknown as InboundProduct);
+          const existingBalances = await stockForBatch(erp, existingProducts);
+          for (const [id, raw] of existingBalances) balances.set(id, raw);
+          report.stockUpdated += await refreshStoredStock(existingBalances);
+        }
       } catch (error) {
         note(report, `saldos: ${error instanceof Error ? error.message : String(error)}`, false);
       }
@@ -358,12 +428,17 @@ export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks
 
       publish();
       if (listed.done) {
+        report.stopReason = listed.externalIds.length === 0 ? 'pagina_vazia' : 'ultima_pagina_curta';
         catalogDone = true;
         break;
       }
     }
     if (!catalogDone && hooks.maxPages == null) {
+      report.stopReason = 'limite_de_paginas';
       note(report, `Limite de ${MAX_PAGES} páginas atingido.`, true);
+    }
+    if (!catalogDone && hooks.maxPages != null && report.stopReason == null) {
+      report.stopReason = 'fatia';
     }
     report.catalogDone = catalogDone;
     report.status = catalogDone ? 'done' : 'running';

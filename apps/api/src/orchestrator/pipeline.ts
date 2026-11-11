@@ -211,6 +211,30 @@ export async function upsertCatalogProductFromBlingPayload(
 }
 
 /**
+ * Estoque visível no catálogo. Com depósito seller marcado para envio, usa só essa soma.
+ * Sem essa classificação, mostra a soma virtual dos depósitos que não são Full,
+ * para a coluna não ficar vazia depois do sync.
+ */
+function catalogStockFromBalances(
+  balanceItem: StockBalanceItem,
+  warehouses: WarehouseConfig[],
+  computed: { variantStockColumn: number; emptySellerPushWarehousesAlert: boolean }
+): number {
+  if (!computed.emptySellerPushWarehousesAlert) return computed.variantStockColumn;
+  const fullIds = new Set(
+    warehouses.filter((row) => row.role === 'ml_full').map((row) => row.bling_warehouse_id)
+  );
+  const depositos = balanceItem.depositos ?? [];
+  if (depositos.length === 0) {
+    return Number(balanceItem.saldoVirtualTotal ?? 0);
+  }
+  const sum = depositos
+    .filter((row) => !fullIds.has(String(row.id)))
+    .reduce((total, row) => total + Number(row.saldoVirtual ?? 0), 0);
+  return Number(sum.toFixed(3));
+}
+
+/**
  * Aplica a leitura de GET /estoques/saldos para uma variante (Seção 10.7):
  * - Grava variant_stock_balances por depósito.
  * - Na mesma transação, grava product_variants.stock com a soma apenas dos depósitos seller com include_in_push = true.
@@ -253,17 +277,18 @@ export async function applyVariantStockBalancesFromBling(
       );
     }
 
+    const stockValue = catalogStockFromBalances(balanceItem, whRes.rows, computed);
     await client.query(
       `UPDATE product_variants
        SET stock = $2,
            updated_at = now()
        WHERE id = $1`,
-      [variantId, computed.variantStockColumn]
+      [variantId, stockValue]
     );
 
     return {
-      variantStockColumn: computed.variantStockColumn,
-      publishableFloor: computed.publishableFloor,
+      variantStockColumn: stockValue,
+      publishableFloor: Math.max(0, Math.floor(stockValue)),
     };
   });
 }

@@ -85,6 +85,37 @@ reconciliationRouter.get('/api/divergences', reader, async (_req: Request, res: 
   }
 });
 
+reconciliationRouter.get('/api/catalog/products/:id/places', reader, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const found = await query<{
+      location_type: string;
+      store_id: string;
+      quantity: number;
+      user_product_id: string;
+    }>(
+      `SELECT l.location_type, l.store_id, l.quantity, l.user_product_id
+       FROM ml_stock_locations l
+       INNER JOIN platform_variant_links pvl ON pvl.user_product_id = l.user_product_id
+       WHERE pvl.master_product_id = $1 AND pvl.platform = 'mercadolivre'
+       ORDER BY l.location_type, l.store_id`,
+      [req.params.id]
+    );
+    res.status(200).json({
+      supported: found.rows.length > 0,
+      places: found.rows.map((row) => ({
+        locationType: row.location_type,
+        storeId: row.store_id,
+        quantity: Number(row.quantity) || 0,
+        userProductId: row.user_product_id,
+        readOnly: row.location_type === 'meli_facility',
+        label: row.location_type === 'meli_facility' ? 'Full, somente leitura' : row.location_type,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 reconciliationRouter.get('/api/catalog/products/:id/channel-snapshots', reader, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const found = await query<{

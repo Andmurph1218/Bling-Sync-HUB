@@ -43,6 +43,8 @@ export interface ErpCatalogPage {
   page: number;
   pageSize: number;
   externalIds: string[];
+  /** Ids desta página que a lista já identificou como variação de outro produto. */
+  childIds?: string[];
   done: boolean;
   total?: number;
 }

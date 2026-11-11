@@ -53,6 +53,52 @@ export function blingRejectionMessage(data: unknown, status: number): string {
   return `A API do Bling respondeu ${status}.`;
 }
 
+function chunkIds(ids: string[], size: number): string[][] {
+  const chunks: string[][] = [];
+  for (let index = 0; index < ids.length; index += size) chunks.push(ids.slice(index, index + size));
+  return chunks;
+}
+
+function numberField(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeStockBalance(row: unknown): ErpStockBalance | null {
+  if (!row || typeof row !== 'object') return null;
+  const record = row as {
+    produto?: { id?: number | string };
+    id?: number | string;
+    saldoVirtualTotal?: unknown;
+    depositos?: unknown[];
+  };
+  const id = record.produto?.id ?? record.id;
+  if (id === undefined || id === null || String(id).trim() === '') return null;
+  const depositos = (Array.isArray(record.depositos) ? record.depositos : []).flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const deposit = entry as {
+      id?: number | string;
+      deposito?: { id?: number | string };
+      saldoVirtual?: unknown;
+      saldoFisico?: unknown;
+    };
+    const depositId = deposit.id ?? deposit.deposito?.id;
+    if (depositId === undefined || depositId === null) return [];
+    return [{
+      id: depositId,
+      saldoVirtual: numberField(deposit.saldoVirtual),
+      saldoFisico: numberField(deposit.saldoFisico),
+    }];
+  });
+  const saldoVirtualTotal = record.saldoVirtualTotal == null
+    ? depositos.reduce((sum, deposit) => sum + deposit.saldoVirtual, 0)
+    : numberField(record.saldoVirtualTotal);
+  return {
+    externalId: String(id),
+    raw: { produto: { id }, depositos, saldoVirtualTotal },
+  };
+}
+
 function blingError(path: string, status: number, data: unknown): Error {
   const message =
     data && typeof data === 'object' && 'error' in data
@@ -149,19 +195,30 @@ export class LiveBlingCatalogReader implements BlingCatalogReader {
   async list(page: number, pageSize: number): Promise<ErpCatalogPage> {
     const path = `/produtos?pagina=${page}&limite=${pageSize}&tipo=P`;
     process.stderr.write(`bling-list ${path}\n`);
-    const res = await this.get<{ data?: Array<{ id?: number | string }>; total?: number }>(path);
-    process.stderr.write(`bling-list status=${res.status}\n`);
+    const res = await this.get<{
+      data?: Array<{ id?: number | string; variacao?: { produtoPai?: { id?: number | string } }; idProdutoPai?: number | string }>;
+      total?: number;
+    }>(path);
+    process.stderr.write(`bling-list status=${res.status} rows=${res.data.data?.length ?? 0}\n`);
     if (res.status >= 400) {
       throw blingError(path, res.status, res.data);
     }
-    const externalIds = (res.data.data ?? [])
+    const rows = res.data.data ?? [];
+    const externalIds = rows
       .map((row) => (row.id === undefined || row.id === null ? '' : String(row.id)))
       .filter((id) => id.length > 0);
+    const childIds = rows.flatMap((row) => {
+      const id = row.id === undefined || row.id === null ? '' : String(row.id);
+      const parent = row.variacao?.produtoPai?.id ?? row.idProdutoPai;
+      if (!id || parent === undefined || parent === null || String(parent).trim() === '') return [];
+      return [id];
+    });
     const total = typeof res.data.total === 'number' ? res.data.total : undefined;
     return {
       page,
       pageSize,
       externalIds,
+      childIds,
       done: externalIds.length < pageSize,
       ...(total === undefined ? {} : { total }),
     };
@@ -177,14 +234,34 @@ export class LiveBlingCatalogReader implements BlingCatalogReader {
 
   async stock(externalIds: string[]): Promise<ErpStockBalance[]> {
     if (externalIds.length === 0) return [];
+    const unique = [...new Set(externalIds.map((id) => String(id)).filter((id) => id.length > 0))];
+    const balances: ErpStockBalance[] = [];
+    for (const chunk of chunkIds(unique, 50)) {
+      balances.push(...(await this.stockChunk(chunk)));
+    }
+    return balances;
+  }
+
+  private async stockChunk(externalIds: string[]): Promise<ErpStockBalance[]> {
+    try {
+      return await this.stockOnce(externalIds);
+    } catch (error) {
+      if (externalIds.length <= 1) throw error;
+      const middle = Math.ceil(externalIds.length / 2);
+      const left = await this.stockChunk(externalIds.slice(0, middle));
+      const right = await this.stockChunk(externalIds.slice(middle));
+      return [...left, ...right];
+    }
+  }
+
+  private async stockOnce(externalIds: string[]): Promise<ErpStockBalance[]> {
     const queryString = externalIds.map((id) => `idsProdutos[]=${encodeURIComponent(id)}`).join('&');
     const path = `/estoques/saldos?${queryString}`;
-    const res = await this.get<{ data?: Array<{ produto?: { id?: number | string } }> }>(path);
+    const res = await this.get<{ data?: unknown[] }>(path);
     if (res.status >= 400) throw blingError(path, res.status, res.data);
     return (res.data.data ?? []).flatMap((row) => {
-      const id = row.produto?.id;
-      if (id === undefined || id === null) return [];
-      return [{ externalId: String(id), raw: row }];
+      const normalized = normalizeStockBalance(row);
+      return normalized ? [normalized] : [];
     });
   }
 
@@ -316,8 +393,14 @@ export class BlingErpConnector implements ErpConnector {
     return this.reader.list(page, pageSize);
   }
 
-  pullCatalogProduct(externalId: string): Promise<unknown | null> {
-    return this.reader.pull(externalId);
+  async pullCatalogProduct(externalId: string): Promise<unknown | null> {
+    const product = await this.reader.pull(externalId);
+    if (!product || typeof product !== 'object') return product;
+    const balances = await this.reader.stock([externalId]);
+    return {
+      ...(product as Record<string, unknown>),
+      estoqueSaldos: balances.map((balance) => balance.raw),
+    };
   }
 
   pullStockBalances(externalIds: string[]): Promise<ErpStockBalance[]> {
