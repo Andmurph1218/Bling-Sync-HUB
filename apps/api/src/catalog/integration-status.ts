@@ -57,22 +57,22 @@ export function describeChannelIntegration(input: {
     where: fixPlace(item.code),
   }));
   const critical = blockers.filter((item) => item.code === 'sku' || item.code === 'ncm');
-  const linked = input.linkStatus === 'linked';
-  const apt = linked && input.checklist.ready && !failing.some((item) => item.code === 'ncm');
+  const linked = input.linkStatus === 'linked' || input.linkStatus === 'vinculado';
 
   let visual: IntegrationVisual;
-  if (critical.length > 0) visual = 'blocked';
-  else if (apt) visual = 'connected';
+  if (linked) visual = 'connected';
+  else if (critical.length > 0) visual = 'blocked';
   else if (failing.length > 0) visual = 'pending';
-  else if (!linked && !input.sendRequested) visual = 'absent';
+  else if (!input.sendRequested) visual = 'absent';
   else visual = 'pending';
 
-  const tooltip =
-    visual === 'connected'
+  const tooltip = linked
+    ? input.checklist.ready
       ? 'Vinculado e apto para o canal'
-      : visual === 'absent'
-        ? 'Não integrado. Nenhum envio foi solicitado.'
-        : blockers[0]?.title ?? 'Envio solicitado. Aguardando o canal.';
+      : 'Vinculado ao canal'
+    : visual === 'absent'
+      ? 'Não integrado. Nenhum envio foi solicitado.'
+      : blockers[0]?.title ?? 'Envio solicitado. Aguardando o canal.';
 
   return {
     platform: input.platform,
@@ -80,7 +80,7 @@ export function describeChannelIntegration(input: {
     label: LABEL[visual],
     tooltip,
     percent: input.checklist.percent,
-    ready: visual === 'connected',
+    ready: linked ? input.checklist.ready : visual === 'connected',
     blockers,
   };
 }

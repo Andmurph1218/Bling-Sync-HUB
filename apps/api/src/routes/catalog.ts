@@ -183,9 +183,15 @@ catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: R
         `SELECT max(created_at) AS last_error FROM push_jobs WHERE status = 'failed'`
       ),
       query<{ count: number }>(
-        `SELECT count(DISTINCT master_product_id)::int AS count
-         FROM platform_links
-         WHERE platform = 'nuvemshop' AND sync_status = 'linked'`
+        `SELECT count(DISTINCT product_id)::int AS count FROM (
+           SELECT master_product_id AS product_id
+           FROM platform_links
+           WHERE platform = 'nuvemshop' AND sync_status = 'linked'
+           UNION
+           SELECT product_id
+           FROM channel_listing_links
+           WHERE channel = 'nuvemshop' AND link_status = 'vinculado'
+         ) linked_ns`
       ),
       query<{ last_sync: Date | string | null }>(
         `SELECT max(last_bling_sync) AS last_sync FROM master_products`

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { Toaster, ToastMessage } from '../components/toaster';
 import Link from 'next/link';
 import {
   Activity,
@@ -87,6 +88,9 @@ export default function HomePage() {
   const [forbidden, setForbidden] = useState(false);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<{ status: 'idle' | 'processing' | 'completed' | 'failed'; total: number; processed: number } | null>(null);
+  const [reconciling, setReconciling] = useState(false);
+  const [enriching, setEnriching] = useState(false);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [syncStarting, setSyncStarting] = useState(false);
   const [duplicateCount, setDuplicateCount] = useState(0);
 
@@ -143,6 +147,39 @@ export default function HomePage() {
     const timer = window.setInterval(() => void pullSyncStatus(), 2000);
     return () => window.clearInterval(timer);
   }, []);
+
+  const startEnrichment = async () => {
+    setEnriching(true);
+    try {
+      await apiFetch('/api/admin/enrich-catalog', { method: 'POST' });
+      const id = `toast-${Date.now()}`;
+      setToasts((current) => [
+        ...current,
+        { id, variant: 'success', title: 'Enriquecimento iniciado em background' },
+      ]);
+    } catch {
+      const id = `toast-${Date.now()}`;
+      setToasts((current) => [
+        ...current,
+        { id, variant: 'warning', title: 'Não foi possível iniciar o enriquecimento' },
+      ]);
+    } finally {
+      setEnriching(false);
+    }
+  };
+
+  const startReconcile = async () => {
+    setSyncNotice(null);
+    setReconciling(true);
+    try {
+      await apiFetch('/api/admin/reconcile-now', { method: 'POST' });
+      setSyncNotice('Reconciliação iniciada. O HUB busca o anúncio pelo SKU e grava o vínculo.');
+    } catch {
+      setSyncNotice('Não foi possível iniciar a reconciliação.');
+    } finally {
+      setReconciling(false);
+    }
+  };
 
   const startSync = async () => {
     setSyncNotice(null);
@@ -303,6 +340,27 @@ export default function HomePage() {
                 {syncRunning ? 'Sincronizando...' : 'Sincronizar agora'}
               </button>
             )}
+            {hasRole('admin') && (
+              <button
+                type="button"
+                onClick={() => void startReconcile()}
+                disabled={reconciling}
+                className="mt-2 rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {reconciling ? 'Buscando vínculos...' : 'Sincronizar Vínculos (Reconciliação)'}
+              </button>
+            )}
+            {hasRole('admin') && (
+              <button
+                type="button"
+                onClick={() => void startEnrichment()}
+                disabled={enriching}
+                aria-busy={enriching}
+                className="mt-2 rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {enriching ? 'Enriquecendo...' : 'Enriquecer Catálogo (ERP)'}
+              </button>
+            )}
           </KpiCard>
           <KpiCard
             label="Pendências fiscais"
@@ -450,6 +508,7 @@ export default function HomePage() {
           </div>
         </section>
       )}
+      <Toaster toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
     </main>
   );
 }

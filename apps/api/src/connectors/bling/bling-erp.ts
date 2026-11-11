@@ -99,6 +99,60 @@ function normalizeStockBalance(row: unknown): ErpStockBalance | null {
   };
 }
 
+function textField(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function pushLink(links: string[], value: unknown): void {
+  const link = textField(value);
+  if (!/^https?:\/\//i.test(link) || links.includes(link)) return;
+  links.push(link);
+}
+
+function linksFrom(value: unknown, links: string[]): void {
+  if (!value) return;
+  if (typeof value === 'string') {
+    pushLink(links, value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) linksFrom(item, links);
+    return;
+  }
+  if (typeof value !== 'object') return;
+  const record = value as { link?: unknown; url?: unknown; imagemURL?: unknown; externas?: unknown; internas?: unknown; imagens?: unknown };
+  pushLink(links, record.link);
+  pushLink(links, record.url);
+  pushLink(links, record.imagemURL);
+  linksFrom(record.externas, links);
+  linksFrom(record.internas, links);
+  linksFrom(record.imagens, links);
+}
+
+/** Lê imagens, NCM e categoria do JSON de GET /produtos/{id}. Não grava nada no Bling. */
+export function readBlingEnrichment(product: unknown): { images: string[]; ncm: string; category: string } {
+  if (!product || typeof product !== 'object') return { images: [], ncm: '', category: '' };
+  const record = product as {
+    imagem?: unknown;
+    imagemURL?: unknown;
+    galeria?: unknown;
+    midia?: { imagens?: unknown; video?: unknown };
+    tributacao?: { ncm?: unknown };
+    ncm?: unknown;
+    categoria?: { descricao?: unknown } | string;
+  };
+  const images: string[] = [];
+  linksFrom(record.imagemURL, images);
+  linksFrom(record.imagem, images);
+  linksFrom(record.galeria, images);
+  linksFrom(record.midia?.imagens, images);
+  const ncm = textField(record.tributacao?.ncm ?? record.ncm).replace(/\D/g, '').slice(0, 8);
+  const category = typeof record.categoria === 'string'
+    ? record.categoria.trim()
+    : textField(record.categoria?.descricao);
+  return { images, ncm, category };
+}
+
 function blingError(path: string, status: number, data: unknown): Error {
   const message =
     data && typeof data === 'object' && 'error' in data
@@ -391,6 +445,11 @@ export class BlingErpConnector implements ErpConnector {
 
   listCatalogPage(page: number, pageSize: number): Promise<ErpCatalogPage> {
     return this.reader.list(page, pageSize);
+  }
+
+  async fetchProductEnrichmentData(erpId: string): Promise<{ images: string[]; ncm: string; category: string }> {
+    const product = await this.reader.pull(erpId);
+    return readBlingEnrichment(product);
   }
 
   async pullCatalogProduct(externalId: string): Promise<unknown | null> {

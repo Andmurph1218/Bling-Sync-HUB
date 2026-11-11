@@ -60,6 +60,20 @@ describe('Fase 0.5 — Fixtures Sanitizados e Mappers (Simples, Variação, Kit,
     expect(v.components).toEqual([]);
   });
 
+  it('grava o preço em texto do Bling no campo price da variante', () => {
+    const payload = {
+      ...BLING_SIMPLE_PRODUCT_FIXTURE.data,
+      codigo: 'ATL-368',
+      preco: '180,00' as unknown as number,
+    };
+    const res = mapBlingProductToCatalog(payload);
+    expect(res.kind).toBe('mapped');
+    if (res.kind !== 'mapped') return;
+    expect(res.product.erp_sku).toBe('ATL-368');
+    expect(res.product.variants[0]?.price).toBe(180);
+    expect(res.product.variants[0]?.erp_sku).toBe('ATL-368');
+  });
+
   it('2. Mapper cobre produto com variação (formato V) e variação que também é composição (formato E)', () => {
     const resVar = mapBlingProductToCatalog(BLING_VARIABLE_PRODUCT_FIXTURE.data);
     expect(resVar.kind).toBe('mapped');

@@ -262,7 +262,13 @@ export async function listCatalog(input: {
        pv.price::text AS price, pv.promotional_price::text AS promotional_price,
        pv.stock::text AS stock, pv.ean, pv.ean_status
      FROM master_products mp
-     LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
+     LEFT JOIN product_variants pv ON pv.id = (
+       SELECT pv2.id
+       FROM product_variants pv2
+       WHERE pv2.master_product_id = mp.id
+       ORDER BY pv2.is_default DESC, CASE WHEN pv2.price > 0 THEN 0 ELSE 1 END, pv2.updated_at DESC
+       LIMIT 1
+     )
      WHERE ${where}
      ORDER BY mp.updated_at DESC, mp.erp_sku ASC
      LIMIT ${limit} OFFSET ${offset}`,
@@ -330,7 +336,11 @@ export async function listCatalog(input: {
     ids.length
       ? query<{ master_product_id: string; platform: CatalogChannel; sync_status: string }>(
           `SELECT master_product_id, platform, sync_status FROM platform_links
-           WHERE master_product_id IN (${placeholders})`,
+           WHERE master_product_id IN (${placeholders})
+           UNION
+           SELECT product_id AS master_product_id, channel AS platform, 'linked' AS sync_status
+           FROM channel_listing_links
+           WHERE link_status = 'vinculado' AND product_id IN (${placeholders})`,
           ids
         )
       : empty,
@@ -432,12 +442,6 @@ export async function listCatalog(input: {
       hasDuplicateCandidate: Boolean(row.ean && duplicateEans.has(row.ean)),
       channels: [...ACTIVE_CATALOG_CHANNELS],
     });
-    const cachedScore = (row as { worst_score?: number | null }).worst_score;
-    if (cachedScore != null) {
-      checklist.percent = cachedScore;
-      checklist.tone = cachedScore >= 80 ? 'green' : cachedScore >= 50 ? 'amber' : 'red';
-      checklist.ready = cachedScore >= 80 && !row.ncm_fiscal_risk;
-    }
     const productLinks = linksByProduct.get(row.id) ?? [];
     const promo = num(row.promotional_price);
     const integrations = activeChannels.map((platform) => {

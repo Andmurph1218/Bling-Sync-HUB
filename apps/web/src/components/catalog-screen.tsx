@@ -280,8 +280,8 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
     entries: SimulationEntry[];
   } | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       const params = new URLSearchParams({
         status: tab,
@@ -296,15 +296,24 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
       setData(payload);
       setError(null);
     } catch {
-      setData(null);
-      setError('Não foi possível ler o catálogo. Nenhum produto de exemplo é exibido.');
+      if (!quiet) {
+        setData(null);
+        setError('Não foi possível ler o catálogo. Nenhum produto de exemplo é exibido.');
+      }
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, [applied.brand, applied.name, applied.sku, gap, page, tab]);
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void load(true);
+    }, 8000);
+    return () => window.clearInterval(timer);
   }, [load]);
 
   useEffect(() => {

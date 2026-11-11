@@ -30,6 +30,7 @@ function erp(): ErpConnector {
       formato: 'S',
     }),
     createProduct: async () => ({ erp_id: '0', stockWarning: null }),
+    fetchProductEnrichmentData: async () => ({ images: [], ncm: '', category: '' }),
   };
 }
 

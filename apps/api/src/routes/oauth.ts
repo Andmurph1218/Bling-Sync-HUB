@@ -605,6 +605,10 @@ oauthRouter.get(
         refreshToken: null,
         expiresAt,
       });
+      if (storeId) {
+        const listing = await import('../connectors/strategy/nuvemshop-listing.js');
+        await listing.rememberNuvemshopStoreId(storeId);
+      }
 
       const webhooks =
         storeId != null

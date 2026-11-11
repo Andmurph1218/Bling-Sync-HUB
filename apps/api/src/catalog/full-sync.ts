@@ -290,7 +290,88 @@ async function archiveVariationProduct(externalId: string): Promise<number> {
   }
 }
 
-async function refreshStoredStock(balances: Map<string, InboundStockBalance>): Promise<number> {
+function inboundPrice(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    const normalized = text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+/** Atualiza preço e estoque de um produto que já está no HUB, pelo SKU da variante. */
+export async function refreshMissingCommerce(
+  erp: ErpConnector,
+  externalId: string
+): Promise<{ price: number | null; stock: number | null }> {
+  const current = await query<{ id: string; erp_sku: string | null; is_default: boolean; price: string | null; stock: string | null }>(
+    `SELECT pv.id, pv.erp_sku, pv.is_default, pv.price::text AS price, pv.stock::text AS stock
+     FROM product_variants pv
+     JOIN master_products mp ON mp.id = pv.master_product_id
+     WHERE mp.erp_id = $1 AND mp.archived_at IS NULL`,
+    [externalId]
+  );
+  if (current.rows.length === 0) return { price: null, stock: null };
+  const complete = current.rows.every((row) => Number(row.price) > 0 && row.stock !== null);
+  if (complete) {
+    const priced = current.rows.find((row) => row.is_default) ?? current.rows[0];
+    return {
+      price: priced?.price == null ? null : Number(priced.price),
+      stock: priced?.stock == null ? null : Number(priced.stock),
+    };
+  }
+  let raw: unknown;
+  try {
+    raw = await erp.pullCatalogProduct(externalId);
+  } catch {
+    return { price: null, stock: null };
+  }
+  const payload = asProduct(raw);
+  if (!payload) return { price: null, stock: null };
+  if (payload.formato === 'V') await hydrateVariations(erp, payload);
+  const variants = payload.formato === 'V' && (payload.variacoes ?? []).length > 0
+    ? payload.variacoes ?? []
+    : [{ id: payload.id, codigo: payload.codigo, preco: payload.preco }];
+  let price: number | null = null;
+  for (const variant of variants) {
+    const nextPrice = inboundPrice(variant.preco);
+    if (nextPrice <= 0) continue;
+    const sku = String(variant.codigo ?? '').trim();
+    const target = current.rows.find((row) => (row.erp_sku ?? '').trim() === sku)
+      ?? current.rows.find((row) => row.is_default)
+      ?? current.rows[0];
+    if (!target) continue;
+    await query(
+      `UPDATE product_variants SET price = $2, updated_at = now() WHERE id = $1`,
+      [target.id, nextPrice]
+    );
+    if (sku === String(payload.codigo ?? '').trim() || target.is_default) price = nextPrice;
+  }
+  const balances = await stockForBatch(erp, [payload]);
+  const attached = (payload as { estoqueSaldos?: unknown[] }).estoqueSaldos;
+  if (Array.isArray(attached)) {
+    for (const item of attached) {
+      const balance = item as StockBalanceItem;
+      const id = balance.produto?.id;
+      if (id !== undefined && id !== null) balances.set(String(id), item as InboundStockBalance);
+    }
+  }
+  await refreshStoredStock(balances, String(payload.codigo ?? ''));
+  const stockRow = await query<{ stock: string | null }>(
+    `SELECT pv.stock::text AS stock
+     FROM product_variants pv
+     JOIN master_products mp ON mp.id = pv.master_product_id
+     WHERE mp.erp_id = $1
+     ORDER BY pv.is_default DESC
+     LIMIT 1`,
+    [externalId]
+  );
+  return { price, stock: stockRow.rows[0]?.stock == null ? null : Number(stockRow.rows[0].stock) };
+}
+
+async function refreshStoredStock(balances: Map<string, InboundStockBalance>, sku = ''): Promise<number> {
   let updated = 0;
   for (const [externalId, raw] of balances) {
     try {
@@ -299,9 +380,15 @@ async function refreshStoredStock(balances: Map<string, InboundStockBalance>): P
          FROM product_variants pv
          JOIN master_products mp ON mp.id = pv.master_product_id
          WHERE mp.archived_at IS NULL
-           AND (pv.bling_variant_id = $1 OR (mp.erp_id = $1 AND pv.is_default = true))
+           AND (
+             pv.bling_variant_id = $1
+             OR pv.erp_sku = $1
+             OR ($2 <> '' AND pv.erp_sku = $2 AND mp.erp_id = $1)
+             OR (mp.erp_id = $1 AND pv.is_default = true)
+           )
+         ORDER BY CASE WHEN pv.erp_sku = $2 THEN 0 WHEN pv.is_default THEN 1 ELSE 2 END
          LIMIT 1`,
-        [externalId]
+        [externalId, sku]
       );
       const variantId = found.rows[0]?.id;
       if (!variantId) continue;

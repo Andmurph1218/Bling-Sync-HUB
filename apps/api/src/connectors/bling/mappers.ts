@@ -36,6 +36,19 @@ export function parseBlingVariationSpec(specName: string): MappedVariantAttribut
   return attrs.sort((a, b) => a.axisCanonicalName.localeCompare(b.axisCanonicalName));
 }
 
+/** O Bling manda o preço como número ou texto ("180.00" / "180,00"). */
+export function asCatalogPrice(value: unknown, fallback = 0): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return fallback;
+    const normalized = text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
 function mapSituacaoToCatalogStatus(situacao: 'A' | 'I' | 'E'): 'active' | 'inactive' | 'deleted' {
   if (situacao === 'I') return 'inactive';
   if (situacao === 'E') return 'deleted';
@@ -94,8 +107,8 @@ export function mapBlingProductToCatalog(payload: BlingProductPayload): MapErpPr
       is_default: true,
       product_format: payload.formato,
       stock_mode: stockMode,
-      price: payload.preco,
-      cost_price: payload.precoCusto ?? null,
+      price: asCatalogPrice(payload.preco),
+      cost_price: payload.precoCusto == null ? null : asCatalogPrice(payload.precoCusto),
       stock: null,
       net_weight: payload.pesoLiquido ?? null,
       gross_weight: payload.pesoBruto ?? null,
@@ -167,8 +180,10 @@ export function mapBlingProductToCatalog(payload: BlingProductPayload): MapErpPr
       is_default: false,
       product_format: v.formato,
       stock_mode: stockMode,
-      price: v.preco,
-      cost_price: v.precoCusto ?? payload.precoCusto ?? null,
+      price: asCatalogPrice(v.preco, asCatalogPrice(payload.preco)),
+      cost_price: v.precoCusto == null && payload.precoCusto == null
+        ? null
+        : asCatalogPrice(v.precoCusto ?? payload.precoCusto),
       stock: null,
       net_weight: v.pesoLiquido ?? payload.pesoLiquido ?? null,
       gross_weight: v.pesoBruto ?? payload.pesoBruto ?? null,

@@ -7,7 +7,8 @@ import { createUser } from '../auth/service.js';
 import { DbPoolLike, query, setPool } from '../db/pool.js';
 import { runAllMigrationsUp } from '../db/migrator.js';
 import { setRedis } from '../lib/redis.js';
-import { MarketplaceListing } from '../connectors/strategy/types.js';
+import { MarketplaceListing, ErpConnector } from '../connectors/strategy/types.js';
+import { refreshMissingCommerce } from '../catalog/full-sync.js';
 import { reconcileListings } from '../services/reconciliation.service.js';
 
 describe('reconciliação do anúncio', () => {
@@ -111,5 +112,61 @@ describe('reconciliação do anúncio', () => {
       [productId]
     );
     expect(images.rows[0]?.url_normalized).toBe('https://img.local/canal.jpg');
+  });
+
+  it('grava o preço do ERP na variação ATL-368 e vincula o anúncio da Nuvemshop', async () => {
+    const created = await query<{ id: string }>(
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format, ncm_status)
+       VALUES ('erp-atl', 'ATL-368', 'Produto ATL', 'P', 'S', 'valid')
+       RETURNING id`
+    );
+    const atlId = created.rows[0]!.id;
+    await query(
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, price, stock)
+       VALUES ($1, 'ATL-368', true, NULL, NULL)`,
+      [atlId]
+    );
+    const erp = {
+      pullCatalogProduct: async () => ({
+        id: 'erp-atl',
+        nome: 'Produto ATL',
+        codigo: 'ATL-368',
+        preco: '180,00',
+        tipo: 'P',
+        situacao: 'A',
+        formato: 'S',
+        estoqueSaldos: [{
+          produto: { id: 'erp-atl' },
+          saldoVirtualTotal: 4,
+          depositos: [{ id: '1', saldoVirtual: 4, saldoFisico: 4 }],
+        }],
+      }),
+      pullStockBalances: async () => [],
+    } as unknown as ErpConnector;
+    const refreshed = await refreshMissingCommerce(erp, 'erp-atl');
+    expect(refreshed.price).toBe(180);
+
+    const listing: MarketplaceListing = {
+      externalId: '1578151393',
+      title: 'Anúncio ATL-368',
+      price: 180,
+      stock: 4,
+      images: [],
+      status: 'Ativo',
+    };
+    const result = await reconcileListings(async (channel, product) => (
+      channel === 'nuvemshop' && product.sku === 'ATL-368' ? listing : null
+    ), { sku: 'ATL-368' });
+    expect(result.linked).toBe(1);
+    const link = await query<{ listing_id: string }>(
+      `SELECT listing_id FROM channel_listing_links WHERE product_id = $1 AND channel = 'nuvemshop'`,
+      [atlId]
+    );
+    expect(link.rows[0]?.listing_id).toBe('1578151393');
+    const price = await query<{ price: string }>(
+      `SELECT price::text AS price FROM product_variants WHERE master_product_id = $1 AND erp_sku = 'ATL-368'`,
+      [atlId]
+    );
+    expect(Number(price.rows[0]?.price)).toBe(180);
   });
 });

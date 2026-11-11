@@ -1,4 +1,5 @@
-import { getMarketplaceConnector } from '../connectors/strategy/factory.js';
+import { refreshMissingCommerce } from '../catalog/full-sync.js';
+import { createErpConnector, getMarketplaceConnector } from '../connectors/strategy/factory.js';
 import { MarketplaceListing, MasterProduct } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
@@ -20,11 +21,18 @@ export type ListingReader = (channel: string, product: MasterProduct) => Promise
 
 interface HubRow {
   id: string;
+  erp_id: string;
   erp_sku: string;
   ean: string | null;
   price: string | null;
   stock: string | null;
   image_count: number;
+}
+
+export interface ReconcileOptions {
+  limit?: number;
+  offset?: number;
+  sku?: string;
 }
 
 function money(value: number): string {
@@ -126,17 +134,49 @@ async function defaultReader(channel: string, product: MasterProduct): Promise<M
  * Lê o anúncio do canal, guarda o retrato e avisa divergência.
  * Não altera preço, estoque, NCM nem EAN no ERP.
  */
-export async function reconcileListings(read: ListingReader = defaultReader): Promise<{ snapshots: number; alerts: number; linked: number }> {
-  const products = await query<Omit<HubRow, 'image_count'>>(
-    `SELECT mp.id, mp.erp_sku, pv.ean, pv.price::text AS price, pv.stock::text AS stock
+async function skusFor(productId: string, fallback: string): Promise<string[]> {
+  const rows = await query<{ erp_sku: string | null }>(
+    `SELECT erp_sku FROM product_variants WHERE master_product_id = $1 AND trim(COALESCE(erp_sku, '')) <> ''`,
+    [productId]
+  );
+  const skus = rows.rows.map((row) => (row.erp_sku ?? '').trim()).filter((sku) => sku.length > 0);
+  if (!skus.includes(fallback) && fallback.trim()) skus.unshift(fallback.trim());
+  return [...new Set(skus)];
+}
+
+export async function reconcileListings(
+  read: ListingReader = defaultReader,
+  options: ReconcileOptions = {}
+): Promise<{ snapshots: number; alerts: number; linked: number; scanned: number }> {
+  const limit = options.limit ?? READY_LIMIT;
+  const offset = options.offset ?? 0;
+  const sku = options.sku?.trim();
+  const found = await query<Omit<HubRow, 'image_count'> & { is_default: boolean; variant_sku: string | null }>(
+    `SELECT mp.id, mp.erp_id, mp.erp_sku, pv.erp_sku AS variant_sku, pv.is_default,
+            pv.ean, pv.price::text AS price, pv.stock::text AS stock
      FROM master_products mp
-     INNER JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
+     INNER JOIN product_variants pv ON pv.master_product_id = mp.id
      WHERE mp.catalog_status = 'active' AND mp.archived_at IS NULL
        AND trim(mp.erp_sku) <> ''
-       AND pv.price > 0
-     LIMIT $1`,
-    [READY_LIMIT]
+       AND ($1 = '' OR mp.erp_sku = $1 OR pv.erp_sku = $1)
+     ORDER BY mp.updated_at DESC`,
+    [sku && sku.length > 0 ? sku : '']
   );
+  const chosen = new Map<string, Omit<HubRow, 'image_count'>>();
+  for (const row of found.rows) {
+    const current = chosen.get(row.id);
+    const candidate = { id: row.id, erp_id: row.erp_id, erp_sku: row.variant_sku?.trim() || row.erp_sku, ean: row.ean, price: row.price, stock: row.stock };
+    if (!current) {
+      chosen.set(row.id, candidate);
+      continue;
+    }
+    const currentPrice = asNumber(current.price) ?? 0;
+    const nextPrice = asNumber(row.price) ?? 0;
+    if ((row.is_default && currentPrice <= 0) || (currentPrice <= 0 && nextPrice > 0)) {
+      chosen.set(row.id, candidate);
+    }
+  }
+  const products = { rows: [...chosen.values()].slice(offset, offset + limit) };
   const covers = await query<{ master_product_id: string; image_count: number }>(
     `SELECT master_product_id, count(*)::int AS image_count
      FROM product_images
@@ -149,17 +189,26 @@ export async function reconcileListings(read: ListingReader = defaultReader): Pr
   let linked = 0;
   for (const raw of products.rows) {
     const row: HubRow = { ...raw, image_count: imagesByProduct.get(raw.id) ?? 0 };
-    const product: MasterProduct = {
-      id: row.id,
-      sku: row.erp_sku,
-      ean: row.ean,
-      price: asNumber(row.price),
-      stock: asNumber(row.stock),
-    };
+    if (process.env.VITEST !== 'true' && (asNumber(row.price) === null || (asNumber(row.price) ?? 0) <= 0 || asNumber(row.stock) === null)) {
+      const refreshed = await refreshMissingCommerce(createErpConnector('bling'), row.erp_id);
+      if (refreshed.price !== null) row.price = String(refreshed.price);
+      if (refreshed.stock !== null) row.stock = String(refreshed.stock);
+    }
+    const skus = await skusFor(row.id, row.erp_sku);
     for (const channel of CHANNELS) {
       let listing: MarketplaceListing | null = null;
       try {
-        listing = await read(channel, product);
+        for (const sku of skus) {
+          const product: MasterProduct = {
+            id: row.id,
+            sku,
+            ean: row.ean,
+            price: asNumber(row.price),
+            stock: asNumber(row.stock),
+          };
+          listing = await read(channel, product);
+          if (listing) break;
+        }
       } catch (error) {
         logger.error('Leitura do anúncio falhou', {
           channel,
@@ -183,6 +232,25 @@ export async function reconcileListings(read: ListingReader = defaultReader): Pr
       snapshots += 1;
       alerts += found.length;
     }
+  }
+  return { snapshots, alerts, linked, scanned: products.rows.length };
+}
+
+/** Percorre o catálogo em lotes. A leitura do canal não publica anúncio. */
+export async function reconcileAll(read: ListingReader = defaultReader): Promise<{ snapshots: number; alerts: number; linked: number }> {
+  let offset = 0;
+  let snapshots = 0;
+  let alerts = 0;
+  let linked = 0;
+  const page = 80;
+  for (;;) {
+    const result = await reconcileListings(read, { limit: page, offset });
+    snapshots += result.snapshots;
+    alerts += result.alerts;
+    linked += result.linked;
+    if (result.scanned < page) break;
+    offset += page;
+    if (offset >= 20000) break;
   }
   return { snapshots, alerts, linked };
 }

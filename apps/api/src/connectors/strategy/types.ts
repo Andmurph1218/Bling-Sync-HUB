@@ -79,6 +79,7 @@ export interface ErpConnector {
   getPrice(productId: string): Promise<ErpPriceSnapshot>;
   listCatalogPage(page: number, pageSize: number): Promise<ErpCatalogPage>;
   pullCatalogProduct(externalId: string): Promise<unknown | null>;
+  fetchProductEnrichmentData(erpId: string): Promise<{ images: string[]; ncm: string; category: string }>;
   pullStockBalances?(externalIds: string[]): Promise<ErpStockBalance[]>;
   listChildIds?(parentId: string): Promise<string[]>;
   createProduct(productData: CreateProductDTO): Promise<{ erp_id: string; stockWarning: string | null }>;
