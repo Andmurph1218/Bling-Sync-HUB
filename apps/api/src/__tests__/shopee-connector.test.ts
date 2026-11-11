@@ -24,7 +24,7 @@ const CREDS: ShopeeCredentials = {
 
 function mockFetch(payload: unknown, status = 200) {
   const calls: Array<{ url: string; method: string; body: string | null }> = [];
-  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  const fetchImpl = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     calls.push({
       url: String(input),
       method: init?.method ?? 'GET',

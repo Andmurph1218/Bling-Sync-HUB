@@ -4,7 +4,7 @@ import { newDb, DataType } from 'pg-mem';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { createUser } from '../auth/service.js';
-import { DbPoolLike, query, setPool } from '../db/pool.js';
+import { DbPoolLike, setPool } from '../db/pool.js';
 import { runAllMigrationsUp } from '../db/migrator.js';
 import { setRedis } from '../lib/redis.js';
 import { ErpConnector } from '../connectors/strategy/types.js';
