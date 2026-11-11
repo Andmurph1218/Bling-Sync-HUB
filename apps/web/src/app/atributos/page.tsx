@@ -9,16 +9,42 @@ import { CategoryMappingPanel } from '../../components/mapping/category-mapping-
 import { MappingPlatform, MappingStudio } from '../../components/mapping/types';
 
 type StudioTab = 'categories' | 'attributes';
+type ChannelOption = { id: string; name: string };
+type ConnectorAttribute = { id: string; name: string; required: boolean };
+
+const STUDIO_PLATFORMS = new Set<MappingPlatform>(['nuvemshop', 'mercadolivre']);
+
+function isStudioPlatform(value: string): value is MappingPlatform {
+  return STUDIO_PLATFORMS.has(value as MappingPlatform);
+}
 
 export default function AtributosPage() {
   const { hasRole } = useCurrentRole();
   const canWrite = hasRole('operator', 'admin');
   const [tab, setTab] = useState<StudioTab>('categories');
-  const [platform, setPlatform] = useState<MappingPlatform>('nuvemshop');
+  const [platform, setPlatform] = useState<string>('nuvemshop');
+  const [channels, setChannels] = useState<ChannelOption[]>([{ id: 'nuvemshop', name: 'Nuvemshop' }]);
   const [studio, setStudio] = useState<MappingStudio | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [categoryId, setCategoryId] = useState('');
+  const [connectorAttributes, setConnectorAttributes] = useState<ConnectorAttribute[] | null>(null);
+
+  useEffect(() => {
+    void apiFetch<{ apps: Array<{ id: string; name: string; category: string; implemented: boolean }> }>('/api/integrations')
+      .then((payload) => {
+        const next = payload.apps.filter(
+          (app) => app.category === 'marketplaces' && app.implemented && (app.id !== 'mercadolivre' || MERCADO_LIVRE_ACTIVE)
+        );
+        if (next.length > 0) setChannels(next.map((app) => ({ id: app.id, name: app.name })));
+      })
+      .catch(() => undefined);
+  }, []);
 
   const load = useCallback(async () => {
+    if (!isStudioPlatform(platform)) {
+      setStudio(null);
+      return;
+    }
     try {
       setStudio(await apiFetch<MappingStudio>(`/api/catalog/mapping-studio?platform=${platform}`));
       setError(null);
@@ -32,7 +58,24 @@ export default function AtributosPage() {
     void load();
   }, [load]);
 
-  const channelName = platform === 'nuvemshop' ? 'Nuvemshop' : 'Mercado Livre';
+  const channelName = channels.find((channel) => channel.id === platform)?.name ?? platform;
+
+  const readConnectorAttributes = async () => {
+    if (!categoryId.trim()) {
+      setError('Informe o ID da categoria neste canal.');
+      return;
+    }
+    try {
+      const payload = await apiFetch<{ attributes: ConnectorAttribute[] }>(
+        `/api/marketplace/${platform}/category-attributes?categoryId=${encodeURIComponent(categoryId.trim())}`
+      );
+      setConnectorAttributes(payload.attributes);
+      setError(null);
+    } catch {
+      setConnectorAttributes(null);
+      setError('Não foi possível ler os atributos deste canal. Confira a credencial e o ID da categoria.');
+    }
+  };
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -48,11 +91,16 @@ export default function AtributosPage() {
           Canal de destino
           <select
             value={platform}
-            onChange={(event) => setPlatform(event.target.value as MappingPlatform)}
+            onChange={(event) => {
+              setPlatform(event.target.value);
+              setConnectorAttributes(null);
+              setError(null);
+            }}
             className="mt-1 block rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-sm text-text-primary"
           >
-            <option value="nuvemshop">Nuvemshop</option>
-            {MERCADO_LIVRE_ACTIVE && <option value="mercadolivre">Mercado Livre</option>}
+            {channels.map((channel) => (
+              <option key={channel.id} value={channel.id}>{channel.name}</option>
+            ))}
           </select>
         </label>
       </header>
@@ -64,7 +112,7 @@ export default function AtributosPage() {
       )}
       {error && <p className="mt-4 text-sm text-rose-600 dark:text-rose-200" role="alert">{error}</p>}
 
-      <div className="mt-5 flex gap-1 border-b border-border-color" role="tablist">
+      {isStudioPlatform(platform) && <div className="mt-5 flex gap-1 border-b border-border-color" role="tablist">
         {([
           ['categories', 'Mapeamento de Categorias'],
           ['attributes', 'Mapeamento de Atributos e Valores'],
@@ -82,14 +130,52 @@ export default function AtributosPage() {
             {label}
           </button>
         ))}
-      </div>
+      </div>}
 
       <div className="mt-5">
-        {!studio && !error && <p className="text-sm text-text-muted">Carregando...</p>}
-        {studio && tab === 'categories' && (
+        {!isStudioPlatform(platform) && (
+          <section className="rounded-xl border border-border-color bg-bg-surface p-4">
+            <h2 className="text-sm font-semibold text-text-primary">Atributos de {channelName}</h2>
+            <p className="mt-1 text-sm text-text-muted">
+              A lista vem do conector, com o ID da categoria no canal. O estúdio de categorias continua na Nuvemshop e no Mercado Livre.
+            </p>
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="text-xs text-text-muted">
+                ID da categoria
+                <input
+                  value={categoryId}
+                  onChange={(event) => setCategoryId(event.target.value)}
+                  className="mt-1 block rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-sm text-text-primary"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void readConnectorAttributes()}
+                className="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-semibold text-white"
+              >
+                Ler atributos
+              </button>
+            </div>
+            {connectorAttributes && connectorAttributes.length === 0 && (
+              <p className="mt-3 text-sm text-text-muted">Esta categoria não devolveu atributos.</p>
+            )}
+            {connectorAttributes && connectorAttributes.length > 0 && (
+              <ul className="mt-3 divide-y divide-border-color">
+                {connectorAttributes.map((attribute) => (
+                  <li key={attribute.id} className="flex items-center justify-between py-2 text-sm">
+                    <span className="text-text-primary">{attribute.name}</span>
+                    <span className="text-xs text-text-muted">{attribute.required ? 'Obrigatório' : 'Opcional'}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+        {isStudioPlatform(platform) && !studio && !error && <p className="text-sm text-text-muted">Carregando...</p>}
+        {isStudioPlatform(platform) && studio && tab === 'categories' && (
           <CategoryMappingPanel platform={platform} studio={studio} canWrite={canWrite} onSaved={load} />
         )}
-        {studio && tab === 'attributes' && (
+        {isStudioPlatform(platform) && studio && tab === 'attributes' && (
           <AttributeMappingTable platform={platform} categories={studio.erp} fields={studio.fields} canWrite={canWrite} />
         )}
       </div>

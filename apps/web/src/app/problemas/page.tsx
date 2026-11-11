@@ -8,7 +8,16 @@ import { ProblemDataGrid } from '../../components/problems/problem-data-grid';
 import { ProblemLogDrawer } from '../../components/problems/problem-log-drawer';
 import { ERP_SYNC_GROUP, ProblemGroup, ProblemSelection, ProblemType } from '../../components/problems/types';
 
-type Filter = ProblemType | 'todos';
+type Filter = ProblemType | 'todos' | 'duplicidades';
+
+interface DuplicateItem {
+  id: string;
+  productId: string;
+  sku: string;
+  name: string;
+  conflictType: 'erp_sku' | 'erp_ean' | 'marketplace';
+  label: string;
+}
 
 interface PanelPayload {
   groups: ProblemGroup[];
@@ -29,6 +38,7 @@ const FILTERS: Array<{ type: Filter; label: string }> = [
   { type: 'preco', label: 'Problemas de Preço' },
   { type: 'anuncio', label: 'Problemas de Anúncio' },
   { type: 'cadastro', label: 'Problemas de Cadastro' },
+  { type: 'duplicidades', label: 'Duplicidades' },
 ];
 
 const SYSTEMIC_THRESHOLD = 100;
@@ -55,17 +65,24 @@ export default function ProblemasPage() {
   const [selectedItems, setSelectedItems] = useState<Map<string, string>>(new Map());
   const [drawer, setDrawer] = useState<{ itemId: string | null; group: ProblemGroup | null } | null>(null);
   const [batch, setBatch] = useState<BatchStatus | null>(null);
+  const [duplicates, setDuplicates] = useState<DuplicateItem[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
+    let panelFailed = false;
+    let duplicatesFailed = false;
     try {
       setPanel(await apiFetch<PanelPayload>('/api/problems/panel'));
-      setError(null);
     } catch {
-      setError('Não foi possível ler as exceções do HUB.');
-    } finally {
-      setLoading(false);
+      panelFailed = true;
     }
+    try {
+      setDuplicates((await apiFetch<{ items: DuplicateItem[] }>('/api/duplicates')).items);
+    } catch {
+      duplicatesFailed = true;
+    }
+    setError(panelFailed || duplicatesFailed ? 'Não foi possível ler as exceções do HUB.' : null);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -73,6 +90,7 @@ export default function ProblemasPage() {
     const sku = params.get('q');
     const file = params.get('importacao');
     if (sku || file) setImportFilter({ sku: sku ?? '', file: file ?? '' });
+    if (params.get('filtro') === 'duplicidades') setFilter('duplicidades');
     void load();
   }, [load]);
 
@@ -181,6 +199,24 @@ export default function ProblemasPage() {
     }
   };
 
+  const resolveDuplicate = async (item: DuplicateItem) => {
+    const marketplace = item.conflictType === 'marketplace';
+    const question = marketplace
+      ? `Vincular ${item.sku} ao anúncio existente? O HUB não cria outro anúncio.`
+      : `Arquivar ${item.sku} como duplicado do ERP? O cadastro sai do catálogo ativo.`;
+    if (!window.confirm(question)) return;
+    try {
+      await apiFetch(`/api/duplicates/${item.id}/resolve`, {
+        method: 'POST',
+        json: { action: marketplace ? 'link' : 'archive' },
+      });
+      setNotice(marketplace ? 'Anúncio existente vinculado.' : 'Produto arquivado como duplicado.');
+      await load();
+    } catch {
+      setNotice('Não foi possível resolver esta duplicidade.');
+    }
+  };
+
   const batchDone = batch?.status === 'done' || batch?.status === 'failed';
 
   return (
@@ -215,7 +251,7 @@ export default function ProblemasPage() {
         <aside className="h-fit rounded-xl border border-border-color bg-bg-surface p-2">
           <ul className="space-y-0.5">
             {FILTERS.map((item) => {
-              const count = panel?.counts[item.type] ?? 0;
+              const count = item.type === 'duplicidades' ? duplicates.length : (panel?.counts[item.type] ?? 0);
               const active = filter === item.type;
               return (
                 <li key={item.type}>
@@ -267,13 +303,41 @@ export default function ProblemasPage() {
             </div>
           )}
 
-          {!loading && visible.length === 0 && !error && (
+          {filter === 'duplicidades' && (
+            <div className="space-y-2">
+              {!loading && duplicates.length === 0 && (
+                <p className="rounded-xl border border-border-color bg-bg-surface px-4 py-8 text-center text-sm text-text-muted">
+                  Nenhuma duplicidade aberta.
+                </p>
+              )}
+              {duplicates.map((item) => (
+                <article key={item.id} className="flex flex-col gap-3 rounded-xl border border-border-color bg-bg-surface px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-text-primary">{item.name}</p>
+                    <p className="text-xs text-text-muted">{item.sku}</p>
+                    <p className="mt-1 text-sm text-text-primary">{item.label}</p>
+                  </div>
+                  {canWrite && (
+                    <button
+                      type="button"
+                      onClick={() => void resolveDuplicate(item)}
+                      className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white"
+                    >
+                      Resolver
+                    </button>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+
+          {filter !== 'duplicidades' && !loading && visible.length === 0 && !error && (
             <p className="rounded-xl border border-border-color bg-bg-surface px-4 py-8 text-center text-sm text-text-muted">
               Nenhuma exceção neste filtro.
             </p>
           )}
 
-          {visible.length > 0 && (
+          {filter !== 'duplicidades' && visible.length > 0 && (
             <ProblemDataGrid
               groups={visible}
               selection={{ groupKeys: selectedGroups, itemIds: selectedItems }}

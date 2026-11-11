@@ -149,7 +149,7 @@ export class LiveBlingCatalogReader implements BlingCatalogReader {
   async list(page: number, pageSize: number): Promise<ErpCatalogPage> {
     const path = `/produtos?pagina=${page}&limite=${pageSize}&tipo=P`;
     process.stderr.write(`bling-list ${path}\n`);
-    const res = await this.get<{ data?: Array<{ id?: number | string }> }>(path);
+    const res = await this.get<{ data?: Array<{ id?: number | string }>; total?: number }>(path);
     process.stderr.write(`bling-list status=${res.status}\n`);
     if (res.status >= 400) {
       throw blingError(path, res.status, res.data);
@@ -157,11 +157,13 @@ export class LiveBlingCatalogReader implements BlingCatalogReader {
     const externalIds = (res.data.data ?? [])
       .map((row) => (row.id === undefined || row.id === null ? '' : String(row.id)))
       .filter((id) => id.length > 0);
+    const total = typeof res.data.total === 'number' ? res.data.total : undefined;
     return {
       page,
       pageSize,
       externalIds,
       done: externalIds.length < pageSize,
+      ...(total === undefined ? {} : { total }),
     };
   }
 

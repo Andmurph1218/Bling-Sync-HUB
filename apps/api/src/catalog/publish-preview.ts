@@ -1,3 +1,6 @@
+import { ACTIVE_CATALOG_CHANNELS } from '../config/channels.js';
+import { query } from '../db/pool.js';
+import { logger } from '../lib/logger.js';
 import {
   AttributeMapInput,
   isChannelMappingGreen,
@@ -5,7 +8,6 @@ import {
 } from './channel-attributes.js';
 import { ChecklistResult, evaluateCatalogChecklist } from './completeness.js';
 import { isBlankSku } from './blank-sku.js';
-import { query } from '../db/pool.js';
 
 export type PublishChannel = 'mercadolivre' | 'nuvemshop';
 
@@ -148,49 +150,65 @@ export async function buildPublishPreview(productId: string, channel: PublishCha
   };
 }
 
+/** Só a string exata "true" publica sozinho. Ausente ou qualquer outro valor deixa o envio manual. */
+export function isAutoPublishEnabled(): boolean {
+  return process.env.AUTO_PUBLISH_ENABLED === 'true';
+}
+
 export async function recalculateCompleteness(ids: string[]): Promise<Array<{ id: string; percent: number; ready: boolean }>> {
   const items = [];
   for (const id of ids) {
-    const found = await query<{
-      erp_id: string;
-      erp_sku: string | null;
-      ncm_status: string;
-      ncm_fiscal_risk: boolean;
-      hub_category_id: string | null;
-      price: string | null;
-      ean_status: string | null;
-      cover_count: number;
-    }>(
-      `SELECT mp.erp_id, mp.erp_sku, mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id,
-              pv.price::text AS price, pv.ean_status,
-              (
-                SELECT count(*)::int FROM product_images pi
-                WHERE pi.master_product_id = $1 AND pi.is_cover_eligible = true
-              ) AS cover_count
-       FROM master_products mp
-       LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
-       WHERE mp.id = $1`,
-      [id]
-    );
-    const row = found.rows[0];
-    if (!row) continue;
-    const checklist = evaluateCatalogChecklist({
-      erpId: row.erp_id,
-      sku: row.erp_sku,
-      hasCoverImage: Number(row.cover_count) > 0,
-      hubCategoryId: row.hub_category_id,
-      mappedPlatforms: [],
-      greenPlatforms: [],
-      eanStatus: row.ean_status,
-      eanRequired: false,
-      ncmStatus: row.ncm_status,
-      ncmFiscalRisk: row.ncm_fiscal_risk,
-      price: row.price === null ? null : Number(row.price),
-      hasDuplicateCandidate: false,
-    });
-    items.push({ id, percent: checklist.percent, ready: checklist.ready });
+    const scores: ChecklistResult[] = [];
+    for (const channel of ACTIVE_CATALOG_CHANNELS) {
+      const checklist = await checklistForChannel(id, channel);
+      if (!checklist) continue;
+      scores.push(checklist);
+      if (checklist.percent === 100) await enqueueAutoPublish(id, channel);
+    }
+    if (scores.length === 0) continue;
+    const percent = Math.min(...scores.map((score) => score.percent));
+    items.push({ id, percent, ready: scores.every((score) => score.percent === 100) });
   }
   return items;
+}
+
+async function enqueueAutoPublish(productId: string, channel: PublishChannel): Promise<void> {
+  if (!isAutoPublishEnabled()) return;
+  const open = await query<{ id: string }>(
+    `SELECT id FROM publish_queue
+     WHERE product_id = $1 AND channel = $2 AND status IN ('pending', 'processing')
+     LIMIT 1`,
+    [productId, channel]
+  );
+  if (open.rows[0]) return;
+  const preview = await buildPublishPreview(productId, channel);
+  if (!preview?.payload.seller_custom_field) return;
+  const inserted = await query<{ id: string }>(
+    `INSERT INTO publish_queue (product_id, channel, status, payload_json)
+     VALUES ($1, $2, 'pending', $3)
+     RETURNING id`,
+    [
+      productId,
+      channel,
+      JSON.stringify({
+        sku: preview.payload.seller_custom_field,
+        price: preview.payload.price,
+        stock: preview.payload.available_quantity,
+        attributes: preview.payload.attributes,
+      }),
+    ]
+  );
+  const id = inserted.rows[0]?.id;
+  if (!id || process.env.VITEST) return;
+  try {
+    const { getPublishQueue } = await import('../queues/publish-queue.js');
+    await getPublishQueue().add('publish', { publishQueueId: id }, { jobId: id, removeOnComplete: 1000, removeOnFail: 500 });
+  } catch (error) {
+    logger.error('Não foi possível acordar o worker. O item ficou pendente na fila.', {
+      id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 export async function checklistForChannel(

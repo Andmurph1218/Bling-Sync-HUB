@@ -36,7 +36,7 @@ const COPY: Record<string, string> = {
   nuvemshop: 'Sincronize catálogo e estoque com a loja.',
   mercadolivre: 'Sincronize anúncios. A autorização OAuth precisa ser refeita.',
   amazon: 'Sincronize produtos, estoque e pedidos.',
-  shopee: 'Sincronize produtos, estoque e pedidos.',
+  shopee: 'Publique catálogo na Shopee. Preço e estoque continuam no ERP.',
   tiktok: 'Sincronize produtos, estoque e pedidos.',
 };
 

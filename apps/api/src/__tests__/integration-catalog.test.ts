@@ -84,7 +84,7 @@ describe('loja de integrações do administrador', () => {
     const shopee = catalog.body.groups
       .flatMap((group: { apps: Array<{ slug: string; health: string; isAvailable: boolean }> }) => group.apps)
       .find((app: { slug: string }) => app.slug === 'shopee');
-    expect(shopee).toMatchObject({ health: 'soon', isAvailable: false });
+    expect(shopee).toMatchObject({ health: 'available', isAvailable: true });
 
     const requested = await request(app)
       .post('/api/admin/integrations/shopee/request')

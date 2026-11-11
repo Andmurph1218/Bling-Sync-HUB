@@ -1,4 +1,5 @@
 import { IntegrationCategory, IntegrationStatus, TokenSnapshot } from './types.js';
+import { ShopeeConnector } from '../shopee/index.js';
 import { MercadoLivreMarketplaceConnector, NuvemshopMarketplaceConnector } from './marketplaces.js';
 import { UnavailableMarketplaceConnector } from './unavailable.js';
 import { ErpConnector, MarketplaceConnector } from './types.js';
@@ -14,7 +15,7 @@ export interface IntegrationApp {
 export const INTEGRATION_APPS: IntegrationApp[] = [
   { id: 'mercadolivre', name: 'Mercado Livre', category: 'marketplaces', implemented: true, authorizePath: '/oauth/mercadolivre/authorize' },
   { id: 'nuvemshop', name: 'Nuvemshop', category: 'marketplaces', implemented: true, authorizePath: null },
-  { id: 'shopee', name: 'Shopee', category: 'marketplaces', implemented: false, authorizePath: null },
+  { id: 'shopee', name: 'Shopee', category: 'marketplaces', implemented: true, authorizePath: null },
   { id: 'amazon', name: 'Amazon', category: 'marketplaces', implemented: false, authorizePath: null },
   { id: 'tiktok', name: 'TikTok Shop', category: 'marketplaces', implemented: false, authorizePath: null },
   { id: 'bling', name: 'Bling', category: 'erps', implemented: true, authorizePath: '/oauth/bling/authorize' },
@@ -23,7 +24,7 @@ export const INTEGRATION_APPS: IntegrationApp[] = [
 const MARKETPLACES: Record<string, () => MarketplaceConnector> = {
   mercadolivre: () => new MercadoLivreMarketplaceConnector(),
   nuvemshop: () => new NuvemshopMarketplaceConnector(),
-  shopee: () => new UnavailableMarketplaceConnector('shopee'),
+  shopee: () => new ShopeeConnector(),
   amazon: () => new UnavailableMarketplaceConnector('amazon'),
   tiktok: () => new UnavailableMarketplaceConnector('tiktok'),
 };

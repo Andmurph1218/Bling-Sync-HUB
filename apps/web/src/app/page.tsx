@@ -86,6 +86,26 @@ export default function HomePage() {
   const [catalogHomeError, setCatalogHomeError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<{ status: 'idle' | 'processing' | 'completed' | 'failed'; total: number; processed: number } | null>(null);
+  const [syncStarting, setSyncStarting] = useState(false);
+  const [duplicateCount, setDuplicateCount] = useState(0);
+
+  const pullSyncStatus = async () => {
+    try {
+      const next = await apiFetch<{ status: 'idle' | 'processing' | 'completed' | 'failed'; total: number; processed: number }>(
+        '/api/admin/sync-status'
+      );
+      setSyncStatus(next);
+    } catch {
+      // Operador sem a rota de admin continua vendo o card parado.
+    }
+    try {
+      const duplicates = await apiFetch<{ total: number }>('/api/duplicates');
+      setDuplicateCount(duplicates.total);
+    } catch {
+      setDuplicateCount(0);
+    }
+  };
 
   const loadState = async () => {
     setLoading(true);
@@ -118,17 +138,23 @@ export default function HomePage() {
 
   useEffect(() => {
     void loadState();
+    void pullSyncStatus();
     setForbidden(new URLSearchParams(window.location.search).get('erro') === '403');
+    const timer = window.setInterval(() => void pullSyncStatus(), 2000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const startSync = async () => {
     setSyncNotice(null);
+    setSyncStarting(true);
     try {
       await apiFetch('/api/admin/sync-full', { method: 'POST' });
-      setSyncNotice('Sincronização do Bling iniciada.');
-      await loadState();
+      setSyncNotice('Sincronização do ERP iniciada. A tela continua livre.');
+      await pullSyncStatus();
     } catch {
       setSyncNotice('Não foi possível iniciar a sincronização.');
+    } finally {
+      setSyncStarting(false);
     }
   };
 
@@ -137,10 +163,14 @@ export default function HomePage() {
   const linked = catalogHome?.linkedNuvemshop ?? 0;
   const coverage = products === 0 ? 0 : Math.round((linked / products) * 100);
   const queued = catalogHome?.cards.publicationsToday.queued ?? 0;
-  const syncRunning = catalogHome?.sync?.status === 'running' || queued > 0;
-  const seen = catalogHome?.sync?.seen ?? 0;
-  const upserted = catalogHome?.sync?.upserted ?? 0;
-  const syncPercent = syncRunning && seen > 0 ? Math.round((upserted / seen) * 100) : catalogHome?.completenessPct ?? 0;
+  const syncState = syncStatus?.status ?? 'idle';
+  const syncRunning = syncState === 'processing' || syncStarting;
+  const syncProcessed = syncStatus?.processed ?? 0;
+  const syncTotal = syncStatus?.total ?? 0;
+  const syncPercent = syncTotal > 0 ? Math.min(100, Math.round((syncProcessed / syncTotal) * 100)) : null;
+  const syncSentence = syncTotal > 0
+    ? `Sincronizando ${formatCount(syncProcessed)} de ${formatCount(syncTotal)}`
+    : `Sincronizando ${formatCount(syncProcessed)} produtos`;
   const lastTouch = catalogHome?.lastBlingSync ?? catalogHome?.sync?.finishedAt ?? catalogHome?.lastSyncOk ?? null;
   const awaitingNcm = catalogHome?.fiscal?.awaitingNcm ?? state?.kpis.actionPendings.breakdown.ncmPendingFirst ?? 0;
   const awaitingEan = catalogHome?.fiscal?.awaitingEan ?? state?.kpis.actionPendings.breakdown.eanPending ?? 0;
@@ -172,9 +202,11 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => void startSync()}
-                className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white"
+                disabled={syncRunning}
+                aria-busy={syncRunning}
+                className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Sincronizar ERP
+                {syncRunning ? 'Sincronizando...' : 'Sincronizar ERP'}
               </button>
             )}
           </div>
@@ -217,6 +249,22 @@ export default function HomePage() {
       )}
 
       <section className="mt-6">
+        <Link
+          href="/problemas?filtro=duplicidades"
+          className={`mb-4 block rounded-xl border px-4 py-4 ${
+            duplicateCount > 0
+              ? 'border-amber-500/50 bg-amber-500/15 text-amber-950 dark:border-rose-400/40 dark:bg-rose-500/15 dark:text-rose-50'
+              : 'border-border-color bg-bg-surface text-text-primary'
+          }`}
+        >
+          <p className="text-xs font-semibold uppercase tracking-wide">Duplicidades detectadas</p>
+          <p className="mt-1 text-2xl font-bold">{formatCount(duplicateCount)}</p>
+          <p className="mt-1 text-sm">
+            {duplicateCount > 0
+              ? 'SKU repetido no ERP ou anúncio que já existe no canal. Abra para resolver.'
+              : 'Nenhuma colisão aberta no catálogo.'}
+          </p>
+        </Link>
         {catalogHomeError && <p className="mb-3 text-sm text-rose-700 dark:text-rose-200" role="alert">{catalogHomeError}</p>}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard
@@ -229,13 +277,17 @@ export default function HomePage() {
           />
           <KpiCard
             label="Saúde da fila de sync"
-            value={syncRunning ? `${syncPercent}% sincronizado` : 'Parado'}
-            hint={`Última atualização: ${relativeTime(lastTouch)}`}
+            value={syncRunning ? (syncPercent === null ? 'Em andamento' : `${syncPercent}%`) : syncState === 'completed' ? 'Concluída' : syncState === 'failed' ? 'Falhou' : 'Parado'}
+            hint={syncRunning ? syncSentence : `Última atualização: ${relativeTime(lastTouch)}`}
             href="/problemas"
-            accent={syncRunning ? 'neutral' : 'rose'}
-            pulse={syncRunning ? 'live' : 'stopped'}
+            accent={syncRunning ? 'neutral' : syncState === 'failed' ? 'rose' : 'neutral'}
+            pulse={syncRunning ? 'live' : syncState === 'idle' || syncState === 'failed' ? 'stopped' : null}
+            progress={syncRunning ? syncPercent : null}
           >
-            {!syncRunning && (
+            {syncRunning && (
+              <p className="mt-3 text-xs text-text-primary" role="status">{syncSentence}</p>
+            )}
+            {!syncRunning && syncState !== 'completed' && (
               <p className="mt-3 text-xs text-text-muted">
                 Nenhuma sincronização em andamento. Clique em Sincronizar para iniciar.
               </p>
@@ -244,9 +296,11 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => void startSync()}
-                className="mt-3 rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold text-text-primary"
+                disabled={syncRunning}
+                aria-busy={syncRunning}
+                className="mt-3 rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Sincronizar agora
+                {syncRunning ? 'Sincronizando...' : 'Sincronizar agora'}
               </button>
             )}
           </KpiCard>

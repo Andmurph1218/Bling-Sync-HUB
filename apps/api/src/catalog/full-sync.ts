@@ -26,6 +26,8 @@ export interface FullSyncReport {
   ready: number;
   incomplete: number;
   errors: string[];
+  catalogDone: boolean;
+  catalogTotal: number | null;
 }
 
 export interface FullSyncHooks {
@@ -36,6 +38,8 @@ export interface FullSyncHooks {
   scoreProduct?: (masterProductId: string) => Promise<boolean>;
   pageSize?: number;
   startPage?: number;
+  maxPages?: number;
+  delayMs?: number;
   skipExisting?: boolean;
   alreadyImported?: (externalId: string) => Promise<boolean>;
   onProgress?: (report: FullSyncReport) => void;
@@ -58,6 +62,8 @@ function emptyReport(): FullSyncReport {
     ready: 0,
     incomplete: 0,
     errors: [],
+    catalogDone: false,
+    catalogTotal: null,
   };
 }
 
@@ -262,27 +268,37 @@ function stockBySku(payload: InboundProduct, balances: Map<string, InboundStockB
 export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks = {}): Promise<FullSyncReport> {
   const pageSize = hooks.pageSize ?? DEFAULT_PAGE_SIZE;
   const startPage = hooks.startPage && hooks.startPage > 0 ? Math.floor(hooks.startPage) : 1;
+  const lastPage = hooks.maxPages && hooks.maxPages > 0
+    ? Math.min(MAX_PAGES, startPage + Math.floor(hooks.maxPages) - 1)
+    : MAX_PAGES;
   const upsertProduct = hooks.upsertProduct ?? defaultUpsert;
   const scoreProduct = hooks.scoreProduct ?? defaultScore;
   const alreadyImported = hooks.alreadyImported ?? defaultAlreadyImported;
   const report: FullSyncReport = { ...emptyReport(), status: 'running', startedAt: new Date().toISOString(), errors: [] };
   let previousFirst = '';
-  let reachedEnd = false;
+  let catalogDone = false;
+  const pause = async () => {
+    if (hooks.delayMs && hooks.delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, hooks.delayMs));
+    }
+  };
 
   const publish = () => hooks.onProgress?.({ ...report, errors: [...report.errors] });
   publish();
 
   try {
-    for (let page = startPage; page <= MAX_PAGES; page += 1) {
+    for (let page = startPage; page <= lastPage; page += 1) {
+      await pause();
       const listed = await erp.listCatalogPage(page, pageSize);
       report.pages = page;
+      if (typeof listed.total === 'number' && listed.total > 0) report.catalogTotal = listed.total;
       if (listed.externalIds.length === 0) {
-        reachedEnd = true;
+        catalogDone = true;
         break;
       }
       if (listed.externalIds[0] === previousFirst) {
         note(report, `A página ${page} repetiu o primeiro produto. A paginação parou.`, true);
-        reachedEnd = true;
+        catalogDone = true;
         break;
       }
       previousFirst = listed.externalIds[0] ?? '';
@@ -296,6 +312,7 @@ export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks
             continue;
           }
           process.stderr.write(`pull ${externalId}\n`);
+          await pause();
           const raw = await erp.pullCatalogProduct(externalId);
           const payload = asProduct(raw);
           if (!payload) {
@@ -341,14 +358,15 @@ export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks
 
       publish();
       if (listed.done) {
-        reachedEnd = true;
+        catalogDone = true;
         break;
       }
     }
-    if (!reachedEnd) {
+    if (!catalogDone && hooks.maxPages == null) {
       note(report, `Limite de ${MAX_PAGES} páginas atingido.`, true);
     }
-    report.status = 'done';
+    report.catalogDone = catalogDone;
+    report.status = catalogDone ? 'done' : 'running';
   } catch (error) {
     report.status = 'failed';
     note(report, error instanceof Error ? error.message : String(error), true);

@@ -25,6 +25,8 @@ import * as m023 from './migrations/1729080000023_viewer-role.js';
 import * as m024 from './migrations/1729080000024_import-job-progress.js';
 import * as m025 from './migrations/1729080000025_governance.js';
 import * as m026 from './migrations/1729080000026_erp-identity.js';
+import * as m027 from './migrations/1729080000027_sync-status.js';
+import * as m028 from './migrations/1729080000028_duplicate-alerts.js';
 
 export interface MigrationStep {
   id: number;
@@ -60,6 +62,8 @@ export const ALL_MIGRATIONS: MigrationStep[] = [
   { id: 24, name: '1729080000024_import-job-progress', upSql: m024.UP_SQL, downSql: m024.DOWN_SQL },
   { id: 25, name: '1729080000025_governance', upSql: m025.UP_SQL, downSql: m025.DOWN_SQL },
   { id: 26, name: '1729080000026_erp-identity', upSql: m026.UP_SQL, downSql: m026.DOWN_SQL },
+  { id: 27, name: '1729080000027_sync-status', upSql: m027.UP_SQL, downSql: m027.DOWN_SQL },
+  { id: 28, name: '1729080000028_duplicate-alerts', upSql: m028.UP_SQL, downSql: m028.DOWN_SQL },
 ];
 
 /**

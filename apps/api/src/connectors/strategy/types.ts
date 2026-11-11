@@ -44,6 +44,7 @@ export interface ErpCatalogPage {
   pageSize: number;
   externalIds: string[];
   done: boolean;
+  total?: number;
 }
 
 export interface ErpStockBalance {
@@ -90,8 +91,9 @@ export interface ListingDraft {
 }
 
 export interface ListingResult {
-  performed: false;
-  reason: 'escrita_ao_vivo_desligada';
+  performed: boolean;
+  reason: string;
+  externalId?: string;
 }
 
 export interface StockUpdate {

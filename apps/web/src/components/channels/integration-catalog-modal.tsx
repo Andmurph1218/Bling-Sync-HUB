@@ -6,7 +6,6 @@ import { BrandLogo } from '../brand-logo';
 
 const SOON = [
   { id: 'amazon', name: 'Amazon' },
-  { id: 'shopee', name: 'Shopee' },
   { id: 'magalu', name: 'Magalu' },
 ];
 
@@ -18,7 +17,7 @@ export function IntegrationCatalogModal({ onClose }: { onClose: () => void }) {
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-text-primary">Adicionar canal</h2>
-            <p className="mt-1 text-xs text-text-muted">Nuvemshop já está no HUB. Os demais canais ainda não recebem catálogo.</p>
+            <p className="mt-1 text-xs text-text-muted">Nuvemshop e Shopee já estão no HUB. Os demais canais ainda não recebem catálogo.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Fechar" className="rounded-md p-1 text-text-muted"><X className="h-4 w-4" /></button>
         </div>

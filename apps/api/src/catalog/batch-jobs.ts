@@ -7,9 +7,7 @@ import { recalculateCompleteness } from './publish-preview.js';
 import { MERCADO_LIVRE_ACTIVE } from '../config/channels.js';
 import { ReprocessContext, reprocessProblemItem } from './problem-panel.js';
 import { processWebhookEventById } from '../engines/wig.js';
-import { startFullCatalogSync } from './full-sync.js';
-import { loadConnectors } from '../connectors/load.js';
-import { createErpConnector, DEFAULT_ERP_ID } from '../connectors/strategy/factory.js';
+import { enqueueErpSync } from '../queues/erp-sync-worker.js';
 
 export type BatchAction = 'arquivar' | 'completude' | 'envio' | 'problemas';
 
@@ -68,8 +66,8 @@ function problemContext(payload: BatchPayload): ReprocessContext {
     allowErpSync: payload.allowErpSync === true,
     erpSyncRequested: false,
     startErpSync: async () => {
-      await loadConnectors();
-      return startFullCatalogSync(createErpConnector(DEFAULT_ERP_ID)).started;
+      const started = await enqueueErpSync();
+      return started.accepted;
     },
     recalculate: async (productId) => {
       await recalculateCompleteness([productId]);

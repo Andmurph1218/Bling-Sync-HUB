@@ -1,5 +1,7 @@
 # JH Sync Hub
 
+[![CI](https://github.com/Andmurph1218/Bling-Sync-HUB/actions/workflows/ci.yml/badge.svg)](https://github.com/Andmurph1218/Bling-Sync-HUB/actions/workflows/ci.yml)
+
 HUB / iPaaS de normalização de catálogo. Sistemas internos (ERP e apps) entregam o cadastro. O HUB padroniza produto, variante, categoria e atributo. Os canais de venda recebem só o que passou na validação.
 
 O ERP instalado hoje é o Bling. Os canais com código são Nuvemshop (ativo) e Mercado Livre (código presente, produto inativo). Shopee, Amazon e TikTok Shop aparecem na loja como em breve. Preço, estoque e fiscal continuam soberanos no ERP. O canal enriquece conteúdo e mídia. Pedido e NF-e ficam fora.
@@ -54,7 +56,7 @@ A volta desenhada no diagrama (preço, estoque e pedido saindo do canal e entran
 | P0 | No ar | Ajustes externos de OAuth do Mercado Livre e de webhook de pedido no Bling |
 | P1 | No ar | Lista lê o espelho do HUB, não o ERP ao vivo |
 | P2 | No ar, em sombra | Escrita ao vivo desligada. Checklist verde é a porta do envio real |
-| P3 | Aberto | Shopee e Amazon, publicação automática do checklist verde, série de qualidade, CI/CD |
+| P3 | Aberto | Shopee e Amazon, publicação automática do checklist verde, série de qualidade, deploy por pipeline |
 
 ## Princípios
 
@@ -65,6 +67,10 @@ A volta desenhada no diagrama (preço, estoque e pedido saindo do canal e entran
 5. Toda operação pode ser reexecutada com o mesmo resultado.
 6. EAN inválido, NCM divergente ou preço zero bloqueiam publicação. Estoque de anúncio já publicado continua.
 7. NCM e EAN não são apagados. O arquivo fiscal permanece por 5 anos.
+
+## Integração contínua
+
+O workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) roda em cada push e em cada pull request para `main`. O job usa Ubuntu e Node.js 20, instala com `npm ci`, compila API e painel com `npm run build` e executa a suíte da API com `npm run test`. Um passo vermelho marca o commit. A suíte não abre banco nem Redis: os testes usam pg-mem.
 
 ## Stack prevista
 

@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { requireRole } from '../auth/middleware.js';
+import { INTEGRATION_APPS } from '../connectors/strategy/factory.js';
 import { query } from '../db/pool.js';
 
 export const integrationCatalogRouter = Router();
@@ -40,19 +41,22 @@ integrationCatalogRouter.get('/api/admin/integrations', admin, async (_req: Requ
        LEFT JOIN oauth_tokens tok ON tok.provider = c.slug
        ORDER BY c.category, c.name`
     );
-    const apps = rows.rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      slug: row.slug,
-      category: row.category,
-      logoUrl: row.logo_url,
-      isInstalled: row.has_credentials || row.is_installed,
-      isAvailable: row.is_available,
-      hasCredentials: row.has_credentials,
-      hasToken: row.has_token,
-      tokenValid: row.token_valid,
-      health: !row.is_available ? 'soon' : row.has_credentials && row.token_valid ? 'ok' : row.has_credentials ? 'attention' : 'available',
-    }));
+    const apps = rows.rows.map((row) => {
+      const isAvailable = row.is_available || INTEGRATION_APPS.some((app) => app.id === row.slug && app.implemented);
+      return {
+        id: row.id,
+        name: row.name,
+        slug: row.slug,
+        category: row.category,
+        logoUrl: row.logo_url,
+        isInstalled: row.has_credentials || row.is_installed,
+        isAvailable,
+        hasCredentials: row.has_credentials,
+        hasToken: row.has_token,
+        tokenValid: row.token_valid,
+        health: !isAvailable ? 'soon' : row.has_credentials && row.token_valid ? 'ok' : row.has_credentials ? 'attention' : 'available',
+      };
+    });
     const order = ['Marketplace', 'ERP', 'Logística'] as const;
     const groups = order.map((category) => ({
       category,

@@ -31,7 +31,7 @@ interface IntegrationsPayload {
 const COPY: Record<string, string> = {
   mercadolivre: 'Sincronize catálogo e estoque para o Mercado Livre. Requer autorização OAuth.',
   nuvemshop: 'Publique catálogo e estoque na loja. A escrita ao vivo continua desligada.',
-  shopee: 'Marketplace previsto. O conector ainda não recebe catálogo.',
+  shopee: 'Publique catálogo na Shopee pela Open Platform v2. A escrita ao vivo continua desligada.',
   amazon: 'Marketplace previsto. O conector ainda não recebe catálogo.',
   tiktok: 'Canal previsto. O conector ainda não está instalado.',
   bling: 'ERP do catálogo, do estoque e do preço. O HUB não processa pedidos.',

@@ -955,6 +955,7 @@ catalogRouter.put(
         res.status(404).json({ error: 'not_found' });
         return;
       }
+      await recalculateCompleteness([req.params.id]);
       res.status(200).json({ hubCategoryId });
     } catch (error) {
       next(error);
@@ -1146,10 +1147,10 @@ catalogRouter.put(
         sourceField: attribute.sourceField ?? null,
         valueMaps: attribute.valueMaps ?? [],
       }));
-      await withTransaction(async (client) => {
-        const targets = [req.params.id];
-        if (parsed.data.applyToChildren) targets.push(...(await descendantHubCategoryIds(client, req.params.id)));
-        for (const hubCategoryId of targets) {
+      const targets = await withTransaction(async (client) => {
+        const ids = [req.params.id];
+        if (parsed.data.applyToChildren) ids.push(...(await descendantHubCategoryIds(client, req.params.id)));
+        for (const hubCategoryId of ids) {
           await linkChannelCategory(
             client,
             hubCategoryId,
@@ -1161,7 +1162,17 @@ catalogRouter.put(
           );
           await replaceAttributeMaps(client, hubCategoryId, platform, drafts);
         }
+        return ids;
       });
+      const productIds: string[] = [];
+      for (const hubCategoryId of targets) {
+        const affected = await query<{ id: string }>(
+          `SELECT id FROM master_products WHERE catalog_status = 'active' AND hub_category_id = $1`,
+          [hubCategoryId]
+        );
+        productIds.push(...affected.rows.map((row) => row.id));
+      }
+      if (productIds.length > 0) await recalculateCompleteness(productIds);
       res.status(200).json({ saved: true });
     } catch (error) {
       next(error);
@@ -1196,6 +1207,7 @@ catalogRouter.post(
          DO UPDATE SET is_cover_eligible = true, updated_at = now()`,
         [row.id, parsed.data.url]
       );
+      await recalculateCompleteness([row.id]);
       const listed = await listCatalog({
         tab: 'todos',
         sku: '',

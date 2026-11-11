@@ -7,7 +7,6 @@ import { createUser } from '../auth/service.js';
 import { CATALOG_MODE, isOrderOrInvoiceEvent } from '../connectors/strategy/catalog-mode.js';
 import { loadConnectors } from '../connectors/load.js';
 import { createErpConnector, createMarketplaceConnector, resolveInstallStatus } from '../connectors/strategy/factory.js';
-import { ConnectorNotInstalledError } from '../connectors/strategy/types.js';
 import { getPublicBaseUrl, webhookUrl } from '../config/public-url.js';
 import { UP_SQL as IDENTITY_SQL } from '../db/migrations/1729080000001_identity-and-controls.js';
 import { DbPoolLike, query, setPool } from '../db/pool.js';
@@ -42,9 +41,10 @@ describe('P0.6 — fábrica de conectores', () => {
       performed: false,
       reason: 'escrita_ao_vivo_desligada',
     });
-    await expect(createMarketplaceConnector('shopee').createListing({ sku: '1', price: 1, stock: 1, attributes: [] })).rejects.toBeInstanceOf(
-      ConnectorNotInstalledError
-    );
+    await expect(createMarketplaceConnector('shopee').createListing({ sku: '1', price: 1, stock: 1, attributes: [] })).resolves.toMatchObject({
+      performed: false,
+      reason: 'escrita_ao_vivo_desligada',
+    });
     expect(() => createErpConnector('omie')).toThrow(/erp_not_registered/);
     expect(CATALOG_MODE.badge).toBe('Modo Catálogo (Webhooks de Pedido Desativados)');
   });
@@ -136,7 +136,8 @@ describe('P0.6 — loja e canais', () => {
       'logistics',
       'marketplaces',
     ]);
-    expect(store.body.apps.find((row: { id: string }) => row.id === 'shopee').statusLabel).toBe('Em breve');
+    expect(store.body.apps.find((row: { id: string }) => row.id === 'shopee').statusLabel).toBe('Não instalado');
+    expect(store.body.apps.find((row: { id: string }) => row.id === 'shopee').implemented).toBe(true);
 
     const channels = await request(app).get('/api/integrations/channels').set('Cookie', cookie);
     expect(channels.status).toBe(200);
