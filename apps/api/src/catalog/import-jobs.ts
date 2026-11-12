@@ -3,6 +3,7 @@ import { Redis } from 'ioredis';
 import { env } from '../config/env.js';
 import { query } from '../db/pool.js';
 import { importCatalogWorkbook, openImportSheet, shouldRunImportInBackground } from './spreadsheet.js';
+import { JITTERED_BACKOFF, jitteredBackoffStrategy } from '../queues/backoff.js';
 
 interface ImportPayload {
   id: string;
@@ -26,6 +27,7 @@ export function startImportWorker(): void {
   workerStarted = true;
   const worker = new Worker<ImportPayload>('catalog-import', async (job) => runImportJob(job.data.id), {
     connection: connection(),
+    settings: { backoffStrategy: jitteredBackoffStrategy },
   });
   worker.on('failed', () => undefined);
 }
@@ -99,7 +101,7 @@ export async function acceptCatalogImport(input: {
   const jobId = await insertJob(input.userId, fileName, 'running', total, 0, 0, []);
   files.set(jobId, input.file);
   try {
-    await getQueue().add('run', { id: jobId }, { jobId });
+    await getQueue().add('run', { id: jobId }, { jobId, attempts: 5, backoff: JITTERED_BACKOFF });
   } catch {
     await runImportJob(jobId);
   }

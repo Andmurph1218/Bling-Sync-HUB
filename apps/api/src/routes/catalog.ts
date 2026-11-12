@@ -584,6 +584,44 @@ catalogRouter.post(
   }
 );
 
+catalogRouter.get('/api/ops/queues', requireRole('operator', 'admin'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { collectQueueObservability } = await import('../queues/metrics.js');
+    res.status(200).json(await collectQueueObservability());
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.get('/api/dead-letters', requireRole('operator', 'admin'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { listOpenDeadLetters } = await import('../queues/dead-letters.js');
+    res.status(200).json({ items: await listOpenDeadLetters() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.post('/api/dead-letters/:id/replay', requireRole('operator', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { replayDeadLetter } = await import('../queues/dead-letters.js');
+    const result = await replayDeadLetter(req.params.id);
+    res.status(200).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Não foi possível reprocessar.';
+    if (
+      message.includes('não encontrada')
+      || message.includes('já foi reprocessada')
+      || message.includes('não tem')
+      || message.includes('ainda não tem')
+    ) {
+      res.status(400).json({ error: 'dead_letter_rejected', message });
+      return;
+    }
+    next(error);
+  }
+});
+
 catalogRouter.get(
   '/api/catalog/publish-queue',
   requireRole('operator', 'admin'),

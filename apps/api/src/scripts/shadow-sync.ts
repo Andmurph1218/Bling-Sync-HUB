@@ -11,6 +11,7 @@
  * 6. Resumo JSON no stdout. CQS/controles permanecem em mode='shadow'.
  */
 
+import { nuvemshopFetch } from '../connectors/strategy/nuvemshop-http.js';
 import { getPool, query } from '../db/pool.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
 import { sharedBlingRateLimiter } from '../connectors/bling/rate-limiter.js';
@@ -164,7 +165,7 @@ async function mlGet<T>(accessToken: string, path: string): Promise<T> {
 }
 
 async function nsGet<T>(accessToken: string, path: string): Promise<T> {
-  const res = await fetch(`${NS_BASE}${path}`, {
+  const res = await nuvemshopFetch(`${NS_BASE}${path}`, {
     headers: {
       Authentication: `bearer ${accessToken}`,
       'User-Agent': 'JH Sync Hub (shadow-sync)',

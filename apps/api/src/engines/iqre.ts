@@ -22,6 +22,7 @@
 import crypto from 'node:crypto';
 import { PoolClient } from 'pg';
 import { withTransaction } from '../db/pool.js';
+import { jitteredBackoffMs } from '../queues/backoff.js';
 
 const ALLOWED_HOST_SUFFIXES = [
   'bling.com.br',
@@ -402,8 +403,8 @@ export async function processQueuedImagesWorkerBatch(options: {
             [row.id, nextAttempts, errMessage]
           );
         } else {
-          const backoffSeconds = Math.pow(2, nextAttempts) * 15;
-          const nextAvailableAt = new Date(Date.now() + backoffSeconds * 1000).toISOString();
+          const backoffMs = jitteredBackoffMs(nextAttempts, 15_000);
+          const nextAvailableAt = new Date(Date.now() + backoffMs).toISOString();
           await client.query(
             `UPDATE image_processing_queue
              SET stage = 'queued',

@@ -75,12 +75,12 @@ async function saveSnapshot(
   alerts: Array<{ kind: string; message: string }>
 ): Promise<void> {
   await query(
-    `DELETE FROM marketplace_listings_snapshot WHERE product_id = $1 AND marketplace = $2`,
-    [productId, marketplace]
-  );
-  await query(
     `INSERT INTO marketplace_listings_snapshot (product_id, marketplace, external_id, payload_json, last_synced_at)
-     VALUES ($1, $2, $3, $4, now())`,
+     VALUES ($1, $2, $3, $4, now())
+     ON CONFLICT (product_id, marketplace) DO UPDATE
+     SET external_id = EXCLUDED.external_id,
+         payload_json = EXCLUDED.payload_json,
+         last_synced_at = now()`,
     [productId, marketplace, listing.externalId, JSON.stringify({
       price: listing.price,
       stock: listing.stock,

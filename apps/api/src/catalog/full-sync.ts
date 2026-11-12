@@ -2,9 +2,9 @@ import { InboundProduct, InboundStockBalance, InboundVariant } from '../connecto
 import { ErpConnector } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { isAllowedImageHost, EnqueueImageCandidate } from '../engines/iqre.js';
+import { checklistForChannels } from './publish-preview.js';
 import { applyVariantStockBalancesFromBling, blingChangedAt, isNewerHubSync, runFullProductCatalogPipeline } from '../orchestrator/pipeline.js';
 import { StockBalanceItem } from '../contracts/mappers.js';
-import { evaluateCatalogChecklist } from './completeness.js';
 
 const DEFAULT_PAGE_SIZE = 20;
 const STOCK_CHUNK = 20;
@@ -165,54 +165,6 @@ async function defaultUpsert(
     imagesToEnqueue: imageCandidates(payload),
   });
   return { masterProductId: report.masterProductId, variantIdsBySku: report.variantIdsBySku };
-}
-
-async function defaultScore(masterProductId: string): Promise<boolean> {
-  const found = await query<{
-    erp_id: string;
-    erp_sku: string | null;
-    ncm_status: string;
-    ncm_fiscal_risk: boolean;
-    hub_category_id: string | null;
-    price: string | null;
-    ean_status: string | null;
-    has_cover: boolean;
-  }>(
-    `SELECT mp.erp_id, mp.erp_sku, mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id,
-            pv.price::text AS price, pv.ean_status,
-            EXISTS (
-              SELECT 1 FROM product_images pi
-              WHERE pi.master_product_id = mp.id AND pi.is_cover_eligible = true
-            ) AS has_cover
-     FROM master_products mp
-     LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
-     WHERE mp.id = $1`,
-    [masterProductId]
-  );
-  const row = found.rows[0];
-  if (!row) return false;
-  const checklist = evaluateCatalogChecklist({
-    erpId: row.erp_id,
-    sku: row.erp_sku,
-    hasCoverImage: row.has_cover,
-    hubCategoryId: row.hub_category_id,
-    mappedPlatforms: [],
-    greenPlatforms: [],
-    eanStatus: row.ean_status,
-    eanRequired: false,
-    ncmStatus: row.ncm_status,
-    ncmFiscalRisk: row.ncm_fiscal_risk,
-    price: row.price === null ? null : Number(row.price),
-    hasDuplicateCandidate: false,
-    channels: ['nuvemshop'],
-  });
-  await query(
-    `UPDATE master_products
-     SET worst_score = $2, has_fiscal_risk = $3, updated_at = now()
-     WHERE id = $1`,
-    [masterProductId, checklist.percent, row.ncm_fiscal_risk || row.ncm_status !== 'valid']
-  ).catch(() => undefined);
-  return checklist.ready;
 }
 
 async function recordSyncFailure(externalId: string, error: unknown): Promise<void> {
@@ -423,7 +375,6 @@ export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks
     ? Math.min(MAX_PAGES, startPage + Math.floor(hooks.maxPages) - 1)
     : MAX_PAGES;
   const upsertProduct = hooks.upsertProduct ?? defaultUpsert;
-  const scoreProduct = hooks.scoreProduct ?? defaultScore;
   const alreadyImported = hooks.alreadyImported ?? defaultAlreadyImported;
   const report: FullSyncReport = { ...emptyReport(), status: 'running', startedAt: new Date().toISOString(), errors: [] };
   let previousFirst = '';
@@ -510,18 +461,41 @@ export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks
         note(report, `saldos: ${error instanceof Error ? error.message : String(error)}`, false);
       }
 
+      const savedIds: string[] = [];
       for (const payload of batch) {
         try {
           const saved = await upsertProduct(payload, stockBySku(payload, balances));
           report.upserted += 1;
           report.variants += Object.keys(saved.variantIdsBySku).length;
-          const ready = await scoreProduct(saved.masterProductId);
-          if (ready) report.ready += 1;
-          else report.incomplete += 1;
+          if (hooks.scoreProduct) {
+            const ready = await hooks.scoreProduct(saved.masterProductId);
+            if (ready) report.ready += 1;
+            else report.incomplete += 1;
+          } else {
+            savedIds.push(saved.masterProductId);
+          }
         } catch (error) {
           note(report, `${payload.codigo}: ${error instanceof Error ? error.message : String(error)}`, true);
         }
         publish();
+      }
+      if (savedIds.length > 0) {
+        const checks = await checklistForChannels(savedIds);
+        for (const id of savedIds) {
+          const scores = checks.get(id) ?? [];
+          const ready = scores.length > 0 && scores.every((score) => score.percent === 100);
+          const percent = scores.length === 0 ? 0 : Math.min(...scores.map((score) => score.percent));
+          await query(
+            `UPDATE master_products
+             SET worst_score = $2,
+                 has_fiscal_risk = (ncm_fiscal_risk OR ncm_status <> 'valid'),
+                 updated_at = now()
+             WHERE id = $1`,
+            [id, percent]
+          ).catch(() => undefined);
+          if (ready) report.ready += 1;
+          else report.incomplete += 1;
+        }
       }
 
       publish();

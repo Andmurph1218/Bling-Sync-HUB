@@ -7,6 +7,7 @@ import { query } from '../db/pool.js';
 import { classifyApiHttpError } from '../contracts/mappers.js';
 import { ErpCallLane, ScheduledLimiter, rateLimiter } from './rate-limit-port.js';
 import { OAuthRefreshFn, OAuthTokenManager } from './oauth-token-manager.js';
+import { withNuvemshopLimit } from './strategy/nuvemshop-http.js';
 
 export interface HttpTransportRequest {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -336,11 +337,14 @@ export class NuvemshopConnector {
     if (measures.height !== undefined) cleanBody.height = measures.height;
     if (measures.depth !== undefined) cleanBody.depth = measures.depth;
 
-    return this.transport({
-      method: 'PATCH',
-      url: `${this.baseUrl}/${this.storeId}/products/${productId}/variants`,
-      headers,
-      body: [cleanBody],
-    });
+    return withNuvemshopLimit(
+      () => this.transport({
+        method: 'PATCH',
+        url: `${this.baseUrl}/${this.storeId}/products/${productId}/variants`,
+        headers,
+        body: [cleanBody],
+      }),
+      (response) => response.headers
+    );
   }
 }

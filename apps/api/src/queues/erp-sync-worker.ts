@@ -8,6 +8,9 @@ import { createErpConnector } from '../connectors/strategy/factory.js';
 import { ErpConnector } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
+import { isFinalQueueAttempt, JITTERED_BACKOFF, jitteredBackoffStrategy } from './backoff.js';
+import { holdQueueForBlingQuota } from './quota-pause.js';
+import { recordDeadLetter } from './dead-letters.js';
 import { detectDuplicates } from '../services/duplicate-detector.service.js';
 
 export const ERP_SYNC_QUEUE_NAME = 'erp-sync-queue';
@@ -91,7 +94,7 @@ async function enqueuePage(runToken: string, page: number): Promise<void> {
   await getErpSyncQueue().add(
     'page',
     { page, runToken },
-    { jobId, removeOnComplete: 200, removeOnFail: 50, attempts: 5, backoff: { type: 'fixed', delay: 5_000 } }
+    { jobId, removeOnComplete: 200, removeOnFail: 50, attempts: 5, backoff: JITTERED_BACKOFF }
   );
 }
 
@@ -231,19 +234,29 @@ export function startErpSyncWorker(): Worker<PageJob> {
   if (worker) return worker;
   worker = new Worker<PageJob>(
     ERP_SYNC_QUEUE_NAME,
-    async (job) => {
-      await loadConnectors();
-      const erp = createErpConnector('bling');
-      await processErpSyncPage(erp, job.data.page, {
-        pageSize: ERP_SYNC_PAGE_SIZE,
-        delayMs: ERP_SYNC_DELAY_MS,
-        runToken: job.data.runToken,
-      });
+    async (job, token) => {
+      try {
+        await loadConnectors();
+        const erp = createErpConnector('bling');
+        await processErpSyncPage(erp, job.data.page, {
+          pageSize: ERP_SYNC_PAGE_SIZE,
+          delayMs: ERP_SYNC_DELAY_MS,
+          runToken: job.data.runToken,
+        });
+      } catch (error) {
+        await holdQueueForBlingQuota(job, token, error);
+      }
     },
-    { connection: redisConnection(), concurrency: 1 }
+    { connection: redisConnection(), concurrency: 1, settings: { backoffStrategy: jitteredBackoffStrategy } }
   );
   worker.on('failed', (job, error) => {
     logger.error('Página da sync do ERP falhou', { jobId: job?.id, error: error.message });
+    if (!isFinalQueueAttempt(job?.attemptsMade, job?.opts.attempts)) return;
+    void recordDeadLetter({ queue: ERP_SYNC_QUEUE_NAME, payload: job?.data ?? {}, error: error.message }).catch((recordError: unknown) => {
+      logger.error('Não foi possível gravar a carta morta da sync', {
+        error: recordError instanceof Error ? recordError.message : String(recordError),
+      });
+    });
   });
   return worker;
 }

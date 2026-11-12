@@ -10,6 +10,9 @@ import { query } from '../db/pool.js';
 import { enqueueProductImagesForSync, normalizeImageUrl } from '../engines/iqre.js';
 import { formatNcmDisplay } from '../engines/nve.js';
 import { logger } from '../lib/logger.js';
+import { isFinalQueueAttempt, JITTERED_BACKOFF, jitteredBackoffStrategy } from './backoff.js';
+import { holdQueueForBlingQuota } from './quota-pause.js';
+import { recordDeadLetter } from './dead-letters.js';
 
 export const ENRICHMENT_QUEUE_NAME = 'enrichment-queue';
 export const ENRICHMENT_BATCH_SIZE = 50;
@@ -127,6 +130,7 @@ export async function processEnrichmentBatch(
     [afterErpId, ENRICHMENT_BATCH_SIZE]
   );
   let enriched = 0;
+  const enrichedIds: string[] = [];
   for (const row of rows.rows) {
     try {
       const data = await erp.fetchProductEnrichmentData(row.erp_id);
@@ -134,16 +138,18 @@ export async function processEnrichmentBatch(
       const ncmSaved = await saveNcmAndCategory(row.id, data.ncm, data.category);
       if (!imageSaved && !ncmSaved) continue;
       enriched += 1;
-      const scored = await recalculateCompleteness([row.id]);
-      const percent = scored[0]?.percent;
-      if (percent != null) {
-        await query(`UPDATE master_products SET worst_score = $2, updated_at = now() WHERE id = $1`, [row.id, percent]);
-      }
+      enrichedIds.push(row.id);
     } catch (error) {
       logger.error('Enriquecimento do produto falhou', {
         erpId: row.erp_id,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+  if (enrichedIds.length > 0) {
+    const scored = await recalculateCompleteness(enrichedIds);
+    for (const item of scored) {
+      await query(`UPDATE master_products SET worst_score = $2, updated_at = now() WHERE id = $1`, [item.id, item.percent]);
     }
   }
   const last = rows.rows[rows.rows.length - 1]?.erp_id ?? null;
@@ -161,7 +167,7 @@ async function enqueueBatch(runToken: string, afterErpId: string): Promise<void>
   await getEnrichmentQueue().add(
     'batch',
     { afterErpId, runToken },
-    { jobId, removeOnComplete: 50, removeOnFail: 20, attempts: 3, backoff: { type: 'fixed', delay: 5_000 } }
+    { jobId, removeOnComplete: 50, removeOnFail: 20, attempts: 3, backoff: JITTERED_BACKOFF }
   );
 }
 
@@ -179,22 +185,32 @@ export function startEnrichmentWorker(): Worker<EnrichJob> {
   if (worker) return worker;
   worker = new Worker<EnrichJob>(
     ENRICHMENT_QUEUE_NAME,
-    async (job) => {
-      await loadConnectors();
-      const erp = createErpConnector('bling');
-      const report = await processEnrichmentBatch(erp, job.data.afterErpId);
-      logger.info('enriquecimento lote', {
-        afterErpId: job.data.afterErpId,
-        processed: report.processed,
-        enriched: report.enriched,
-        nextCursor: report.nextCursor,
-      });
-      if (report.nextCursor) await enqueueBatch(job.data.runToken, report.nextCursor);
+    async (job, token) => {
+      try {
+        await loadConnectors();
+        const erp = createErpConnector('bling');
+        const report = await processEnrichmentBatch(erp, job.data.afterErpId);
+        logger.info('enriquecimento lote', {
+          afterErpId: job.data.afterErpId,
+          processed: report.processed,
+          enriched: report.enriched,
+          nextCursor: report.nextCursor,
+        });
+        if (report.nextCursor) await enqueueBatch(job.data.runToken, report.nextCursor);
+      } catch (error) {
+        await holdQueueForBlingQuota(job, token, error);
+      }
     },
-    { connection: redisConnection(), concurrency: 1 }
+    { connection: redisConnection(), concurrency: 1, settings: { backoffStrategy: jitteredBackoffStrategy } }
   );
   worker.on('failed', (job, error) => {
     logger.error('Lote de enriquecimento falhou', { jobId: job?.id, error: error.message });
+    if (!isFinalQueueAttempt(job?.attemptsMade, job?.opts.attempts)) return;
+    void recordDeadLetter({ queue: ENRICHMENT_QUEUE_NAME, payload: job?.data ?? {}, error: error.message }).catch((recordError: unknown) => {
+      logger.error('Não foi possível gravar a carta morta do enriquecimento', {
+        error: recordError instanceof Error ? recordError.message : String(recordError),
+      });
+    });
   });
   return worker;
 }

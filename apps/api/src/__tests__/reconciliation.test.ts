@@ -212,4 +212,22 @@ describe('reconciliação do anúncio', () => {
     );
     expect(owners.rows[0]?.count).toBe(1);
   });
+
+  it('atualiza o snapshot do canal sem abrir uma segunda linha', async () => {
+    const listing: MarketplaceListing = {
+      externalId: 'MLB999',
+      title: 'Anúncio atualizado',
+      price: 18,
+      stock: 7,
+      images: ['https://img.local/novo.jpg'],
+      status: 'Ativo',
+    };
+    await reconcileListings(async (channel) => (channel === 'mercadolivre' ? listing : null), { sku: 'SKU-RECON' });
+    await reconcileListings(async (channel) => (channel === 'mercadolivre' ? listing : null), { sku: 'SKU-RECON' });
+    const rows = await query<{ external_id: string }>(
+      `SELECT external_id FROM marketplace_listings_snapshot WHERE product_id = $1 AND marketplace = 'mercadolivre'`,
+      [productId]
+    );
+    expect(rows.rows).toEqual([{ external_id: 'MLB999' }]);
+  });
 });

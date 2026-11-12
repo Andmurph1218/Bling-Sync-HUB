@@ -1,5 +1,6 @@
 import { query } from '../../db/pool.js';
 import { OAuthTokenManager } from '../oauth-token-manager.js';
+import { nuvemshopFetch } from './nuvemshop-http.js';
 import { MarketplaceListing, MasterProduct } from './types.js';
 
 interface NuvemshopVariant {
@@ -100,7 +101,7 @@ export async function fetchNuvemshopListing(product: MasterProduct): Promise<Mar
     Accept: 'application/json',
   };
   const base = `https://api.nuvemshop.com.br/2025-03/${encodeURIComponent(storeId)}`;
-  const bySku = await fetch(`${base}/products/sku/${encodeURIComponent(sku)}`, { headers });
+  const bySku = await nuvemshopFetch(`${base}/products/sku/${encodeURIComponent(sku)}`, { headers });
   if (bySku.ok) {
     const body = (await bySku.json()) as NuvemshopProduct & {
       product_id?: number | string;
@@ -123,7 +124,7 @@ export async function fetchNuvemshopListing(product: MasterProduct): Promise<Mar
     const listing = listingFromProduct(body, sku);
     if (listing) return listing;
   }
-  const response = await fetch(`${base}/products?q=${encodeURIComponent(sku)}`, { headers });
+  const response = await nuvemshopFetch(`${base}/products?q=${encodeURIComponent(sku)}`, { headers });
   if (!response.ok) return null;
   const payload = (await response.json()) as NuvemshopProduct[];
   const match = (Array.isArray(payload) ? payload : []).find((item) =>

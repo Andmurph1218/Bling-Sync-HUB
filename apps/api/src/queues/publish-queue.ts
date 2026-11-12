@@ -7,6 +7,8 @@ import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
 import { EXISTING_LISTING_MESSAGE } from '../catalog/completeness.js';
 import { buildPublishPreview, checklistForChannel, linkedListingExternalId, PublishChannel } from '../catalog/publish-preview.js';
+import { isFinalQueueAttempt, JITTERED_BACKOFF, jitteredBackoffStrategy } from './backoff.js';
+import { recordDeadLetter } from './dead-letters.js';
 
 export const PUBLISH_QUEUE_NAME = 'publish-marketplace';
 export const DRY_RUN_LOG = 'simulado com sucesso';
@@ -200,7 +202,7 @@ export async function createPublishJobs(items: PublishJobInput[]): Promise<strin
       continue;
     }
     try {
-      await getPublishQueue().add('publish', { publishQueueId: id }, { jobId: id, removeOnComplete: 1000, removeOnFail: 500 });
+      await getPublishQueue().add('publish', { publishQueueId: id }, { jobId: id, attempts: 5, backoff: JITTERED_BACKOFF, removeOnComplete: 1000, removeOnFail: 500 });
     } catch (error) {
       logger.error('Não foi possível enfileirar a publicação. O item ficou pendente.', {
         id,
@@ -218,10 +220,16 @@ export function startPublishWorker(): Worker {
     async (job: { data: { publishQueueId: string } }) => {
       await processPublishQueueItem(job.data.publishQueueId);
     },
-    { connection: redisConnection(), concurrency: 2 }
+    { connection: redisConnection(), concurrency: 2, settings: { backoffStrategy: jitteredBackoffStrategy } }
   );
   worker.on('failed', (job, error) => {
     logger.error('Job de publicação falhou', { jobId: job?.id, error: error.message });
+    if (!isFinalQueueAttempt(job?.attemptsMade, job?.opts.attempts)) return;
+    void recordDeadLetter({ queue: PUBLISH_QUEUE_NAME, payload: job?.data ?? {}, error: error.message }).catch((recordError: unknown) => {
+      logger.error('Não foi possível gravar a carta morta da publicação', {
+        error: recordError instanceof Error ? recordError.message : String(recordError),
+      });
+    });
   });
   return worker;
 }
