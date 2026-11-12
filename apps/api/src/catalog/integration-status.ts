@@ -2,6 +2,12 @@ import { CatalogChannel, ChecklistResult } from './completeness.js';
 
 export type IntegrationVisual = 'connected' | 'pending' | 'blocked' | 'absent' | 'attention';
 
+/** Vínculo do HUB, sugestão de reconciliação ou status legado de platform_links. */
+export function isChannelLinked(status: string | null | undefined): boolean {
+  const value = (status ?? '').trim().toLowerCase();
+  return value === 'linked' || value === 'vinculado' || value === 'sugerido';
+}
+
 export interface ChannelBlocker {
   code: string;
   title: string;
@@ -58,11 +64,12 @@ export function describeChannelIntegration(input: {
     where: fixPlace(item.code),
   }));
   const critical = blockers.filter((item) => item.code === 'sku' || item.code === 'ncm');
-  const linked = input.linkStatus === 'linked' || input.linkStatus === 'vinculado';
+  const linked = isChannelLinked(input.linkStatus);
   const ncmBlocked = failing.some((item) => item.code === 'ncm' || item.code === 'ncm_approval');
+  const incomplete = failing.length > 0;
 
   let visual: IntegrationVisual;
-  if (linked && ncmBlocked) visual = 'attention';
+  if (linked && incomplete) visual = 'attention';
   else if (linked) visual = 'connected';
   else if (critical.length > 0) visual = 'blocked';
   else if (failing.length > 0) visual = 'pending';
@@ -70,7 +77,9 @@ export function describeChannelIntegration(input: {
   else visual = 'pending';
 
   const tooltip = visual === 'attention'
-    ? 'Vinculado ao canal, com pendência fiscal de NCM.'
+    ? ncmBlocked
+      ? 'Integrado ao canal, com pendência fiscal de NCM.'
+      : `Integrado ao canal, com completude em ${input.checklist.percent}%.`
     : linked
     ? input.checklist.ready
       ? 'Vinculado e apto para o canal'

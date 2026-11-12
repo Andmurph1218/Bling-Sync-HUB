@@ -26,7 +26,7 @@ const COPY: Record<IntegrationBadgeKind, { label: string; tooltip: string; class
   },
   attention: {
     label: 'Vinculado com Pendência',
-    tooltip: 'Vinculado ao canal, com pendência fiscal de NCM.',
+    tooltip: 'Integrado ao canal, com completude pendente.',
     className: 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-100',
   },
 };
@@ -42,18 +42,21 @@ export function integrationBadgeKind(input: { visual: string; ready: boolean }):
 export function IntegrationStatusBadge({
   platform,
   kind,
+  tooltip,
   onClick,
 }: {
   platform: string;
   kind: IntegrationBadgeKind;
+  tooltip?: string;
   onClick?: () => void;
 }) {
   const copy = COPY[kind];
+  const hint = tooltip || copy.tooltip;
   return (
     <button
       type="button"
-      title={copy.tooltip}
-      aria-label={`${copy.label}. ${copy.tooltip}`}
+      title={hint}
+      aria-label={`${copy.label}. ${hint}`}
       onClick={onClick}
       className={`inline-flex max-w-full items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-none ${copy.className}`}
     >

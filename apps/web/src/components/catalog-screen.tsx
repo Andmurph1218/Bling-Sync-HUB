@@ -830,6 +830,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                                     key={channel.platform}
                                     platform={channel.platform}
                                     kind={integrationBadgeKind(channel)}
+                                    tooltip={channel.tooltip}
                                     onClick={() => setChannelFocus({ item, platform: channel.platform })}
                                   />
                                 ))}
