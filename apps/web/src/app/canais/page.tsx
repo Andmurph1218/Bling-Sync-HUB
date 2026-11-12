@@ -1,14 +1,13 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { AlertTriangle, HelpCircle, Plus } from 'lucide-react';
 import { useCurrentRole } from '../../components/app-shell';
 import { API_BASE_URL, apiFetch } from '../../utils/api-client';
 import { MERCADO_LIVRE_ACTIVE } from '../../config/channels';
 import { ChannelCard } from '../../components/channels/channel-card';
 import { IntegrationCatalogModal } from '../../components/channels/integration-catalog-modal';
-import { WarehouseConfigTable, WarehouseRow } from '../../components/channels/warehouse-config-table';
-
 interface ChannelRow {
   id: string;
   name: string;
@@ -21,7 +20,7 @@ interface ChannelRow {
 interface ChannelsPayload {
   catalogMode: { badge: string };
   channels: ChannelRow[];
-  warehouses: WarehouseRow[];
+  warehouses: Array<{ bling_warehouse_id: string; name: string; role: string; include_in_push: boolean }>;
 }
 
 interface WebhookEvent {
@@ -74,7 +73,11 @@ export default function CanaisConfiguracoesPage() {
   const mercadoLivre = channel('mercadolivre');
   const nuvemshopConnected = nuvemshop?.health === 'ok';
   const mercadoLivreConnected = MERCADO_LIVRE_ACTIVE && mercadoLivre?.health === 'ok';
-  const unclassified = (data?.warehouses ?? []).filter((warehouse) => warehouse.role === 'unclassified');
+  const warehouses = data?.warehouses ?? [];
+  const unclassified = warehouses.filter((warehouse) => warehouse.role === 'unclassified');
+  const sellerCount = warehouses.filter((warehouse) => warehouse.role === 'seller' && warehouse.include_in_push).length;
+  const fullCount = warehouses.filter((warehouse) => warehouse.role === 'ml_full').length;
+  const damagedCount = warehouses.filter((warehouse) => warehouse.role === 'damaged').length;
 
   const openSettings = async (id: string) => {
     setNotice(null);
@@ -98,21 +101,6 @@ export default function CanaisConfiguracoesPage() {
       await load();
     } catch {
       setNotice('Não foi possível desconectar o canal.');
-    }
-  };
-
-  const saveWarehouse = async (next: WarehouseRow) => {
-    if (!data) return;
-    const previous = data.warehouses;
-    setData({ ...data, warehouses: previous.map((row) => (row.bling_warehouse_id === next.bling_warehouse_id ? next : row)) });
-    try {
-      await apiFetch(`/admin/controls/warehouses/${encodeURIComponent(next.bling_warehouse_id)}`, {
-        method: 'PUT',
-        json: { name: next.name, role: next.role, include_in_push: next.include_in_push },
-      });
-    } catch {
-      setData({ ...data, warehouses: previous });
-      setNotice('Não foi possível salvar o depósito. Só depósito próprio entra na soma publicada.');
     }
   };
 
@@ -193,22 +181,30 @@ export default function CanaisConfiguracoesPage() {
             </section>
           )}
 
-          <section className="mt-8 rounded-xl border border-border-color bg-bg-surface p-6">
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold">Mapeamento de estoque (ERP para canais)</h2>
-              <span title="Regra do HUB: O estoque enviado ao marketplace é a soma dos saldos virtuais dos depósitos marcados como Seller. O depósito ML Full é de responsabilidade do Mercado Livre e nunca entra nesta soma.">
-                <HelpCircle className="h-4 w-4 text-text-muted" aria-label="Regra da soma de estoque" />
-              </span>
-            </div>
-            {unclassified.length > 0 && (
-              <p className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                Atenção: você tem {unclassified.length} {unclassified.length === 1 ? 'depósito não classificado' : 'depósitos não classificados'}. O estoque {unclassified.length === 1 ? 'dele' : 'deles'} não será enviado aos canais. Configure {unclassified.length === 1 ? 'abaixo' : 'abaixo'}.
+          <section className="mt-8 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border-color bg-bg-surface p-6">
+            <div className="max-w-xl">
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold">Depósitos de estoque</h2>
+                <span title="O estoque enviado ao marketplace é a soma dos saldos virtuais dos depósitos de Venda. Full e Avaria nunca entram nesta soma.">
+                  <HelpCircle className="h-4 w-4 text-text-muted" aria-label="Regra da soma de estoque" />
+                </span>
+              </div>
+              <p className="mt-1 text-sm text-text-muted">
+                {sellerCount} de venda · {fullCount} Full · {damagedCount} avaria · {unclassified.length} sem classificação
               </p>
-            )}
-            <div className="mt-4">
-              <WarehouseConfigTable warehouses={data.warehouses} canEdit={isAdmin} onChange={(warehouse) => void saveWarehouse(warehouse)} />
+              {sellerCount === 0 && (
+                <p className="mt-3 flex items-start gap-2 text-sm text-amber-800 dark:text-amber-200">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  Nenhum depósito de venda classificado. Nenhum produto entra na lista de envio.
+                </p>
+              )}
             </div>
+            <Link
+              href="/canais/depositos"
+              className="inline-flex items-center rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+            >
+              {sellerCount === 0 || unclassified.length > 0 ? 'Classificar depósitos' : 'Ver depósitos'}
+            </Link>
           </section>
         </>
       )}

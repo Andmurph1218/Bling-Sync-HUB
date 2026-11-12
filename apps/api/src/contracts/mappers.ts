@@ -91,7 +91,7 @@ export interface StockBalanceItem {
 
 export interface WarehouseConfig {
   bling_warehouse_id: string;
-  role: 'unclassified' | 'seller' | 'ml_full' | 'other';
+  role: 'unclassified' | 'seller' | 'ml_full' | 'damaged' | 'other';
   include_in_push: boolean;
 }
 
@@ -107,7 +107,7 @@ export interface ComputedStockResult {
 /**
  * Calcula o estoque publicado a partir de GET /estoques/saldos (Seções 2 e 10.7):
  * - Soma apenas saldo_virtual dos depósitos com role = 'seller' e include_in_push = true.
- * - Depósitos ml_full, other e unclassified nunca entram na soma.
+ * - Depósitos ml_full, damaged, other e unclassified nunca entram na soma.
  * - Nunca usa saldoVirtualTotal nem subtrai meli_facility.
  */
 export function computePublishableStockFromBalances(

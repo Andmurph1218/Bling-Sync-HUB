@@ -49,6 +49,13 @@ export function asCatalogPrice(value: unknown, fallback = 0): number {
   return fallback;
 }
 
+/** Campo ausente não vira 0. O upsert mantém o último preço conhecido. */
+export function catalogPriceOrNull(value: unknown): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  return asCatalogPrice(value);
+}
+
 function mapSituacaoToCatalogStatus(situacao: 'A' | 'I' | 'E'): 'active' | 'inactive' | 'deleted' {
   if (situacao === 'I') return 'inactive';
   if (situacao === 'E') return 'deleted';

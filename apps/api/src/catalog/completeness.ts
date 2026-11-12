@@ -1,5 +1,11 @@
 import { isBlankSku } from './blank-sku.js';
 
+export const NO_SELLER_WAREHOUSE_MESSAGE =
+  'Nenhum depósito de venda classificado. Vá em Canais > Depósitos e classifique';
+
+export const EXISTING_LISTING_MESSAGE =
+  'Já existe anúncio neste canal. A ação Criar está bloqueada; use Atualizar.';
+
 export type CatalogChannel = 'mercadolivre' | 'nuvemshop';
 
 export interface ChecklistInput {
@@ -15,6 +21,13 @@ export interface ChecklistInput {
   ncmFiscalRisk: boolean;
   price: number | null;
   hasDuplicateCandidate: boolean;
+  /** Informado só no checklist de envio: sem depósito seller o estoque publicável não existe. */
+  hasSellerWarehouse?: boolean;
+  /**
+   * Informado no checklist de envio. null = nenhum anúncio, a ação é Criar.
+   * Um id bloqueia Criar e pede Atualizar.
+   */
+  existingListingId?: string | null;
   /** Quando informado, o semáforo vale só para estes canais. */
   channels?: CatalogChannel[];
 }
@@ -97,15 +110,17 @@ export function evaluateCatalogChecklist(input: ChecklistInput): ChecklistResult
       fixHref: '/fiscal/ean',
     },
     {
-      code: 'ncm',
+      code: input.ncmStatus === 'pending_approval' ? 'ncm_approval' : 'ncm',
       ok: input.ncmStatus === 'valid' && !input.ncmFiscalRisk,
       blocks: true,
       title:
         input.ncmStatus === 'conflict'
           ? 'NCM em conflito entre variações'
-          : input.ncmStatus === 'valid' && !input.ncmFiscalRisk
-            ? 'NCM válido'
-            : 'NCM ausente ou inválido',
+          : input.ncmStatus === 'pending_approval'
+            ? 'NCM importado aguardando aprovação do fiscal'
+            : input.ncmStatus === 'valid' && !input.ncmFiscalRisk
+              ? 'NCM válido'
+              : 'NCM ausente ou inválido',
       fixHref: '/fiscal/ncm',
     },
     {
@@ -125,6 +140,25 @@ export function evaluateCatalogChecklist(input: ChecklistInput): ChecklistResult
       fixHref: '/vinculos',
     },
   ];
+  if (input.hasSellerWarehouse !== undefined) {
+    items.push({
+      code: 'seller_warehouse',
+      ok: input.hasSellerWarehouse,
+      blocks: true,
+      title: input.hasSellerWarehouse ? 'Depósito de venda classificado' : NO_SELLER_WAREHOUSE_MESSAGE,
+      fixHref: '/canais/depositos',
+    });
+  }
+  if (input.existingListingId !== undefined) {
+    const linked = Boolean(input.existingListingId);
+    items.push({
+      code: 'channel_listing',
+      ok: !linked,
+      blocks: true,
+      title: linked ? EXISTING_LISTING_MESSAGE : 'Nenhum anúncio neste canal. A ação é Criar.',
+      fixHref: '/vinculos',
+    });
+  }
 
   const okCount = items.filter((item) => item.ok).length;
   const percent = Math.round((okCount / items.length) * 100);

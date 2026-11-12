@@ -5,7 +5,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { query } from '../db/pool.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
 import { loadConnectors } from '../connectors/load.js';
-import { rateLimiter } from '../connectors/rate-limit-port.js';
+import { acquireBlingRequestSlot } from '../connectors/bling/bling-http-limit.js';
 import { getPublicBaseUrl as readPublicBaseUrl } from '../config/public-url.js';
 import { loadAppCredentials } from '../connectors/app-credentials.js';
 
@@ -159,6 +159,7 @@ export async function refreshBlingTokenViaHttp(
     refresh_token: currentRefreshToken,
   });
 
+  await acquireBlingRequestSlot();
   const response = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
     method: 'POST',
     headers: {
@@ -212,8 +213,8 @@ export async function discoverBlingWarehousesAndStores(): Promise<{
 
   const fetchBlingJson = async <T>(path: string): Promise<T> => {
     await loadConnectors();
-    return rateLimiter().schedule('webhook_p1_push_stock', async () => {
-      const res = await fetch(`https://api.bling.com.br/Api/v3${path}`, {
+    await acquireBlingRequestSlot();
+    const res = await fetch(`https://api.bling.com.br/Api/v3${path}`, {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -225,7 +226,6 @@ export async function discoverBlingWarehousesAndStores(): Promise<{
         throw new Error(`Erro em GET ${path} (${res.status}): ${text}`);
       }
       return (await res.json()) as T;
-    });
   };
 
   const depositosRes = await fetchBlingJson<{
@@ -363,6 +363,7 @@ oauthRouter.get(
         code,
       });
 
+      await acquireBlingRequestSlot();
       const tokenRes = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
         method: 'POST',
         headers: {

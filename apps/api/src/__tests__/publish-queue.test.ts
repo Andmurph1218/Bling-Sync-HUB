@@ -4,6 +4,7 @@ import { newDb, DataType } from 'pg-mem';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { createUser } from '../auth/service.js';
+import { EXISTING_LISTING_MESSAGE, NO_SELLER_WAREHOUSE_MESSAGE } from '../catalog/completeness.js';
 import { ListingDraft } from '../connectors/strategy/types.js';
 import { DbPoolLike, query, setPool } from '../db/pool.js';
 import { runAllMigrationsUp } from '../db/migrator.js';
@@ -267,9 +268,10 @@ describe('P2 — fila de publicação', () => {
        WHERE id = $1`,
       [productId, categoryId]
     );
-    await query(
-      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, stock)
-       VALUES ($1, 'VERDE-1', true, 'S', 10, 2)`,
+    const variant = await query<{ id: string }>(
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, stock, catalog_stock)
+       VALUES ($1, 'VERDE-1', true, 'S', 10, 2, 9)
+       RETURNING id`,
       [productId]
     );
     await query(
@@ -288,6 +290,24 @@ describe('P2 — fila de publicação', () => {
         ],
       });
 
+    const withoutSeller = await request(app)
+      .post('/api/catalog/products/send-list')
+      .set('Cookie', cookie)
+      .send({ ids: [productId], channel: 'mercadolivre' });
+    expect(withoutSeller.status).toBe(202);
+    expect(withoutSeller.body.queued).toEqual([]);
+    expect(withoutSeller.body.skipped[0].reason).toBe(NO_SELLER_WAREHOUSE_MESSAGE);
+
+    await query(
+      `INSERT INTO stock_warehouses (bling_warehouse_id, name, role, include_in_push)
+       VALUES ('DEP-VERDE', 'Loja', 'seller', true)`
+    );
+    await query(
+      `INSERT INTO variant_stock_balances (variant_id, bling_warehouse_id, saldo_fisico, saldo_virtual)
+       VALUES ($1, 'DEP-VERDE', 2, 2)`,
+      [variant.rows[0]!.id]
+    );
+
     const sent = await request(app)
       .post('/api/catalog/products/send-list')
       .set('Cookie', cookie)
@@ -295,11 +315,48 @@ describe('P2 — fila de publicação', () => {
     expect(sent.status).toBe(202);
     expect(sent.body.queued).toHaveLength(1);
     expect(sent.body.skipped).toEqual([]);
-    const stored = await query<{ status: string; error_message: string }>(
-      `SELECT status, error_message FROM publish_queue WHERE id = $1`,
+    const stored = await query<{ status: string; error_message: string; payload_json: string }>(
+      `SELECT status, error_message, payload_json FROM publish_queue WHERE id = $1`,
       [sent.body.queued[0]]
     );
     expect(stored.rows[0]).toMatchObject({ status: 'success', error_message: DRY_RUN_LOG });
+    const payload = typeof stored.rows[0]!.payload_json === 'string'
+      ? JSON.parse(stored.rows[0]!.payload_json)
+      : stored.rows[0]!.payload_json;
+    expect(payload.stock).toBe(2);
+
+    await query(
+      `INSERT INTO channel_listing_links (product_id, channel, listing_id, link_status)
+       VALUES ($1, 'mercadolivre', 'MLB1578151393', 'vinculado')`,
+      [productId]
+    );
+    const duplicate = await request(app)
+      .post('/api/catalog/products/send-list')
+      .set('Cookie', cookie)
+      .send({ ids: [productId], channel: 'mercadolivre' });
+    expect(duplicate.status).toBe(202);
+    expect(duplicate.body.queued).toEqual([]);
+    expect(duplicate.body.skipped[0].reason).toBe(EXISTING_LISTING_MESSAGE);
+
+    const forced = await query<{ id: string }>(
+      `INSERT INTO publish_queue (product_id, channel, payload_json)
+       VALUES ($1, 'mercadolivre', $2)
+       RETURNING id`,
+      [productId, JSON.stringify({ sku: 'VERDE-1', price: 10, stock: 2, attributes: [] })]
+    );
+    const creates: string[] = [];
+    await processPublishQueueItem(forced.rows[0]!.id, {
+      live: true,
+      publish: async (channel) => {
+        creates.push(channel);
+      },
+    });
+    expect(creates).toEqual([]);
+    const blockedCreate = await query<{ status: string; error_message: string }>(
+      `SELECT status, error_message FROM publish_queue WHERE id = $1`,
+      [forced.rows[0]!.id]
+    );
+    expect(blockedCreate.rows[0]).toEqual({ status: 'failed', error_message: EXISTING_LISTING_MESSAGE });
   });
 
   it('agrega falha de envio, webhook e pendência de completude', async () => {

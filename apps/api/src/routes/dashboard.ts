@@ -2130,7 +2130,8 @@ dashboardRouter.get(
         score_ns: number | null;
       }>(
         `SELECT mp.erp_id, mp.erp_sku, mp.name,
-                pv.price::text AS price, pv.cost_price::text AS cost_price, pv.stock::text AS stock,
+                pv.price::text AS price, pv.cost_price::text AS cost_price,
+                COALESCE(pv.catalog_stock, pv.stock)::text AS stock,
                 crs.score_bling, crs.score_ml, crs.score_ns
          FROM master_products mp
          INNER JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true

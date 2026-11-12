@@ -62,10 +62,20 @@ describe('reconciliação do anúncio', () => {
     );
     productId = created.rows[0]!.id;
     erpId = created.rows[0]!.erp_id;
-    await query(
+    const variant = await query<{ id: string }>(
       `INSERT INTO product_variants (master_product_id, erp_sku, is_default, price, stock)
-       VALUES ($1, 'SKU-RECON', true, 20, 10)`,
+       VALUES ($1, 'SKU-RECON', true, 20, 10)
+       RETURNING id`,
       [productId]
+    );
+    await query(
+      `INSERT INTO stock_warehouses (bling_warehouse_id, name, role, include_in_push)
+       VALUES ('DEP-RECON', 'Loja', 'seller', true)`
+    );
+    await query(
+      `INSERT INTO variant_stock_balances (variant_id, bling_warehouse_id, saldo_fisico, saldo_virtual)
+       VALUES ($1, 'DEP-RECON', 10, 10)`,
+      [variant.rows[0]!.id]
     );
   });
 
@@ -168,5 +178,38 @@ describe('reconciliação do anúncio', () => {
       [atlId]
     );
     expect(Number(price.rows[0]?.price)).toBe(180);
+  });
+
+  it('não derruba a rodada quando o anúncio já está vinculado a outro produto', async () => {
+    const other = await query<{ id: string }>(
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
+       VALUES ('erp-dup', 'SKU-DUP', 'Duplicado', 'P', 'S')
+       RETURNING id`
+    );
+    await query(
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, price, stock)
+       VALUES ($1, 'SKU-DUP', true, 9, 1)`,
+      [other.rows[0]!.id]
+    );
+    await query(
+      `INSERT INTO channel_listing_links (product_id, channel, listing_id, link_status)
+       VALUES ($1, 'nuvemshop', 'NS-JA-VINCULADO', 'vinculado')`,
+      [productId]
+    );
+    const listing: MarketplaceListing = {
+      externalId: 'NS-JA-VINCULADO',
+      title: 'Já vinculado',
+      price: 20,
+      stock: 10,
+      images: [],
+      status: 'Ativo',
+    };
+    const result = await reconcileListings(async (channel) => (channel === 'nuvemshop' ? listing : null), { sku: 'SKU-DUP' });
+    expect(result.scanned).toBe(1);
+    expect(result.linked).toBe(0);
+    const owners = await query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM channel_listing_links WHERE channel = 'nuvemshop' AND listing_id = 'NS-JA-VINCULADO'`
+    );
+    expect(owners.rows[0]?.count).toBe(1);
   });
 });

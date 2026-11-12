@@ -44,7 +44,7 @@ matchingRouter.get(
         listing_id: string | null;
       }>(
         `SELECT mp.id, mp.erp_id, mp.erp_sku, mp.name,
-                pv.price::text AS price, pv.stock::text AS stock, pv.ean,
+                pv.price::text AS price, COALESCE(pv.catalog_stock, pv.stock)::text AS stock, pv.ean,
                 cl.link_status, cl.listing_id
          FROM master_products mp
          LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true

@@ -28,6 +28,8 @@ import * as m026 from './migrations/1729080000026_erp-identity.js';
 import * as m027 from './migrations/1729080000027_sync-status.js';
 import * as m028 from './migrations/1729080000028_duplicate-alerts.js';
 import * as m029 from './migrations/1729080000029_marketplace-reconciliation.js';
+import * as m030 from './migrations/1729080000030_stock-split.js';
+import * as m031 from './migrations/1729080000031_pending-review.js';
 
 export interface MigrationStep {
   id: number;
@@ -66,6 +68,8 @@ export const ALL_MIGRATIONS: MigrationStep[] = [
   { id: 27, name: '1729080000027_sync-status', upSql: m027.UP_SQL, downSql: m027.DOWN_SQL },
   { id: 28, name: '1729080000028_duplicate-alerts', upSql: m028.UP_SQL, downSql: m028.DOWN_SQL },
   { id: 29, name: '1729080000029_marketplace-reconciliation', upSql: m029.UP_SQL, downSql: m029.DOWN_SQL },
+  { id: 30, name: '1729080000030_stock-split', upSql: m030.UP_SQL, downSql: m030.DOWN_SQL },
+  { id: 31, name: '1729080000031_pending-review', upSql: m031.UP_SQL, downSql: m031.DOWN_SQL },
 ];
 
 /**

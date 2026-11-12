@@ -56,6 +56,7 @@ interface CatalogItem {
   brand: string | null;
   typeLabel: string;
   stock: number | null;
+  publishableStock?: number | null;
   price: number | null;
   promotionalPrice: number | null;
   coverUrl: string | null;
@@ -211,6 +212,8 @@ const MISSING_LABEL: Record<string, string> = {
   attributes: 'Atributos',
   ean: 'EAN',
   ncm: 'NCM',
+  ncm_approval: 'NCM',
+  channel_listing: 'Vínculo',
   price: 'Preço',
   duplicate: 'Duplicata',
 };
@@ -810,7 +813,12 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                             {isBlankSku(item.sku) ? <EmptySkuNotice /> : <p className="truncate font-mono text-xs text-text-muted">{item.sku}</p>}
                           </td>
                           <td className="px-2 py-1 text-text-muted">{item.typeLabel}</td>
-                          <td className="px-2 py-1">{item.stock === null ? '—' : item.stock}</td>
+                          <td
+                            className="px-2 py-1 tabular-nums"
+                            title={item.stock === null ? undefined : `Envio aos canais: ${item.publishableStock ?? 0} (só depósitos de Venda)`}
+                          >
+                            {item.stock === null ? '—' : item.stock}
+                          </td>
                           <td className="px-2 py-1">{money(item.price)}</td>
                           <td className="px-2 py-1">{item.promotionalPrice === null ? '—' : money(item.promotionalPrice)}</td>
                           <td className="px-2 py-1">
@@ -1118,7 +1126,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                   setConfirmCreate(true);
                 }}
               >
-                <p className="text-text-muted">SKU livre. Nome, preço e estoque são gravados no Bling.</p>
+                <p className="text-text-muted">SKU livre no HUB. Nome e preço são gravados no Bling. O estoque informado fica no catálogo do HUB.</p>
                 <input value={createName} onChange={(event) => setCreateName(event.target.value)} required placeholder="Nome" className="w-full rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-text-primary" />
                 <input value={createPrice} onChange={(event) => setCreatePrice(event.target.value)} required inputMode="decimal" placeholder="Preço" className="w-full rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-text-primary" />
                 <input value={createStock} onChange={(event) => setCreateStock(event.target.value)} required inputMode="decimal" placeholder="Estoque" className="w-full rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-text-primary" />

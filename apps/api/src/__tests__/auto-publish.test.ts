@@ -46,10 +46,20 @@ describe('publicação automática ao completar o canal', () => {
       [categoryId]
     );
     productId = created.rows[0]!.id;
-    await query(
+    const variant = await query<{ id: string }>(
       `INSERT INTO product_variants (master_product_id, erp_sku, is_default, price, stock, ean_status)
-       VALUES ($1, 'AUTO-1', true, 0, 4, 'valid')`,
+       VALUES ($1, 'AUTO-1', true, 0, 4, 'valid')
+       RETURNING id`,
       [productId]
+    );
+    await query(
+      `INSERT INTO stock_warehouses (bling_warehouse_id, name, role, include_in_push)
+       VALUES ('DEP-VENDA-AUTO', 'Loja', 'seller', true)`
+    );
+    await query(
+      `INSERT INTO variant_stock_balances (variant_id, bling_warehouse_id, saldo_fisico, saldo_virtual)
+       VALUES ($1, 'DEP-VENDA-AUTO', 4, 4)`,
+      [variant.rows[0]!.id]
     );
     await query(
       `INSERT INTO product_images (master_product_id, source_url, url_normalized, source_platform, is_cover_eligible)

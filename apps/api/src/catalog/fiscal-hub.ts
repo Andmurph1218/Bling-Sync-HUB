@@ -18,6 +18,7 @@ export interface FiscalHubItem {
 }
 
 const ORIGIN: Record<string, string> = {
+  bling: 'Bling',
   mercadolivre: 'Mercado Livre',
   nuvemshop: 'Nuvemshop',
   erp: 'ERP',

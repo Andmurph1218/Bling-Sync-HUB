@@ -1,16 +1,9 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Toaster, ToastMessage } from '../components/toaster';
 import Link from 'next/link';
-import {
-  Activity,
-  FileText,
-  Info,
-  RefreshCw,
-  Shield,
-  Unlink,
-} from 'lucide-react';
+import { ChevronDown, RefreshCw, Shield } from 'lucide-react';
 import {
   fetchOperationalState,
   OperationalStatePayload,
@@ -18,9 +11,8 @@ import {
 import { EmptySkuNotice } from '../components/empty-sku-notice';
 import { apiFetch } from '../utils/api-client';
 import { useCurrentRole } from '../components/app-shell';
-import { KpiCard } from '../components/home/kpi-card';
-import { ActionCenterItem } from '../components/home/action-center-item';
-import { OnboardingFunnel } from '../components/home/onboarding-funnel';
+import { CatalogCycle } from '../components/home/onboarding-funnel';
+import { BrandLogo } from '../components/brand-logo';
 
 interface CatalogHome {
   cards: {
@@ -37,6 +29,7 @@ interface CatalogHome {
   lastSyncError: string | null;
   lastBlingSync?: string | null;
   linkedNuvemshop?: number;
+  linkedMercadoLivre?: number;
   fiscal?: { awaitingNcm: number; awaitingEan: number; conflicts: number };
   readiness?: { averageScore: number; readyToPublish: number };
   livePublishing?: boolean;
@@ -54,27 +47,53 @@ function formatCount(value: number): string {
   return value.toLocaleString('pt-BR');
 }
 
-function formatActivityResult(status: string, reason: string | null): string {
-  const normalized = status.toLowerCase();
-  if (normalized === 'processed' || normalized === 'processado') return 'Sincronizado com sucesso';
-  if (normalized === 'failed' || normalized === 'error' || normalized === 'erro') return 'Falha na sincronização';
-  const detail = (reason ?? '').toLowerCase();
-  if (detail.includes('idêntico_content') || detail.includes('identico_content') || detail.includes('identical')) {
-    return 'Ignorado (sem alteração real)';
-  }
-  if (normalized === 'ignored') return 'Ignorado (sem alteração real)';
-  return status;
+const EVENT_LABEL: Record<string, string> = {
+  'product.created': 'Produto Criado',
+  'product.updated': 'Produto Atualizado',
+  'product.deleted': 'Produto Removido',
+  'stock.created': 'Estoque Atualizado',
+  'stock.updated': 'Estoque Atualizado',
+  'product/created': 'Produto Criado',
+  'product/updated': 'Produto Atualizado',
+  'product/deleted': 'Produto Removido',
+};
+
+function formatEvent(eventType: string): string {
+  return EVENT_LABEL[eventType] ?? EVENT_LABEL[eventType.toLowerCase()] ?? eventType.replace(/[._]/g, ' ');
 }
 
-function relativeTime(value: string | null | undefined): string {
-  if (!value) return 'sem registro';
-  const minutes = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 60000));
-  if (minutes < 1) return 'agora';
-  if (minutes < 60) return `há ${minutes} minuto${minutes === 1 ? '' : 's'}`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `há ${hours} hora${hours === 1 ? '' : 's'}`;
-  const days = Math.round(hours / 24);
-  return `há ${days} dia${days === 1 ? '' : 's'}`;
+function activityBadge(status: string, reason: string | null): { label: string; className: string } {
+  const normalized = status.toLowerCase();
+  const detail = (reason ?? '').toLowerCase();
+  const ignored = normalized === 'ignored'
+    || detail.includes('identical')
+    || detail.includes('identico')
+    || detail.includes('idêntico');
+  if (ignored) {
+    return {
+      label: 'Atualização Ignorada (sem alteração)',
+      className: 'border-border-color bg-bg-base text-text-muted',
+    };
+  }
+  if (normalized === 'processed' || normalized === 'processado' || normalized === 'completed') {
+    return {
+      label: 'Sucesso',
+      className: 'border-emerald-600/30 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200',
+    };
+  }
+  if (normalized === 'failed' || normalized === 'error' || normalized === 'erro') {
+    return {
+      label: 'Falha',
+      className: 'border-rose-600/30 bg-rose-500/15 text-rose-800 dark:text-rose-200',
+    };
+  }
+  return { label: status, className: 'border-border-color bg-bg-base text-text-muted' };
+}
+
+function healthTone(score: number): { bar: string; text: string } {
+  if (score > 80) return { bar: 'bg-emerald-600', text: 'text-emerald-800 dark:text-emerald-200' };
+  if (score > 50) return { bar: 'bg-amber-500', text: 'text-amber-800 dark:text-amber-200' };
+  return { bar: 'bg-rose-600', text: 'text-rose-800 dark:text-rose-200' };
 }
 
 export default function HomePage() {
@@ -82,7 +101,6 @@ export default function HomePage() {
   const [state, setState] = useState<OperationalStatePayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [showTechDetails, setShowTechDetails] = useState<boolean>(false);
   const [catalogHome, setCatalogHome] = useState<CatalogHome | null>(null);
   const [catalogHomeError, setCatalogHomeError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
@@ -92,7 +110,10 @@ export default function HomePage() {
   const [enriching, setEnriching] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [syncStarting, setSyncStarting] = useState(false);
+  const [enrichmentLive, setEnrichmentLive] = useState(false);
+  const [syncMenuOpen, setSyncMenuOpen] = useState(false);
   const [duplicateCount, setDuplicateCount] = useState(0);
+  const syncMenuRef = useRef<HTMLDivElement>(null);
 
   const pullSyncStatus = async () => {
     try {
@@ -148,6 +169,22 @@ export default function HomePage() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (!syncMenuOpen) return;
+    const onPointer = (event: MouseEvent) => {
+      if (!syncMenuRef.current?.contains(event.target as Node)) setSyncMenuOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSyncMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [syncMenuOpen]);
+
   const startEnrichment = async () => {
     setEnriching(true);
     try {
@@ -157,6 +194,8 @@ export default function HomePage() {
         ...current,
         { id, variant: 'success', title: 'Enriquecimento iniciado em background' },
       ]);
+      setEnrichmentLive(true);
+      setSyncMenuOpen(false);
     } catch {
       const id = `toast-${Date.now()}`;
       setToasts((current) => [
@@ -174,6 +213,7 @@ export default function HomePage() {
     try {
       await apiFetch('/api/admin/reconcile-now', { method: 'POST' });
       setSyncNotice('Reconciliação iniciada. O HUB busca o anúncio pelo SKU e grava o vínculo.');
+      setSyncMenuOpen(false);
     } catch {
       setSyncNotice('Não foi possível iniciar a reconciliação.');
     } finally {
@@ -187,6 +227,7 @@ export default function HomePage() {
     try {
       await apiFetch('/api/admin/sync-full', { method: 'POST' });
       setSyncNotice('Sincronização do ERP iniciada. A tela continua livre.');
+      setSyncMenuOpen(false);
       await pullSyncStatus();
     } catch {
       setSyncNotice('Não foi possível iniciar a sincronização.');
@@ -197,24 +238,20 @@ export default function HomePage() {
 
   const shadow = catalogHome?.livePublishing !== true;
   const products = catalogHome?.cards.products.value ?? state?.kpis.monitoredProducts.value ?? 0;
-  const linked = catalogHome?.linkedNuvemshop ?? 0;
-  const coverage = products === 0 ? 0 : Math.round((linked / products) * 100);
-  const queued = catalogHome?.cards.publicationsToday.queued ?? 0;
-  const syncState = syncStatus?.status ?? 'idle';
-  const syncRunning = syncState === 'processing' || syncStarting;
-  const syncProcessed = syncStatus?.processed ?? 0;
-  const syncTotal = syncStatus?.total ?? 0;
-  const syncPercent = syncTotal > 0 ? Math.min(100, Math.round((syncProcessed / syncTotal) * 100)) : null;
-  const syncSentence = syncTotal > 0
-    ? `Sincronizando ${formatCount(syncProcessed)} de ${formatCount(syncTotal)}`
-    : `Sincronizando ${formatCount(syncProcessed)} produtos`;
-  const lastTouch = catalogHome?.lastBlingSync ?? catalogHome?.sync?.finishedAt ?? catalogHome?.lastSyncOk ?? null;
+  const readyToPublish = catalogHome?.readiness?.readyToPublish ?? catalogHome?.cards.ready.value ?? 0;
+  const averageScore = catalogHome?.readiness?.averageScore ?? catalogHome?.completenessPct ?? 0;
+  const tone = healthTone(averageScore);
   const awaitingNcm = catalogHome?.fiscal?.awaitingNcm ?? state?.kpis.actionPendings.breakdown.ncmPendingFirst ?? 0;
   const awaitingEan = catalogHome?.fiscal?.awaitingEan ?? state?.kpis.actionPendings.breakdown.eanPending ?? 0;
   const fiscalConflicts = catalogHome?.fiscal?.conflicts ?? state?.kpis.actionPendings.breakdown.eanDuplicates ?? 0;
   const fiscalProducts = awaitingNcm + awaitingEan;
-  const averageScore = catalogHome?.readiness?.averageScore ?? 0;
-  const readyToPublish = catalogHome?.readiness?.readyToPublish ?? catalogHome?.cards.ready.value ?? 0;
+  const incomplete = catalogHome?.cards.incomplete.value ?? state?.contentIncompleteCount ?? 0;
+  const pendingActions = fiscalProducts + fiscalConflicts + incomplete + duplicateCount;
+  const nuvemshopPublished = catalogHome?.linkedNuvemshop ?? 0;
+  const mercadoLivrePublished = catalogHome?.linkedMercadoLivre ?? 0;
+  const syncState = syncStatus?.status ?? 'idle';
+  const syncRunning = syncState === 'processing' || syncStarting;
+  const syncBusy = syncRunning || reconciling || enriching;
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -231,37 +268,65 @@ export default function HomePage() {
         </p>
       )}
 
-      <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-6 lg:flex-row lg:items-center">
+      <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-6 lg:flex-row lg:items-end">
         <div>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-text-primary">Visão Geral</h1>
-            {hasRole('admin') && (
-              <button
-                type="button"
-                onClick={() => void startSync()}
-                disabled={syncRunning}
-                aria-busy={syncRunning}
-                className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {syncRunning ? 'Sincronizando...' : 'Sincronizar ERP'}
-              </button>
-            )}
-          </div>
-          <p className="mt-1 text-sm text-text-muted">O que precisa de ação agora, lido do banco.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-text-primary">Visão Geral</h1>
+          <p className="mt-1 max-w-xl text-sm text-text-muted">Quantos produtos estão prontos, o que ainda trava a venda e o estado dos canais.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => setShowTechDetails((prev) => !prev)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border-color bg-bg-surface px-3 py-2 text-xs font-medium text-text-muted"
-          >
-            <Info className="h-3.5 w-3.5" />
-            <span>{showTechDetails ? 'Ocultar siglas' : 'Ver siglas'}</span>
-          </button>
+          {hasRole('admin') && (
+            <div className="relative" ref={syncMenuRef}>
+              <button
+                type="button"
+                aria-expanded={syncMenuOpen}
+                aria-haspopup="menu"
+                aria-busy={syncBusy}
+                onClick={() => setSyncMenuOpen((open) => !open)}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-base"
+              >
+                Sincronização
+                <ChevronDown className={`h-4 w-4 transition ${syncMenuOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+              </button>
+              {syncMenuOpen && (
+                <div role="menu" className="absolute right-0 z-20 mt-2 w-80 rounded-xl border border-border-color bg-bg-surface p-2 shadow-[0_12px_30px_-18px_rgba(0,0,0,0.45)]">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={syncRunning}
+                    onClick={() => void startSync()}
+                    className="block w-full rounded-lg px-3 py-2 text-left hover:bg-bg-base disabled:opacity-60"
+                  >
+                    <span className="block text-sm font-semibold text-text-primary">{syncRunning ? 'Sincronizando o ERP...' : 'Sync Completo ERP (Bling)'}</span>
+                    <span className="mt-0.5 block text-xs text-text-muted">Lê preço, estoque e cadastro do Bling.</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={reconciling}
+                    onClick={() => void startReconcile()}
+                    className="mt-1 block w-full rounded-lg px-3 py-2 text-left hover:bg-bg-base disabled:opacity-60"
+                  >
+                    <span className="block text-sm font-semibold text-text-primary">{reconciling ? 'Buscando vínculos...' : 'Reconciliação de Vínculos (Marketplaces)'}</span>
+                    <span className="mt-0.5 block text-xs text-text-muted">Encontra o anúncio pelo SKU e grava o vínculo.</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={enriching}
+                    onClick={() => void startEnrichment()}
+                    className="mt-1 block w-full rounded-lg px-3 py-2 text-left hover:bg-bg-base disabled:opacity-60"
+                  >
+                    <span className="block text-sm font-semibold text-text-primary">{enriching ? 'Enriquecendo...' : 'Enriquecimento em Massa (Imagens/NCM)'}</span>
+                    <span className="mt-0.5 block text-xs text-text-muted">Copia imagem e NCM do ERP para o HUB.</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           <button
             type="button"
             onClick={() => void loadState()}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border-color bg-bg-surface px-3 py-2 text-xs font-semibold text-text-primary"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border-color bg-bg-surface px-3 py-2 text-xs font-semibold text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>Atualizar</span>
@@ -276,7 +341,7 @@ export default function HomePage() {
       )}
 
       {state && state.emptySkuCount > 0 && (
-        <section className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-color border-l-4 border-l-rose-500 bg-bg-surface px-4 py-3">
+        <section className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-color bg-bg-surface px-4 py-3">
           <div className="flex items-center gap-2 text-sm text-text-primary">
             <EmptySkuNotice />
             <span>{formatCount(state.emptySkuCount)} produto(s) sem SKU. Eles não entram na lista de envio.</span>
@@ -286,178 +351,61 @@ export default function HomePage() {
       )}
 
       <section className="mt-6">
-        <Link
-          href="/problemas?filtro=duplicidades"
-          className={`mb-4 block rounded-xl border px-4 py-4 ${
-            duplicateCount > 0
-              ? 'border-amber-500/50 bg-amber-500/15 text-amber-950 dark:border-rose-400/40 dark:bg-rose-500/15 dark:text-rose-50'
-              : 'border-border-color bg-bg-surface text-text-primary'
-          }`}
-        >
-          <p className="text-xs font-semibold uppercase tracking-wide">Duplicidades detectadas</p>
-          <p className="mt-1 text-2xl font-bold">{formatCount(duplicateCount)}</p>
-          <p className="mt-1 text-sm">
-            {duplicateCount > 0
-              ? 'SKU repetido no ERP ou anúncio que já existe no canal. Abra para resolver.'
-              : 'Nenhuma colisão aberta no catálogo.'}
-          </p>
-        </Link>
         {catalogHomeError && <p className="mb-3 text-sm text-rose-700 dark:text-rose-200" role="alert">{catalogHomeError}</p>}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <KpiCard
-            label="Cobertura do catálogo"
-            value={`${formatCount(products)} produtos`}
-            hint={`${formatCount(linked)} vinculados à Nuvemshop`}
-            href="/catalogo"
-            accent="sky"
-            progress={coverage}
-          />
-          <KpiCard
-            label="Saúde da fila de sync"
-            value={syncRunning ? (syncPercent === null ? 'Em andamento' : `${syncPercent}%`) : syncState === 'completed' ? 'Concluída' : syncState === 'failed' ? 'Falhou' : 'Parado'}
-            hint={syncRunning ? syncSentence : `Última atualização: ${relativeTime(lastTouch)}`}
-            href="/problemas"
-            accent={syncRunning ? 'neutral' : syncState === 'failed' ? 'rose' : 'neutral'}
-            pulse={syncRunning ? 'live' : syncState === 'idle' || syncState === 'failed' ? 'stopped' : null}
-            progress={syncRunning ? syncPercent : null}
-          >
-            {syncRunning && (
-              <p className="mt-3 text-xs text-text-primary" role="status">{syncSentence}</p>
-            )}
-            {!syncRunning && syncState !== 'completed' && (
-              <p className="mt-3 text-xs text-text-muted">
-                Nenhuma sincronização em andamento. Clique em Sincronizar para iniciar.
-              </p>
-            )}
-            {hasRole('admin') && (
-              <button
-                type="button"
-                onClick={() => void startSync()}
-                disabled={syncRunning}
-                aria-busy={syncRunning}
-                className="mt-3 rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {syncRunning ? 'Sincronizando...' : 'Sincronizar agora'}
-              </button>
-            )}
-            {hasRole('admin') && (
-              <button
-                type="button"
-                onClick={() => void startReconcile()}
-                disabled={reconciling}
-                className="mt-2 rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {reconciling ? 'Buscando vínculos...' : 'Sincronizar Vínculos (Reconciliação)'}
-              </button>
-            )}
-            {hasRole('admin') && (
-              <button
-                type="button"
-                onClick={() => void startEnrichment()}
-                disabled={enriching}
-                aria-busy={enriching}
-                className="mt-2 rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {enriching ? 'Enriquecendo...' : 'Enriquecer Catálogo (ERP)'}
-              </button>
-            )}
-          </KpiCard>
-          <KpiCard
-            label="Pendências fiscais"
-            value={`${formatCount(fiscalProducts)} produtos`}
-            hint={`${formatCount(awaitingNcm)} aguardando NCM | ${formatCount(awaitingEan)} aguardando EAN`}
-            href="/fiscal"
-            accent={fiscalConflicts > 0 ? 'rose' : fiscalProducts > 0 ? 'amber' : 'neutral'}
-          />
-          <KpiCard
-            label="Ações hoje"
-            value={`${formatCount(catalogHome?.cards.publicationsToday.sent ?? 0)} envios`}
-            hint={`${formatCount(catalogHome?.cards.publicationsToday.failed ?? 0)} erros | ${formatCount(queued)} na fila`}
-            href="/publicacoes"
-            accent="amber"
-          />
-        </div>
-        {syncNotice && <p className="mt-2 text-xs text-text-muted" role="status">{syncNotice}</p>}
-      </section>
-
-      {state && (
-        <section className="mt-8">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold text-text-primary">O que precisa da sua atenção agora</h2>
-              <p className="text-xs text-text-muted">Abra os detalhes só quando precisar do motivo e do impacto.</p>
+          <Link href="/catalogo" className="rounded-xl border border-border-color bg-bg-surface p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+            <p className="text-sm font-semibold text-text-primary">Total no Catálogo</p>
+            <p className="mt-3 text-3xl font-bold tracking-tight text-text-primary">{formatCount(products)}</p>
+            <p className="mt-1 text-xs text-text-muted">{formatCount(readyToPublish)} produtos prontos para venda</p>
+          </Link>
+          <div className="rounded-xl border border-border-color bg-bg-surface p-4">
+            <p className="text-sm font-semibold text-text-primary">Saúde do Catálogo</p>
+            <p className={`mt-3 text-3xl font-bold tracking-tight ${tone.text}`}>{averageScore}% Completo</p>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-bg-base" role="meter" aria-valuenow={averageScore} aria-valuemin={0} aria-valuemax={100} aria-label="Média de completude">
+              <div className={`h-full ${tone.bar}`} style={{ width: `${Math.max(0, Math.min(100, averageScore))}%` }} />
             </div>
-            <Link href="/pendencias" className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white">
-              Resolver pendências
+          </div>
+          <div className="rounded-xl border border-border-color bg-bg-surface p-4">
+            <p className="text-sm font-semibold text-text-primary">Ações Necessárias</p>
+            <p className="mt-3 text-3xl font-bold tracking-tight text-text-primary">{formatCount(pendingActions)}</p>
+            <p className="mt-1 text-xs text-text-muted">Fiscais, incompletos e duplicidades</p>
+            <Link href="/problemas" className="mt-3 inline-flex rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
+              Resolver Pendências
             </Link>
           </div>
-          <ul className="mt-4 overflow-hidden rounded-xl border border-border-color bg-bg-surface">
-            <ActionCenterItem
-              icon={<Unlink className="h-4 w-4" />}
-              tone="amber"
-              title="Vínculos pendentes"
-              count={state.kpis.actionPendings.breakdown.matchingSuggestions}
-              href="/vinculos"
-              reason="Só um sinal forte coincidiu. O HUB exige dois sinais concordantes para vincular sozinho."
-              impact="Sem o vínculo, o HUB não envia melhoria de conteúdo para esses anúncios."
-              tech={showTechDetails ? 'PIRE / matching_queue' : undefined}
-            />
-            <ActionCenterItem
-              icon={<Shield className="h-4 w-4" />}
-              tone={fiscalConflicts > 0 ? 'rose' : 'amber'}
-              title="Bloqueio fiscal"
-              count={fiscalProducts}
-              href="/fiscal"
-              reason="Produtos do Bling estão sem EAN válido ou aguardam a segunda aprovação de NCM."
-              impact="Criação e atualização de conteúdo ficam bloqueadas. Estoque e pausa seguem livres."
-              tech={showTechDetails ? 'GVE (EAN) + NVE (NCM)' : undefined}
-            />
-            <ActionCenterItem
-              icon={<FileText className="h-4 w-4" />}
-              tone="orange"
-              title="Conteúdo incompleto"
-              count={state.contentIncompleteCount}
-              href="/completude"
-              reason="Falta categoria, imagem de capa, descrição ou atributo exigido pela Nuvemshop."
-              impact="O produto não fica apto para envio até a prontidão do canal fechar."
-              tech={showTechDetails ? 'CRE' : undefined}
-            />
-          </ul>
-        </section>
-      )}
+          <div className="rounded-xl border border-border-color bg-bg-surface p-4">
+            <p className="text-sm font-semibold text-text-primary">Canais Ativos</p>
+            <ul className="mt-3 space-y-2">
+              <li className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2 text-sm text-text-primary">
+                  <BrandLogo id="nuvemshop" name="Nuvemshop" size={22} />
+                  Nuvemshop
+                </span>
+                <span className="text-sm font-semibold tabular-nums text-text-primary">{formatCount(nuvemshopPublished)}</span>
+              </li>
+              <li className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-2 text-sm text-text-primary">
+                  <BrandLogo id="mercadolivre" name="Mercado Livre" size={22} />
+                  Mercado Livre
+                </span>
+                <span className="text-sm font-semibold tabular-nums text-text-primary">{formatCount(mercadoLivrePublished)}</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+        {syncNotice && <p className="mt-3 text-xs text-text-muted" role="status">{syncNotice}</p>}
+      </section>
 
       <section className="mt-8">
         <h2 className="text-lg font-bold text-text-primary">Ciclo do catálogo</h2>
-        <p className="mt-1 text-xs text-text-muted">Do ERP até a Nuvemshop. A publicação fica bloqueada no modo simulação.</p>
-        <div className="mt-4">
-          <OnboardingFunnel
-            steps={[
-              {
-                title: 'Importar ERP',
-                detail: products > 0 ? `${formatCount(products)} produtos lidos do Bling` : 'Nenhum produto importado',
-                percent: products > 0 ? 100 : 0,
-                state: products > 0 ? 'done' : 'active',
-              },
-              {
-                title: 'Enriquecer dados',
-                detail: readyToPublish === 1
-                  ? '1 produto atingiu o mínimo para publicação'
-                  : `${formatCount(readyToPublish)} produtos atingiram o mínimo para publicação`,
-                metric: `Score médio: ${averageScore}/100`,
-                subtext: readyToPublish === 1
-                  ? '1 produto atingiu o mínimo para publicação'
-                  : `${formatCount(readyToPublish)} produtos atingiram o mínimo para publicação`,
-                percent: averageScore,
-                state: averageScore >= 100 ? 'done' : 'active',
-              },
-              {
-                title: 'Publicar na Nuvemshop',
-                detail: 'Aguardando aprovação de conteúdo',
-                subtext: 'Aguardando aprovação de conteúdo',
-                percent: shadow ? 0 : coverage,
-                state: shadow ? 'blocked' : coverage >= 100 ? 'done' : 'active',
-              },
-            ]}
+        <div className="mt-4 rounded-xl border border-border-color bg-bg-surface p-5">
+          <CatalogCycle
+            imported={products > 0}
+            enriching={enrichmentLive || enriching}
+            shadow={shadow}
+            canContinue={hasRole('admin')}
+            continuing={enriching}
+            onContinue={() => void startEnrichment()}
           />
         </div>
       </section>
@@ -465,10 +413,7 @@ export default function HomePage() {
       {state && (
         <section className="mt-8 rounded-xl border border-border-color bg-bg-surface p-5">
           <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
-            <div className="flex items-center gap-2">
-              <Activity className="h-4 w-4 text-text-muted" />
-              <h2 className="text-base font-bold text-text-primary">Atividade recente</h2>
-            </div>
+            <h2 className="text-base font-bold text-text-primary">Atividade recente</h2>
             <Link href="/auditoria" className="text-xs text-text-muted underline">Ver auditoria</Link>
           </div>
           <div className="mt-4 overflow-x-auto">
@@ -493,10 +438,17 @@ export default function HomePage() {
                 {state.recentWebhooks.map((wh) => (
                   <tr key={wh.id}>
                     <td className="py-2.5 pr-4 font-semibold uppercase text-text-primary">{wh.source}</td>
-                    <td className="py-2.5 px-4 font-mono text-text-muted">{wh.event_type}</td>
+                    <td className="py-2.5 px-4 text-text-primary">{formatEvent(wh.event_type)}</td>
                     <td className="py-2.5 px-4 font-mono text-text-primary">{wh.resource_id}</td>
-                    <td className="py-2.5 px-4 text-text-muted">
-                      {formatActivityResult(wh.status, wh.ignore_reason)}
+                    <td className="py-2.5 px-4">
+                      {(() => {
+                        const badge = activityBadge(wh.status, wh.ignore_reason);
+                        return (
+                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${badge.className}`}>
+                            {badge.label}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="py-2.5 pl-4 text-right text-text-muted">
                       {wh.processed_at ? new Date(wh.processed_at).toLocaleString('pt-BR') : 'Na fila'}

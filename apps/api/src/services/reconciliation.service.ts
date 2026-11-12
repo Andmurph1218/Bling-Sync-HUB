@@ -1,4 +1,5 @@
 import { refreshMissingCommerce } from '../catalog/full-sync.js';
+import { productsWithSellerWarehouse } from '../catalog/warehouse-stock.js';
 import { createErpConnector, getMarketplaceConnector } from '../connectors/strategy/factory.js';
 import { MarketplaceListing, MasterProduct } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
@@ -31,7 +32,8 @@ interface HubRow {
 
 export interface ReconcileOptions {
   limit?: number;
-  offset?: number;
+  /** Cursor exclusivo. A próxima página começa depois deste id. */
+  afterId?: string;
   sku?: string;
 }
 
@@ -45,18 +47,25 @@ function asNumber(value: string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-async function linkIfMissing(productId: string, marketplace: string, listing: MarketplaceListing): Promise<void> {
-  const existing = await query(
-    `SELECT 1 FROM channel_listing_links WHERE product_id = $1 AND channel = $2 LIMIT 1`,
-    [productId, marketplace]
-  );
-  if (existing.rows[0]) return;
-  await query(
-    `INSERT INTO channel_listing_links (product_id, channel, listing_id, listing_title, listing_price, listing_status, link_status)
-     VALUES ($1, $2, $3, $4, $5, $6, 'vinculado')
-     ON CONFLICT (product_id, channel) DO NOTHING`,
-    [productId, marketplace, listing.externalId, listing.title, listing.price, listing.status]
-  );
+async function linkIfMissing(productId: string, marketplace: string, listing: MarketplaceListing): Promise<boolean> {
+  try {
+    const inserted = await query(
+      `INSERT INTO channel_listing_links (product_id, channel, listing_id, listing_title, listing_price, listing_status, link_status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'vinculado')
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
+      [productId, marketplace, listing.externalId, listing.title, listing.price, listing.status]
+    );
+    return (inserted.rowCount ?? 0) > 0;
+  } catch (error) {
+    logger.warn('Conflito de vínculo ignorado', {
+      productId,
+      marketplace,
+      listingId: listing.externalId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
 }
 
 async function saveSnapshot(
@@ -83,7 +92,7 @@ async function saveSnapshot(
   );
 }
 
-function compare(row: HubRow, marketplace: string, listing: MarketplaceListing): Array<{
+function compare(row: HubRow, marketplace: string, listing: MarketplaceListing, compareStock: boolean): Array<{
   kind: 'price' | 'stock' | 'enrichment';
   message: string;
   hubValue: string;
@@ -104,7 +113,7 @@ function compare(row: HubRow, marketplace: string, listing: MarketplaceListing):
       channelValue: String(listing.price),
     });
   }
-  if (hubStock !== null && listing.stock !== null && hubStock !== listing.stock) {
+  if (compareStock && hubStock !== null && listing.stock !== null && hubStock !== listing.stock) {
     const sold = hubStock > listing.stock ? ` Vendeu ${hubStock - listing.stock} no ${short}, estoque no Bling não baixou.` : '';
     alerts.push({
       kind: 'stock',
@@ -147,20 +156,36 @@ async function skusFor(productId: string, fallback: string): Promise<string[]> {
 export async function reconcileListings(
   read: ListingReader = defaultReader,
   options: ReconcileOptions = {}
-): Promise<{ snapshots: number; alerts: number; linked: number; scanned: number }> {
+): Promise<{ snapshots: number; alerts: number; linked: number; scanned: number; lastId: string | null }> {
   const limit = options.limit ?? READY_LIMIT;
-  const offset = options.offset ?? 0;
-  const sku = options.sku?.trim();
+  const afterId = options.afterId?.trim() ?? '';
+  const sku = options.sku?.trim() ?? '';
+  const page = await query<{ id: string }>(
+    `SELECT mp.id
+     FROM master_products mp
+     WHERE mp.catalog_status = 'active' AND mp.archived_at IS NULL
+       AND trim(mp.erp_sku) <> ''
+       AND ($1 = '' OR mp.id::text > $1)
+       AND (
+         $2 = ''
+         OR mp.erp_sku = $2
+         OR mp.id IN (SELECT master_product_id FROM product_variants WHERE erp_sku = $2)
+       )
+     ORDER BY mp.id::text ASC
+     LIMIT $3`,
+    [afterId, sku, limit]
+  );
+  const ids = page.rows.map((row) => row.id);
+  const lastId = ids[ids.length - 1] ?? null;
+  if (ids.length === 0) return { snapshots: 0, alerts: 0, linked: 0, scanned: 0, lastId: null };
+  const idList = ids.map((_, index) => `$${index + 1}`).join(', ');
   const found = await query<Omit<HubRow, 'image_count'> & { is_default: boolean; variant_sku: string | null }>(
     `SELECT mp.id, mp.erp_id, mp.erp_sku, pv.erp_sku AS variant_sku, pv.is_default,
             pv.ean, pv.price::text AS price, pv.stock::text AS stock
      FROM master_products mp
      INNER JOIN product_variants pv ON pv.master_product_id = mp.id
-     WHERE mp.catalog_status = 'active' AND mp.archived_at IS NULL
-       AND trim(mp.erp_sku) <> ''
-       AND ($1 = '' OR mp.erp_sku = $1 OR pv.erp_sku = $1)
-     ORDER BY mp.updated_at DESC`,
-    [sku && sku.length > 0 ? sku : '']
+     WHERE mp.id IN (${idList})`,
+    ids
   );
   const chosen = new Map<string, Omit<HubRow, 'image_count'>>();
   for (const row of found.rows) {
@@ -176,14 +201,19 @@ export async function reconcileListings(
       chosen.set(row.id, candidate);
     }
   }
-  const products = { rows: [...chosen.values()].slice(offset, offset + limit) };
+  const products = { rows: ids.flatMap((id) => {
+    const row = chosen.get(id);
+    return row ? [row] : [];
+  }) };
   const covers = await query<{ master_product_id: string; image_count: number }>(
     `SELECT master_product_id, count(*)::int AS image_count
      FROM product_images
-     WHERE is_cover_eligible = true
-     GROUP BY master_product_id`
+     WHERE is_cover_eligible = true AND master_product_id IN (${idList})
+     GROUP BY master_product_id`,
+    ids
   );
   const imagesByProduct = new Map(covers.rows.map((row) => [row.master_product_id, Number(row.image_count) || 0]));
+  const sellerProducts = await productsWithSellerWarehouse(products.rows.map((row) => row.id));
   let snapshots = 0;
   let alerts = 0;
   let linked = 0;
@@ -224,33 +254,30 @@ export async function reconcileListings(
         );
         continue;
       }
-      const before = await query(`SELECT 1 FROM channel_listing_links WHERE product_id = $1 AND channel = $2`, [row.id, channel]);
-      await linkIfMissing(row.id, channel, listing);
-      if (!before.rows[0]) linked += 1;
-      const found = compare(row, channel, listing);
+      if (await linkIfMissing(row.id, channel, listing)) linked += 1;
+      const found = compare(row, channel, listing, sellerProducts.has(row.id));
       await saveSnapshot(row.id, channel, listing, found.map((item) => ({ kind: item.kind, message: item.message })));
       snapshots += 1;
       alerts += found.length;
     }
   }
-  return { snapshots, alerts, linked, scanned: products.rows.length };
+  return { snapshots, alerts, linked, scanned: products.rows.length, lastId };
 }
 
-/** Percorre o catálogo em lotes. A leitura do canal não publica anúncio. */
+/** Percorre o catálogo em lotes pelo id. A leitura do canal não publica anúncio. */
 export async function reconcileAll(read: ListingReader = defaultReader): Promise<{ snapshots: number; alerts: number; linked: number }> {
-  let offset = 0;
+  let afterId = '';
   let snapshots = 0;
   let alerts = 0;
   let linked = 0;
   const page = 80;
-  for (;;) {
-    const result = await reconcileListings(read, { limit: page, offset });
+  for (let guard = 0; guard < 250; guard += 1) {
+    const result = await reconcileListings(read, { limit: page, afterId });
     snapshots += result.snapshots;
     alerts += result.alerts;
     linked += result.linked;
-    if (result.scanned < page) break;
-    offset += page;
-    if (offset >= 20000) break;
+    if (result.scanned < page || !result.lastId) break;
+    afterId = result.lastId;
   }
   return { snapshots, alerts, linked };
 }

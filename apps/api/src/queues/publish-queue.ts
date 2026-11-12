@@ -5,7 +5,8 @@ import { ListingDraft } from '../connectors/strategy/types.js';
 import { getMarketplaceConnector } from '../connectors/strategy/factory.js';
 import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
-import { buildPublishPreview, checklistForChannel, PublishChannel } from '../catalog/publish-preview.js';
+import { EXISTING_LISTING_MESSAGE } from '../catalog/completeness.js';
+import { buildPublishPreview, checklistForChannel, linkedListingExternalId, PublishChannel } from '../catalog/publish-preview.js';
 
 export const PUBLISH_QUEUE_NAME = 'publish-marketplace';
 export const DRY_RUN_LOG = 'simulado com sucesso';
@@ -90,6 +91,11 @@ export async function processPublishQueueItem(
     if (!checklist?.ready) {
       const pending = checklist?.items.filter((item) => !item.ok).map((item) => item.title).join('; ');
       await mark(id, 'failed', pending || 'Checklist incompleto no canal.');
+      return;
+    }
+    const externalId = await linkedListingExternalId(row.product_id, row.channel);
+    if (externalId) {
+      await mark(id, 'failed', EXISTING_LISTING_MESSAGE);
       return;
     }
     const live = hooks?.live ?? isLivePublishingEnabled();

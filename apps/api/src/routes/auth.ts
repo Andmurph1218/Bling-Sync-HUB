@@ -6,6 +6,8 @@ import { extractOpaqueToken, requireAuth, requireRole } from '../auth/middleware
 import { DefaultPasswordRejectedError } from '../auth/password-policy.js';
 import { authenticateUser, changeOwnPassword, completeMfaLogin, createUser, revokeSessionByToken } from '../auth/service.js';
 import { ROLES } from '../auth/types.js';
+import { recomputeVariantStockFromBalances } from '../catalog/warehouse-stock.js';
+import { logger } from '../lib/logger.js';
 
 export const authRouter = Router();
 
@@ -28,7 +30,7 @@ const createUserSchema = z.object({
 
 const updateWarehouseControlSchema = z.object({
   name: z.string().min(1),
-  role: z.enum(['unclassified', 'seller', 'ml_full', 'other']),
+  role: z.enum(['unclassified', 'seller', 'ml_full', 'damaged', 'other']),
   include_in_push: z.boolean(),
 });
 
@@ -204,9 +206,10 @@ authRouter.post(
  * Rota administrativa de classificação de depósito (Seção 6 e 9.1):
  * Operador e aprovador fiscal recebem 403.
  * A mudança e o registro em control_changes ocorrem na mesma transação.
+ * O caminho sob /api é o que o Dashboard usa, porque só /api passa pelo proxy do Next.
  */
 authRouter.put(
-  '/admin/controls/warehouses/:warehouseId',
+  ['/admin/controls/warehouses/:warehouseId', '/api/admin/warehouses/:warehouseId'],
   requireRole('admin'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -285,7 +288,16 @@ authRouter.put(
         };
       });
 
-      res.status(200).json({ warehouse: updated });
+      let recomputedVariants: number | null = null;
+      try {
+        recomputedVariants = await recomputeVariantStockFromBalances();
+      } catch (error) {
+        logger.error('Recálculo de estoque após classificar depósito falhou; o próximo sync corrige', {
+          warehouseId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      res.status(200).json({ warehouse: updated, recomputedVariants });
     } catch (error) {
       next(error);
     }

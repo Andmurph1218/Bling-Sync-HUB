@@ -8,7 +8,6 @@ import {
   Boxes,
   GitCompare,
   ClipboardList,
-  Send,
   TrendingUp,
   Sliders,
   Store,
@@ -22,6 +21,7 @@ import {
   LogOut,
   Loader2,
   Settings,
+  Warehouse,
 } from 'lucide-react';
 import { apiFetch } from '../utils/api-client';
 import { ThemeToggle } from './theme-toggle';
@@ -124,35 +124,38 @@ interface NavItem {
   permission?: string;
   anyPermission?: string[];
   isSubItem?: boolean;
+  group: 'operacao' | 'integracoes' | 'qualidade' | 'sistema';
 }
 
-/**
- * Arquitetura de Navegação nas 8 Áreas Operacionais (Seção 4 de docs/bling_sync_hub_evolucao_dashboard.md),
- * filtrada pelos papéis reais da sessão.
- */
+const NAV_GROUPS: Array<{ id: NavItem['group']; label: string }> = [
+  { id: 'operacao', label: 'Operação' },
+  { id: 'integracoes', label: 'Integrações' },
+  { id: 'qualidade', label: 'Qualidade de Dados' },
+  { id: 'sistema', label: 'Sistema' },
+];
+
 const NAV_ITEMS: NavItem[] = [
-  { href: '/', label: 'Início', shortLabel: 'Início', icon: LayoutDashboard, allowedRoles: ['admin', 'fiscal_approver', 'operator', 'viewer'] },
-  { href: '/catalogo', label: 'Catálogo', shortLabel: 'Catálogo', icon: Boxes, allowedRoles: ['admin', 'fiscal_approver', 'operator', 'viewer'] },
-  { href: '/completude', label: 'Completude', shortLabel: 'Completude', icon: ClipboardList, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
-  { href: '/problemas', label: 'Problemas', shortLabel: 'Problemas', icon: AlertTriangle, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
-  { href: '/atributos', label: 'Atributos', shortLabel: 'Atributos', icon: Tags, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
-  { href: '/fiscal', label: 'Fiscal', shortLabel: 'Fiscal', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'], anyPermission: ['fiscal:approve_ean', 'fiscal:approve_ncm'] },
-  { href: '/fiscal/ean', label: 'Código de barras', shortLabel: 'EAN', icon: Barcode, allowedRoles: ['admin', 'fiscal_approver'], permission: 'fiscal:approve_ean', isSubItem: true },
-  { href: '/admin/imports', label: 'Importações', shortLabel: 'Imports', icon: ClipboardList, allowedRoles: ['admin'], isSubItem: true },
-  { href: '/fiscal/ncm', label: 'Classificação fiscal', shortLabel: 'NCM', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'], permission: 'fiscal:approve_ncm', isSubItem: true },
-  { href: '/qualidade-margem', label: 'Saúde e margem', shortLabel: 'Margem', icon: TrendingUp, allowedRoles: ['admin', 'fiscal_approver', 'operator'], isSubItem: true },
-  { href: '/publicacoes', label: 'Publicações', shortLabel: 'Publicar', icon: Send, allowedRoles: ['admin', 'operator'], anyPermission: ['push:simulate', 'push:execute'] },
-  { href: '/vinculos', label: 'Vínculos', shortLabel: 'Vínculos', icon: GitCompare, allowedRoles: ['admin', 'operator'] },
-  { href: '/canais', label: 'Canais', shortLabel: 'Canais', icon: Sliders, allowedRoles: ['admin', 'operator'] },
-  { href: '/integracoes', label: 'Integrações', shortLabel: 'Integrações', icon: Store, allowedRoles: ['admin', 'operator'] },
-  { href: '/admin/integracoes', label: 'Loja de apps', shortLabel: 'Loja', icon: Store, allowedRoles: ['admin'] },
-  { href: '/auditoria', label: 'Auditoria', shortLabel: 'Auditoria', icon: History, allowedRoles: ['admin', 'fiscal_approver'], permission: 'audit:read' },
-  { href: '/configuracoes', label: 'Configurações', shortLabel: 'Config.', icon: Settings, allowedRoles: ['admin'], anyPermission: ['settings:manage_general', 'settings:manage_users', 'settings:manage_notifications', 'settings:manage_webhooks', 'settings:manage_security'] },
-  { href: '/configuracoes/geral', label: 'Geral', shortLabel: 'Geral', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_general', isSubItem: true },
-  { href: '/configuracoes/usuarios', label: 'Usuários', shortLabel: 'Usuários', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_users', isSubItem: true },
-  { href: '/configuracoes/notificacoes', label: 'Notificações', shortLabel: 'Alertas', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_notifications', isSubItem: true },
-  { href: '/configuracoes/webhooks', label: 'Webhooks e chaves', shortLabel: 'Chaves', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_webhooks', isSubItem: true },
-  { href: '/configuracoes/seguranca', label: 'Segurança', shortLabel: 'Segurança', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_security', isSubItem: true },
+  { group: 'operacao', href: '/', label: 'Início', shortLabel: 'Início', icon: LayoutDashboard, allowedRoles: ['admin', 'fiscal_approver', 'operator', 'viewer'] },
+  { group: 'operacao', href: '/catalogo', label: 'Catálogo', shortLabel: 'Catálogo', icon: Boxes, allowedRoles: ['admin', 'fiscal_approver', 'operator', 'viewer'] },
+  { group: 'operacao', href: '/completude', label: 'Completude', shortLabel: 'Completude', icon: ClipboardList, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { group: 'operacao', href: '/problemas', label: 'Problemas', shortLabel: 'Problemas', icon: AlertTriangle, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { group: 'integracoes', href: '/canais', label: 'Canais', shortLabel: 'Canais', icon: Sliders, allowedRoles: ['admin', 'operator'] },
+  { group: 'integracoes', href: '/canais/depositos', label: 'Depósitos', shortLabel: 'Depósitos', icon: Warehouse, allowedRoles: ['admin', 'operator'], isSubItem: true },
+  { group: 'integracoes', href: '/vinculos', label: 'Vínculos', shortLabel: 'Vínculos', icon: GitCompare, allowedRoles: ['admin', 'operator'] },
+  { group: 'integracoes', href: '/admin/integracoes', label: 'Loja de Apps', shortLabel: 'Loja', icon: Store, allowedRoles: ['admin'] },
+  { group: 'qualidade', href: '/atributos', label: 'Atributos', shortLabel: 'Atributos', icon: Tags, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { group: 'qualidade', href: '/fiscal', label: 'Fiscal', shortLabel: 'Fiscal', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'], anyPermission: ['fiscal:approve_ean', 'fiscal:approve_ncm'] },
+  { group: 'qualidade', href: '/fiscal/ean', label: 'Código de barras', shortLabel: 'EAN', icon: Barcode, allowedRoles: ['admin', 'fiscal_approver'], permission: 'fiscal:approve_ean', isSubItem: true },
+  { group: 'qualidade', href: '/fiscal/ncm', label: 'Classificação fiscal', shortLabel: 'NCM', icon: FileCheck2, allowedRoles: ['admin', 'fiscal_approver'], permission: 'fiscal:approve_ncm', isSubItem: true },
+  { group: 'qualidade', href: '/admin/imports', label: 'Importações', shortLabel: 'Imports', icon: ClipboardList, allowedRoles: ['admin'] },
+  { group: 'qualidade', href: '/qualidade-margem', label: 'Saúde e margem', shortLabel: 'Margem', icon: TrendingUp, allowedRoles: ['admin', 'fiscal_approver', 'operator'] },
+  { group: 'sistema', href: '/auditoria', label: 'Auditoria', shortLabel: 'Auditoria', icon: History, allowedRoles: ['admin', 'fiscal_approver'], permission: 'audit:read' },
+  { group: 'sistema', href: '/configuracoes', label: 'Configurações', shortLabel: 'Config.', icon: Settings, allowedRoles: ['admin'], anyPermission: ['settings:manage_general', 'settings:manage_users', 'settings:manage_notifications', 'settings:manage_webhooks', 'settings:manage_security'] },
+  { group: 'sistema', href: '/configuracoes/geral', label: 'Geral', shortLabel: 'Geral', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_general', isSubItem: true },
+  { group: 'sistema', href: '/configuracoes/usuarios', label: 'Usuários', shortLabel: 'Usuários', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_users', isSubItem: true },
+  { group: 'sistema', href: '/configuracoes/notificacoes', label: 'Notificações', shortLabel: 'Alertas', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_notifications', isSubItem: true },
+  { group: 'sistema', href: '/configuracoes/webhooks', label: 'Webhooks e chaves', shortLabel: 'Chaves', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_webhooks', isSubItem: true },
+  { group: 'sistema', href: '/configuracoes/seguranca', label: 'Segurança', shortLabel: 'Segurança', icon: Settings, allowedRoles: ['admin'], permission: 'settings:manage_security', isSubItem: true },
 ];
 
 interface OauthRow {
@@ -314,32 +317,44 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
           </div>
 
-          <nav aria-label="Navegação principal" className="flex-1 space-y-1 overflow-y-auto p-3">
-            {!collapsed && (
-              <p className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
-                Navegação ({user.roleLabel})
-              </p>
-            )}
-            {visibleNavItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
+          <nav aria-label="Navegação principal" className="flex-1 space-y-4 overflow-y-auto p-3">
+            {NAV_GROUPS.map((group) => {
+              const items = visibleNavItems.filter((item) => item.group === group.id);
+              if (items.length === 0) return null;
               return (
-                <Link
-                  key={`${item.href}-${item.label}`}
-                  href={item.href}
-                  title={collapsed ? item.label : undefined}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-                    item.isSubItem && !collapsed ? 'ml-3 border-l border-border-color pl-3' : ''
-                  } ${
-                    isActive
-                      ? 'border border-border-color/80 bg-bg-surface/90 text-text-primary shadow-sm'
-                      : 'text-text-muted hover:bg-bg-surface hover:text-text-primary'
-                  }`}
-                >
-                  <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-emerald-400' : 'text-text-muted'}`} />
-                  {!collapsed && <span>{item.label}</span>}
-                </Link>
+                <div key={group.id}>
+                  {!collapsed && (
+                    <p className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                      {group.label}
+                    </p>
+                  )}
+                  <div className="space-y-1">
+                    {items.map((item) => {
+                      const Icon = item.icon;
+                      const isActive = item.href === '/' ? pathname === '/' : pathname === item.href || (item.href !== '/fiscal' && item.href !== '/configuracoes' && pathname.startsWith(item.href));
+                      const parentActive = (item.href === '/fiscal' || item.href === '/configuracoes') && pathname.startsWith(item.href);
+                      const current = isActive || parentActive;
+                      return (
+                        <Link
+                          key={`${item.href}-${item.label}`}
+                          href={item.href}
+                          title={collapsed ? item.label : undefined}
+                          aria-current={current && pathname === item.href ? 'page' : undefined}
+                          className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                            item.isSubItem && !collapsed ? 'ml-4' : ''
+                          } ${
+                            pathname === item.href
+                              ? 'bg-bg-base text-text-primary'
+                              : 'text-text-muted hover:bg-bg-base/70 hover:text-text-primary'
+                          }`}
+                        >
+                          <Icon className={`h-4 w-4 shrink-0 ${pathname === item.href ? 'text-emerald-600 dark:text-emerald-400' : 'text-text-muted'}`} />
+                          {!collapsed && <span>{item.label}</span>}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })}
           </nav>
@@ -406,7 +421,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav aria-label="Navegação móvel" className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden items-center justify-around border-t border-border-color bg-bg-surface/95 px-2 py-2 backdrop-blur">
-          {visibleNavItems.filter((item) => !item.isSubItem).slice(0, 5).map((item) => {
+          {visibleNavItems.filter((item) => item.group === 'operacao').map((item) => {
             const Icon = item.icon;
             const isActive = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
             return (

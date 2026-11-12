@@ -123,6 +123,10 @@ export default function AuditoriaPage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-text-primary">Centro de auditoria e compliance</h1>
           <p className="mt-1 text-sm text-text-muted">O que mudou, quem fez e qual foi o resultado.</p>
+          <details className="mt-3 text-xs text-text-muted">
+            <summary className="cursor-pointer font-semibold text-text-primary">Siglas técnicas</summary>
+            <p className="mt-2 max-w-xl">PIRE é o vínculo do anúncio. GVE valida o código de barras. NVE valida o NCM. CRE mede a prontidão do conteúdo.</p>
+          </details>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-800 dark:text-emerald-200">
           <Lock className="h-3.5 w-3.5" />

@@ -20,11 +20,13 @@ export interface InboundProduct {
   id: number | string;
   codigo: string;
   nome: string;
-  preco: number;
+  preco?: number;
   precoCusto?: number;
   tipo: string;
   situacao: string;
   formato: string;
+  /** Data de alteração no Bling. O sync não pisa num webhook mais novo que isto. */
+  dataAlteracao?: string;
   gtin?: string;
   pesoLiquido?: number;
   pesoBruto?: number;

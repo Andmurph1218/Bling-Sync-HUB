@@ -5,7 +5,7 @@ import { newDb, DataType } from 'pg-mem';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { createUser } from '../auth/service.js';
-import { blingRejectionMessage, setBlingProductWriterForTests } from '../connectors/bling/bling-erp.js';
+import { BlingPostTimeoutError, SkuAlreadyInBlingError, blingRejectionMessage, setBlingProductWriterForTests } from '../connectors/bling/bling-erp.js';
 import { STOCK_LAUNCH_WARNING } from '../connectors/strategy/types.js';
 import { ErpRejectedError } from '../connectors/strategy/types.js';
 import { DbPoolLike, query, setPool } from '../db/pool.js';
@@ -189,8 +189,9 @@ describe('catálogo — anti-duplicação e planilha', () => {
     expect(String(created.body.erpId).startsWith('local-')).toBe(false);
     expect(received).toEqual({ name: 'Luminária nova', sku: 'NOVO-BLING', price: 12.5, stock: 3 });
 
-    const saved = await query<{ erp_id: string; description: string | null; price: string; stock: string }>(
-      `SELECT mp.erp_id, mp.description, pv.price::text AS price, pv.stock::text AS stock
+    const saved = await query<{ erp_id: string; description: string | null; price: string; stock: string | null; catalog_stock: string }>(
+      `SELECT mp.erp_id, mp.description, pv.price::text AS price, pv.stock::text AS stock,
+              pv.catalog_stock::text AS catalog_stock
        FROM master_products mp
        INNER JOIN product_variants pv ON pv.master_product_id = mp.id
        WHERE mp.erp_sku = 'NOVO-BLING'`
@@ -198,7 +199,8 @@ describe('catálogo — anti-duplicação e planilha', () => {
     expect(saved.rows[0]?.erp_id).toBe('99887766');
     expect(saved.rows[0]?.description).toBeNull();
     expect(Number(saved.rows[0]?.price)).toBe(12.5);
-    expect(Number(saved.rows[0]?.stock)).toBe(3);
+    expect(Number(saved.rows[0]?.catalog_stock)).toBe(3);
+    expect(saved.rows[0]?.stock).toBeNull();
 
     setBlingProductWriterForTests({
       create: async () => ({ erp_id: '99887767', stockWarning: STOCK_LAUNCH_WARNING }),
@@ -218,5 +220,33 @@ describe('catálogo — anti-duplicação e planilha', () => {
       `SELECT erp_id FROM master_products WHERE erp_sku = 'NOVO-ESTOQUE'`
     );
     expect(kept.rows[0]?.erp_id).toBe('99887767');
+
+    setBlingProductWriterForTests({
+      create: async () => {
+        throw new SkuAlreadyInBlingError('JA-TEM');
+      },
+    });
+    const duplicate = await request(app)
+      .post('/api/catalog/products')
+      .set('Cookie', cookie)
+      .send({ sku: 'JA-TEM', name: 'Já cadastrado', price: 5, stock: 1 });
+    expect(duplicate.status).toBe(409);
+    expect(duplicate.body.message).toBe('O SKU JA-TEM já existe no Bling. A criação foi cancelada. Verifique o cadastro no ERP.');
+    const notCreated = await query(`SELECT id FROM master_products WHERE erp_sku = 'JA-TEM'`);
+    expect(notCreated.rowCount).toBe(0);
+
+    setBlingProductWriterForTests({
+      create: async () => {
+        throw new BlingPostTimeoutError();
+      },
+    });
+    const unconfirmed = await request(app)
+      .post('/api/catalog/products')
+      .set('Cookie', cookie)
+      .send({ sku: 'TIMEOUT-SKU', name: 'Sem confirmação', price: 5, stock: 1 });
+    expect(unconfirmed.status).toBe(422);
+    expect(unconfirmed.body.message).toContain('Verifique no Bling se o produto foi cadastrado.');
+    const notSaved = await query(`SELECT id FROM master_products WHERE erp_sku = 'TIMEOUT-SKU'`);
+    expect(notSaved.rowCount).toBe(0);
   });
 });

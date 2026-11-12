@@ -18,6 +18,7 @@ import { usersAdminRouter } from './routes/users-admin.js';
 import { duplicatesRouter } from './routes/duplicates.js';
 import { reconciliationRouter } from './routes/reconciliation.js';
 import { reportsRouter } from './routes/reports.js';
+import { warehousesRouter } from './routes/warehouses.js';
 import { logger } from './lib/logger.js';
 import { loadConnectors } from './connectors/load.js';
 
@@ -55,6 +56,7 @@ export function createApp(): Express {
   app.use(duplicatesRouter);
   app.use(reconciliationRouter);
   app.use(reportsRouter);
+  app.use(warehousesRouter);
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     const message = err instanceof Error ? err.message : 'Erro interno do servidor';

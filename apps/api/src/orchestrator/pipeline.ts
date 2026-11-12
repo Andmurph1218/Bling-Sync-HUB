@@ -4,6 +4,7 @@
 
 import { PoolClient } from 'pg';
 import { query, withTransaction } from '../db/pool.js';
+import { catalogPriceOrNull } from '../connectors/bling/mappers.js';
 import { InboundProduct } from '../connectors/strategy/inbound.js';
 import { loadConnectors } from '../connectors/load.js';
 import {
@@ -49,6 +50,29 @@ export interface UpsertCatalogFromBlingResult {
   variantIdsBySku: Record<string, string>;
 }
 
+export function blingChangedAt(payload: { dataAlteracao?: string | null }): Date | null {
+  if (!payload.dataAlteracao) return null;
+  const date = new Date(payload.dataAlteracao);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** O webhook grava last_bling_sync com o relógio do HUB. Um snapshot mais antigo não pode voltar. */
+export function isNewerHubSync(changedAt: Date | null, lastBlingSync: Date | string | null): boolean {
+  if (!changedAt || lastBlingSync == null) return false;
+  const sync = lastBlingSync instanceof Date ? lastBlingSync : new Date(lastBlingSync);
+  return !Number.isNaN(sync.getTime()) && sync.getTime() > changedAt.getTime();
+}
+
+function incomingPrice(payload: InboundProduct, sku: string, isDefault: boolean): number | null {
+  const match = (payload.variacoes ?? []).find((row) => row.codigo === sku);
+  if (match) {
+    if ('preco' in match) return catalogPriceOrNull(match.preco);
+    return catalogPriceOrNull(payload.preco);
+  }
+  if (isDefault) return catalogPriceOrNull(payload.preco);
+  return null;
+}
+
 /**
  * Faz o upsert completo de um produto do Bling (simples S, variação V ou kit E) no banco local,
  * respeitando a regra de que product_variants.stock nasce NULL até a leitura de GET /estoques/saldos.
@@ -67,13 +91,19 @@ export async function upsertCatalogProductFromBlingPayload(
   }
 
   const p = mapped.product;
+  const changedAt = blingChangedAt(payload);
   return withTransaction(async (client: PoolClient) => {
+    const previous = await client.query<{ last_bling_sync: Date | null }>(
+      `SELECT last_bling_sync FROM master_products WHERE erp_id = $1`,
+      [p.erp_id]
+    );
+    const stale = isNewerHubSync(changedAt, previous.rows[0]?.last_bling_sync ?? null);
     const prodRes = await client.query<{ id: string }>(
       `INSERT INTO master_products (
          erp_id, erp_sku, ncm, cest, tax_origin, unit, requires_cest,
          bling_tipo, product_format, name, description, short_description,
          brand, category, catalog_status, last_bling_snapshot, last_bling_sync, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, now(), now())
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, COALESCE($17, now()), now())
        ON CONFLICT (erp_id) DO UPDATE
          SET erp_sku = EXCLUDED.erp_sku,
              ncm = COALESCE(master_products.ncm, EXCLUDED.ncm),
@@ -89,8 +119,12 @@ export async function upsertCatalogProductFromBlingPayload(
              brand = EXCLUDED.brand,
              category = EXCLUDED.category,
              catalog_status = EXCLUDED.catalog_status,
-             last_bling_snapshot = EXCLUDED.last_bling_snapshot,
-             last_bling_sync = now(),
+             last_bling_snapshot = CASE WHEN $18 THEN master_products.last_bling_snapshot ELSE EXCLUDED.last_bling_snapshot END,
+             last_bling_sync = CASE
+               WHEN $18 THEN master_products.last_bling_sync
+               WHEN $17 IS NOT NULL THEN $17
+               ELSE now()
+             END,
              updated_at = now()
        RETURNING id`,
       [
@@ -110,6 +144,8 @@ export async function upsertCatalogProductFromBlingPayload(
         p.category,
         p.catalog_status,
         JSON.stringify(payload),
+        changedAt ? changedAt.toISOString() : null,
+        stale,
       ]
     );
 
@@ -124,6 +160,7 @@ export async function upsertCatalogProductFromBlingPayload(
     );
 
     for (const v of p.variants) {
+      const price = incomingPrice(payload, v.erp_sku, v.is_default);
       const varRes = await client.query<{ id: string }>(
         `INSERT INTO product_variants (
            master_product_id, bling_variant_id, erp_sku, is_default,
@@ -132,11 +169,15 @@ export async function upsertCatalogProductFromBlingPayload(
            ean, is_active, variant_status, last_bling_sync, updated_at
          ) VALUES (
            $1, $2, $3, $4, $5, $6, $7, $8, NULL,
-           $9, $10, $11, $12, $13, $14, $15, $16, now(), now()
+           $9, $10, $11, $12, $13, $14, $15, $16, COALESCE($17, now()), now()
          )
          ON CONFLICT (master_product_id, erp_sku) DO UPDATE
-           SET price = EXCLUDED.price,
-               cost_price = EXCLUDED.cost_price,
+           SET price = CASE
+                 WHEN $18 THEN product_variants.price
+                 WHEN $7 IS NULL THEN product_variants.price
+                 ELSE EXCLUDED.price
+               END,
+               cost_price = CASE WHEN $18 THEN product_variants.cost_price ELSE EXCLUDED.cost_price END,
                net_weight = COALESCE(product_variants.net_weight, EXCLUDED.net_weight),
                gross_weight = COALESCE(product_variants.gross_weight, EXCLUDED.gross_weight),
                width = COALESCE(product_variants.width, EXCLUDED.width),
@@ -144,7 +185,11 @@ export async function upsertCatalogProductFromBlingPayload(
                depth = COALESCE(product_variants.depth, EXCLUDED.depth),
                is_active = EXCLUDED.is_active,
                variant_status = EXCLUDED.variant_status,
-               last_bling_sync = now(),
+               last_bling_sync = CASE
+                 WHEN $18 THEN product_variants.last_bling_sync
+                 WHEN $17 IS NOT NULL THEN $17
+                 ELSE now()
+               END,
                updated_at = now()
          RETURNING id`,
         [
@@ -154,7 +199,7 @@ export async function upsertCatalogProductFromBlingPayload(
           v.is_default,
           v.product_format,
           v.stock_mode,
-          v.price,
+          price,
           v.cost_price,
           v.net_weight,
           v.gross_weight,
@@ -164,6 +209,8 @@ export async function upsertCatalogProductFromBlingPayload(
           v.ean,
           v.is_active,
           v.variant_status,
+          changedAt ? changedAt.toISOString() : null,
+          stale,
         ]
       );
 
@@ -211,25 +258,24 @@ export async function upsertCatalogProductFromBlingPayload(
 }
 
 /**
- * Estoque visível no catálogo. Com depósito seller marcado para envio, usa só essa soma.
- * Sem essa classificação, mostra a soma virtual dos depósitos que não são Full,
- * para a coluna não ficar vazia depois do sync.
+ * Estoque de exibição do catálogo: soma virtual dos depósitos que não são Full nem avaria.
+ * Nunca é enviado aos canais; o envio usa product_variants.stock.
  */
-function catalogStockFromBalances(
+export function catalogStockFromBalances(
   balanceItem: StockBalanceItem,
-  warehouses: WarehouseConfig[],
-  computed: { variantStockColumn: number; emptySellerPushWarehousesAlert: boolean }
+  warehouses: WarehouseConfig[]
 ): number {
-  if (!computed.emptySellerPushWarehousesAlert) return computed.variantStockColumn;
-  const fullIds = new Set(
-    warehouses.filter((row) => row.role === 'ml_full').map((row) => row.bling_warehouse_id)
+  const hidden = new Set(
+    warehouses
+      .filter((row) => row.role === 'ml_full' || row.role === 'damaged')
+      .map((row) => row.bling_warehouse_id)
   );
   const depositos = balanceItem.depositos ?? [];
   if (depositos.length === 0) {
     return Number(balanceItem.saldoVirtualTotal ?? 0);
   }
   const sum = depositos
-    .filter((row) => !fullIds.has(String(row.id)))
+    .filter((row) => !hidden.has(String(row.id)))
     .reduce((total, row) => total + Number(row.saldoVirtual ?? 0), 0);
   return Number(sum.toFixed(3));
 }
@@ -237,16 +283,32 @@ function catalogStockFromBalances(
 /**
  * Aplica a leitura de GET /estoques/saldos para uma variante (Seção 10.7):
  * - Grava variant_stock_balances por depósito.
- * - Na mesma transação, grava product_variants.stock com a soma apenas dos depósitos seller com include_in_push = true.
+ * - Na mesma transação, grava product_variants.stock com a soma apenas dos depósitos seller com include_in_push = true
+ *   e product_variants.catalog_stock com a soma de exibição.
  */
 export async function applyVariantStockBalancesFromBling(
   variantId: string,
-  balanceItem: StockBalanceItem
+  balanceItem: StockBalanceItem,
+  observedAt?: Date | null
 ): Promise<{
   variantStockColumn: number;
   publishableFloor: number;
 }> {
   return withTransaction(async (client: PoolClient) => {
+    if (observedAt) {
+      const current = await client.query<{ last_bling_sync: Date | null; stock: string | null }>(
+        `SELECT mp.last_bling_sync, pv.stock::text AS stock
+         FROM product_variants pv
+         INNER JOIN master_products mp ON mp.id = pv.master_product_id
+         WHERE pv.id = $1`,
+        [variantId]
+      );
+      const row = current.rows[0];
+      if (row && isNewerHubSync(observedAt, row.last_bling_sync)) {
+        const kept = row.stock === null ? 0 : Number(row.stock);
+        return { variantStockColumn: kept, publishableFloor: kept };
+      }
+    }
     const whRes = await client.query<WarehouseConfig>(
       `SELECT bling_warehouse_id, role, include_in_push FROM stock_warehouses`
     );
@@ -277,18 +339,19 @@ export async function applyVariantStockBalancesFromBling(
       );
     }
 
-    const stockValue = catalogStockFromBalances(balanceItem, whRes.rows, computed);
+    const catalogStock = catalogStockFromBalances(balanceItem, whRes.rows);
     await client.query(
       `UPDATE product_variants
        SET stock = $2,
+           catalog_stock = $3,
            updated_at = now()
        WHERE id = $1`,
-      [variantId, stockValue]
+      [variantId, computed.variantStockColumn, catalogStock]
     );
 
     return {
-      variantStockColumn: stockValue,
-      publishableFloor: Math.max(0, Math.floor(stockValue)),
+      variantStockColumn: computed.variantStockColumn,
+      publishableFloor: computed.publishableFloor,
     };
   });
 }
@@ -349,13 +412,14 @@ export async function runFullProductCatalogPipeline(
   }
 
   const masterProductId = upserted.masterProductId;
+  const observedAt = blingChangedAt(input.inboundPayload);
 
   // Saldos de depósito e preços de loja
   if (input.stockBalancesBySku) {
     for (const [sku, bal] of Object.entries(input.stockBalancesBySku)) {
       const varId = upserted.variantIdsBySku[sku];
       if (varId) {
-        await applyVariantStockBalancesFromBling(varId, bal);
+        await applyVariantStockBalancesFromBling(varId, bal, observedAt);
       }
     }
   }

@@ -12,6 +12,7 @@ import {
 } from './completeness.js';
 import { ACTIVE_CATALOG_CHANNELS, MERCADO_LIVRE_ACTIVE } from '../config/channels.js';
 import { ChannelIntegrationView, describeChannelIntegration } from './integration-status.js';
+import { productsWithSellerWarehouse } from './warehouse-stock.js';
 
 export type CatalogTab =
   | 'todos'
@@ -29,7 +30,10 @@ export interface CatalogListItem {
   brand: string | null;
   typeLabel: string;
   formato: string;
+  /** Soma de exibição (catalog_stock). Não é o valor enviado aos canais. */
   stock: number | null;
+  /** Soma dos depósitos de venda; é o que vai no payload de envio. */
+  publishableStock: number | null;
   price: number | null;
   promotionalPrice: number | null;
   coverUrl: string | null;
@@ -56,6 +60,7 @@ interface FlagRow {
   price: string | null;
   promotional_price: string | null;
   stock: string | null;
+  publishable_stock: string | null;
   ean_status: string | null;
   has_cover: boolean;
   cover_url: string | null;
@@ -75,6 +80,45 @@ function num(value: string | null): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function whole(value: string | null): number | null {
+  const parsed = num(value);
+  return parsed === null ? null : Math.floor(parsed);
+}
+
+interface VariantRow {
+  master_product_id: string;
+  is_default: boolean;
+  updated_at: Date | string | null;
+  price: string | null;
+  promotional_price: string | null;
+  stock: string | null;
+  publishable_stock: string | null;
+  ean: string | null;
+  ean_status: string | null;
+}
+
+/** Variante exibida na linha: a padrão primeiro, depois a que tem preço, depois a mais recente. */
+function pickDisplayVariants(rows: VariantRow[]): Map<string, VariantRow> {
+  const rank = (row: VariantRow) => [
+    row.is_default ? 0 : 1,
+    (num(row.price) ?? 0) > 0 ? 0 : 1,
+    -new Date(row.updated_at ?? 0).getTime(),
+  ];
+  const chosen = new Map<string, VariantRow>();
+  for (const row of rows) {
+    const current = chosen.get(row.master_product_id);
+    if (!current) {
+      chosen.set(row.master_product_id, row);
+      continue;
+    }
+    const next = rank(row);
+    const best = rank(current);
+    const index = next.findIndex((value, position) => value !== best[position]);
+    if (index >= 0 && next[index]! < best[index]!) chosen.set(row.master_product_id, row);
+  }
+  return chosen;
 }
 
 export function matchesCatalogTab(
@@ -102,7 +146,7 @@ const BAD_PRICE = `mp.id NOT IN (
 )`;
 const NO_STOCK = `mp.id NOT IN (
   SELECT master_product_id FROM product_variants
-  WHERE is_default = true AND stock IS NOT NULL
+  WHERE is_default = true AND (catalog_stock IS NOT NULL OR stock IS NOT NULL)
 )`;
 const MISSING_CHANNEL = `(
   mp.hub_category_id IS NULL
@@ -252,33 +296,48 @@ export async function listCatalog(input: {
   const offset = input.all ? 0 : (page - 1) * pageSize;
   const limit = input.all ? Math.max(total, 1) : pageSize;
 
-  const pageRows = await query<Omit<FlagRow, 'has_cover' | 'cover_url' | 'published' | 'rejected' | 'duplicate_candidate' | 'ean_required'> & {
-    ean: string | null;
-  }>(
+  const productRows = await query<Pick<FlagRow, 'id' | 'erp_id' | 'erp_sku' | 'name' | 'brand' | 'product_format'
+    | 'ncm_status' | 'ncm_fiscal_risk' | 'hub_category_id' | 'archived_at'>>(
     `SELECT
        mp.id, mp.erp_id, mp.erp_sku, mp.name, mp.brand, mp.product_format,
-       mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id, mp.archived_at,
-       mp.worst_score, mp.has_fiscal_risk,
-       pv.price::text AS price, pv.promotional_price::text AS promotional_price,
-       pv.stock::text AS stock, pv.ean, pv.ean_status
+       mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id, mp.archived_at
      FROM master_products mp
-     LEFT JOIN product_variants pv ON pv.id = (
-       SELECT pv2.id
-       FROM product_variants pv2
-       WHERE pv2.master_product_id = mp.id
-       ORDER BY pv2.is_default DESC, CASE WHEN pv2.price > 0 THEN 0 ELSE 1 END, pv2.updated_at DESC
-       LIMIT 1
-     )
      WHERE ${where}
      ORDER BY mp.updated_at DESC, mp.erp_sku ASC
      LIMIT ${limit} OFFSET ${offset}`,
     params
   );
 
-  const ids = pageRows.rows.map((row) => row.id);
+  const ids = productRows.rows.map((row) => row.id);
   const placeholders = ids.map((_, index) => `$${index + 1}`).join(', ');
+  const variantRows = ids.length
+    ? await query<VariantRow>(
+        `SELECT master_product_id, is_default, updated_at,
+                price::text AS price, promotional_price::text AS promotional_price,
+                catalog_stock::text AS stock, stock::text AS publishable_stock,
+                ean, ean_status
+         FROM product_variants
+         WHERE master_product_id IN (${placeholders})`,
+        ids
+      )
+    : { rows: [] as VariantRow[] };
+  const variantByProduct = pickDisplayVariants(variantRows.rows);
+  const pageRows = {
+    rows: productRows.rows.map((row) => {
+      const variant = variantByProduct.get(row.id);
+      return {
+        ...row,
+        price: variant?.price ?? null,
+        promotional_price: variant?.promotional_price ?? null,
+        stock: variant?.stock ?? null,
+        publishable_stock: variant?.publishable_stock ?? null,
+        ean: variant?.ean ?? null,
+        ean_status: variant?.ean_status ?? null,
+      };
+    }),
+  };
   const empty = { rows: [] as never[] };
-  const [covers, published, rejected, eanRows, requiredEan, maps, links, categoryNames, sends, counts, gapCounts] = await Promise.all([
+  const [covers, published, rejected, eanRows, requiredEan, maps, links, listings, categoryNames, sends, counts, gapCounts] = await Promise.all([
     ids.length
       ? query<{ master_product_id: string; url_normalized: string }>(
           `SELECT master_product_id, url_normalized FROM product_images
@@ -341,6 +400,14 @@ export async function listCatalog(input: {
            SELECT product_id AS master_product_id, channel AS platform, 'linked' AS sync_status
            FROM channel_listing_links
            WHERE link_status = 'vinculado' AND product_id IN (${placeholders})`,
+          ids
+        )
+      : empty,
+    ids.length
+      ? query<{ product_id: string; channel: CatalogChannel; listing_id: string }>(
+          `SELECT product_id, channel, listing_id
+           FROM channel_listing_links
+           WHERE link_status = 'vinculado' AND listing_id <> '' AND product_id IN (${placeholders})`,
           ids
         )
       : empty,
@@ -408,7 +475,9 @@ export async function listCatalog(input: {
     list.push({ platform: link.platform, sync_status: link.sync_status });
     linksByProduct.set(link.master_product_id, list);
   }
+  const listingByKey = new Map(listings.rows.map((row) => [`${row.product_id}:${row.channel}`, row.listing_id]));
 
+  const sellerProducts = await productsWithSellerWarehouse(ids);
   const categoryNameById = new Map(categoryNames.rows.map((row) => [row.id, row.name]));
   const sendKeys = new Set(sends.rows.map((row) => `${row.master_product_id}:${row.platform}`));
   const activeChannels = MERCADO_LIVRE_ACTIVE
@@ -458,6 +527,8 @@ export async function listCatalog(input: {
         ncmFiscalRisk: row.ncm_fiscal_risk,
         price,
         hasDuplicateCandidate: Boolean(row.ean && duplicateEans.has(row.ean)),
+        hasSellerWarehouse: sellerProducts.has(row.id),
+        existingListingId: listingByKey.get(`${row.id}:${platform}`) ?? null,
         channels: [platform],
       });
       const link = productLinks.find((item) => item.platform === platform);
@@ -476,7 +547,8 @@ export async function listCatalog(input: {
       brand: row.brand,
       typeLabel: TYPE_LABEL[row.product_format] ?? 'Simples',
       formato: row.product_format,
-      stock: row.stock === null ? null : Math.floor(Number(row.stock)),
+      stock: whole(row.stock ?? row.publishable_stock),
+      publishableStock: whole(row.publishable_stock),
       price,
       promotionalPrice: promo !== null && promo > 0 ? promo : null,
       coverUrl: coverByProduct.get(row.id) ?? null,

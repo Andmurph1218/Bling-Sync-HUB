@@ -2,7 +2,7 @@ import { InboundProduct, InboundStockBalance, InboundVariant } from '../connecto
 import { ErpConnector } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { isAllowedImageHost, EnqueueImageCandidate } from '../engines/iqre.js';
-import { applyVariantStockBalancesFromBling, runFullProductCatalogPipeline } from '../orchestrator/pipeline.js';
+import { applyVariantStockBalancesFromBling, blingChangedAt, isNewerHubSync, runFullProductCatalogPipeline } from '../orchestrator/pipeline.js';
 import { StockBalanceItem } from '../contracts/mappers.js';
 import { evaluateCatalogChecklist } from './completeness.js';
 
@@ -330,14 +330,21 @@ export async function refreshMissingCommerce(
   }
   const payload = asProduct(raw);
   if (!payload) return { price: null, stock: null };
+  const changedAt = blingChangedAt(payload);
+  const stamp = await query<{ last_bling_sync: Date | null }>(
+    `SELECT last_bling_sync FROM master_products WHERE erp_id = $1`,
+    [externalId]
+  );
+  const stale = isNewerHubSync(changedAt, stamp.rows[0]?.last_bling_sync ?? null);
   if (payload.formato === 'V') await hydrateVariations(erp, payload);
   const variants = payload.formato === 'V' && (payload.variacoes ?? []).length > 0
     ? payload.variacoes ?? []
     : [{ id: payload.id, codigo: payload.codigo, preco: payload.preco }];
   let price: number | null = null;
   for (const variant of variants) {
+    if (stale) break;
     const nextPrice = inboundPrice(variant.preco);
-    if (nextPrice <= 0) continue;
+    if (variant.preco === undefined || variant.preco === null || nextPrice <= 0) continue;
     const sku = String(variant.codigo ?? '').trim();
     const target = current.rows.find((row) => (row.erp_sku ?? '').trim() === sku)
       ?? current.rows.find((row) => row.is_default)
@@ -358,7 +365,7 @@ export async function refreshMissingCommerce(
       if (id !== undefined && id !== null) balances.set(String(id), item as InboundStockBalance);
     }
   }
-  await refreshStoredStock(balances, String(payload.codigo ?? ''));
+  await refreshStoredStock(balances, String(payload.codigo ?? ''), changedAt);
   const stockRow = await query<{ stock: string | null }>(
     `SELECT pv.stock::text AS stock
      FROM product_variants pv
@@ -371,7 +378,11 @@ export async function refreshMissingCommerce(
   return { price, stock: stockRow.rows[0]?.stock == null ? null : Number(stockRow.rows[0].stock) };
 }
 
-async function refreshStoredStock(balances: Map<string, InboundStockBalance>, sku = ''): Promise<number> {
+async function refreshStoredStock(
+  balances: Map<string, InboundStockBalance>,
+  sku = '',
+  observedAt?: Date | null
+): Promise<number> {
   let updated = 0;
   for (const [externalId, raw] of balances) {
     try {
@@ -392,7 +403,7 @@ async function refreshStoredStock(balances: Map<string, InboundStockBalance>, sk
       );
       const variantId = found.rows[0]?.id;
       if (!variantId) continue;
-      await applyVariantStockBalancesFromBling(variantId, raw as StockBalanceItem);
+      await applyVariantStockBalancesFromBling(variantId, raw as StockBalanceItem, observedAt);
       updated += 1;
     } catch {
       // A página segue mesmo se um saldo não puder ser gravado. O relatório guarda o erro.

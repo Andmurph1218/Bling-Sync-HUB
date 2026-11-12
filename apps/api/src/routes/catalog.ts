@@ -37,6 +37,7 @@ import { createErpConnector } from '../connectors/strategy/factory.js';
 import { STOCK_LAUNCH_WARNING } from '../connectors/strategy/types.js';
 import { getFullSyncStatus } from '../catalog/full-sync.js';
 import { ErpRejectedError } from '../connectors/strategy/types.js';
+import { BlingPostTimeoutError, SkuAlreadyInBlingError } from '../connectors/bling/bling-erp.js';
 
 export const catalogRouter = Router();
 
@@ -158,7 +159,7 @@ catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: R
     const listed = await listCatalog({ tab: 'todos', sku: '', name: '', brand: '', page: 1, pageSize: 1 });
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
-    const [unlinked, sentToday, failedToday, queued, problems, oauth, lastOk, lastError, linkedNs, lastBling, awaitingNcm, awaitingEan, fiscalConflicts, readiness] = await Promise.all([
+    const [unlinked, sentToday, failedToday, queued, problems, oauth, lastOk, lastError, linkedNs, linkedMl, lastBling, awaitingNcm, awaitingEan, fiscalConflicts, readiness] = await Promise.all([
       query<{ count: number }>(`SELECT count(*)::int AS count FROM matching_queue WHERE status = 'pending'`),
       query<{ count: number }>(
         `SELECT count(*)::int AS count FROM push_jobs WHERE status = 'completed' AND created_at >= $1`,
@@ -192,6 +193,17 @@ catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: R
            FROM channel_listing_links
            WHERE channel = 'nuvemshop' AND link_status = 'vinculado'
          ) linked_ns`
+      ),
+      query<{ count: number }>(
+        `SELECT count(DISTINCT product_id)::int AS count FROM (
+           SELECT master_product_id AS product_id
+           FROM platform_links
+           WHERE platform = 'mercadolivre' AND sync_status = 'linked'
+           UNION
+           SELECT product_id
+           FROM channel_listing_links
+           WHERE channel = 'mercadolivre' AND link_status = 'vinculado'
+         ) linked_ml`
       ),
       query<{ last_sync: Date | string | null }>(
         `SELECT max(last_bling_sync) AS last_sync FROM master_products`
@@ -256,6 +268,7 @@ catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: R
       lastSyncError: lastError.rows[0]?.last_error ?? null,
       lastBlingSync: lastBling.rows[0]?.last_sync ?? null,
       linkedNuvemshop: linkedNs.rows[0]?.count ?? 0,
+      linkedMercadoLivre: linkedMl.rows[0]?.count ?? 0,
       fiscal: {
         awaitingNcm: awaitingNcm.rows[0]?.count ?? 0,
         awaitingEan: awaitingEan.rows[0]?.count ?? 0,
@@ -308,7 +321,8 @@ catalogRouter.get('/api/catalog/products/:erpId/variants', requireAuth, async (r
       stock: string | null;
       ean: string | null;
     }>(
-      `SELECT pv.id, pv.erp_sku, pv.price::text AS price, pv.stock::text AS stock, pv.ean
+      `SELECT pv.id, pv.erp_sku, pv.price::text AS price,
+              COALESCE(pv.catalog_stock, pv.stock)::text AS stock, pv.ean
        FROM product_variants pv
        INNER JOIN master_products mp ON mp.id = pv.master_product_id
        WHERE mp.erp_id = $1 AND mp.catalog_status = 'active'
@@ -692,6 +706,14 @@ catalogRouter.post(
         erpId = createdErp.erp_id;
         stockWarning = createdErp.stockWarning;
       } catch (error) {
+        if (error instanceof SkuAlreadyInBlingError) {
+          res.status(409).json({ error: 'sku_exists_in_bling', message: error.message });
+          return;
+        }
+        if (error instanceof BlingPostTimeoutError) {
+          res.status(422).json({ error: 'bling_unconfirmed', message: error.message });
+          return;
+        }
         if (error instanceof ErpRejectedError) {
           res.status(422).json({ error: 'bling_rejected', message: `Erro no Bling: ${error.message}` });
           return;
@@ -710,7 +732,7 @@ catalogRouter.post(
       );
       const product = created.rows[0]!;
       await query(
-        `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, stock)
+        `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, catalog_stock)
          VALUES ($1, $2, true, 'S', $3, $4)`,
         [product.id, parsed.data.sku, parsed.data.price, parsed.data.stock]
       );

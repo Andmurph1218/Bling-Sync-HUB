@@ -7,6 +7,8 @@ import { loadConnectors } from '../connectors/load.js';
 import { createErpConnector } from '../connectors/strategy/factory.js';
 import { ErpConnector } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
+import { enqueueProductImagesForSync, normalizeImageUrl } from '../engines/iqre.js';
+import { formatNcmDisplay } from '../engines/nve.js';
 import { logger } from '../lib/logger.js';
 
 export const ENRICHMENT_QUEUE_NAME = 'enrichment-queue';
@@ -30,27 +32,27 @@ function getEnrichmentQueue(): Queue<EnrichJob> {
 }
 
 async function saveImages(productId: string, images: string[]): Promise<boolean> {
-  const cover = await query(
-    `SELECT 1 FROM product_images WHERE master_product_id = $1 AND is_cover_eligible = true LIMIT 1`,
-    [productId]
-  );
-  let needsCover = !cover.rows[0];
+  const candidates: Array<{ source_url: string; source_platform: 'bling' }> = [];
   let saved = false;
   for (const [index, url] of images.entries()) {
-    const isCover = needsCover;
+    let normalized: string;
+    try {
+      normalized = normalizeImageUrl(url);
+    } catch {
+      continue;
+    }
     const inserted = await query(
       `INSERT INTO product_images (
          master_product_id, source_url, url_normalized, source_platform,
          is_cover_eligible, rights_status, position_bling
-       ) VALUES ($1, $2, $2, 'bling', $3, 'owned', $4)
+       ) VALUES ($1, $2, $3, 'bling', false, 'pending', $4)
        ON CONFLICT (master_product_id, url_normalized) DO NOTHING`,
-      [productId, url, isCover, index + 1]
+      [productId, url, normalized, index + 1]
     );
-    if ((inserted.rowCount ?? 0) > 0) {
-      saved = true;
-      if (isCover) needsCover = false;
-    }
+    if ((inserted.rowCount ?? 0) > 0) saved = true;
+    candidates.push({ source_url: url, source_platform: 'bling' });
   }
+  if (candidates.length > 0) await enqueueProductImagesForSync(productId, candidates);
   return saved;
 }
 
@@ -61,13 +63,30 @@ async function saveNcmAndCategory(productId: string, ncm: string, category: stri
   if (digits.length === 8) {
     const updated = await query(
       `UPDATE master_products
-       SET ncm = $2, ncm_status = 'valid', ncm_fiscal_risk = false, updated_at = now()
+       SET ncm = $2, ncm_status = 'pending_approval', ncm_fiscal_risk = true, updated_at = now()
        WHERE id = $1
          AND (ncm IS NULL OR trim(ncm) = '')
-         AND ncm_status IN ('unknown', 'invalid')`,
+         AND ncm_status IN ('unknown', 'invalid', 'pending_approval')`,
       [productId, digits]
     );
     saved = (updated.rowCount ?? 0) > 0;
+    if (saved) {
+      const open = await query(
+        `SELECT 1 FROM ncm_manual_suggestions
+         WHERE master_product_id = $1 AND status IN ('pending_first', 'pending_second')
+         LIMIT 1`,
+        [productId]
+      );
+      if (!open.rows[0]) {
+        const expiresAt = new Date(Date.now() + 15 * 86_400_000).toISOString();
+        await query(
+          `INSERT INTO ncm_manual_suggestions (
+             master_product_id, proposed_ncm, source_platform, status, expires_at
+           ) VALUES ($1, $2, 'bling', 'pending_first', $3)`,
+          [productId, formatNcmDisplay(digits), expiresAt]
+        );
+      }
+    }
   }
   if (label) {
     const updated = await query(
@@ -98,8 +117,9 @@ export async function processEnrichmentBatch(
        AND erp_id > $1
        AND (
          ncm IS NULL OR trim(ncm) = ''
-         OR id NOT IN (
-           SELECT master_product_id FROM product_images WHERE is_cover_eligible = true
+         OR (
+           id NOT IN (SELECT master_product_id FROM product_images)
+           AND id NOT IN (SELECT master_product_id FROM image_processing_queue)
          )
        )
      ORDER BY erp_id ASC

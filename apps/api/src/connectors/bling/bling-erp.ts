@@ -4,6 +4,7 @@ async function refreshBlingToken(currentRefreshToken: string) {
   const oauth = await import('../../routes/oauth.js');
   return oauth.refreshBlingTokenViaHttp(currentRefreshToken);
 }
+import { acquireBlingRequestSlot } from './bling-http-limit.js';
 import { query } from '../../db/pool.js';
 import {
   CreateProductDTO,
@@ -14,7 +15,6 @@ import {
   ErpRejectedError,
   ErpStockBalance,
   ErpStockSnapshot,
-  STOCK_LAUNCH_WARNING,
 } from '../strategy/types.js';
 
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
@@ -213,33 +213,79 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Leitura paginada da API v3. Uma chamada a cada 450 ms, fora do balde que travava a segunda requisição. */
+export const BLING_POST_TIMEOUT_MESSAGE =
+  'O Bling não confirmou a tempo. A criação não foi repetida. Verifique no Bling se o produto foi cadastrado.';
+
+export class BlingPostTimeoutError extends Error {
+  constructor() {
+    super(BLING_POST_TIMEOUT_MESSAGE);
+    this.name = 'BlingPostTimeoutError';
+  }
+}
+
+export class SkuAlreadyInBlingError extends Error {
+  constructor(sku: string) {
+    super(`O SKU ${sku} já existe no Bling. A criação foi cancelada. Verifique o cadastro no ERP.`);
+    this.name = 'SkuAlreadyInBlingError';
+  }
+}
+
+export function isBlingTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === 'bling_timeout';
+}
+
+/** O filtro por código devolve o produto. Sem `codigo` no JSON, qualquer linha já é o SKU pedido. */
+export function blingSkuAlreadyListed(
+  rows: Array<{ codigo?: string | null }>,
+  sku: string
+): boolean {
+  const wanted = sku.trim().toLowerCase();
+  if (!wanted || rows.length === 0) return false;
+  const codes = rows.map((row) => (row.codigo ?? '').trim().toLowerCase()).filter((code) => code.length > 0);
+  if (codes.length === 0) return true;
+  return codes.includes(wanted);
+}
+
+/**
+ * GET pode repetir timeout e 429. POST com timeout não repete: o Bling pode ter gravado o produto.
+ */
+export async function runBlingCall<T>(
+  method: 'GET' | 'POST',
+  send: () => Promise<{ status: number; data: T }>,
+  wait: (ms: number) => Promise<void> = sleep
+): Promise<{ status: number; data: T }> {
+  let lastStatus = 0;
+  let lastData: T = null as T;
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const res = await send();
+      lastStatus = res.status;
+      lastData = res.data;
+      lastError = null;
+      if (res.status !== 429) return res;
+    } catch (error) {
+      if (method === 'POST' && isBlingTimeout(error)) throw new BlingPostTimeoutError();
+      lastError = error;
+    }
+    await wait(1000 * (attempt + 1));
+  }
+  if (lastError) throw lastError;
+  return { status: lastStatus, data: lastData };
+}
+
+/** Leitura e escrita na API v3. A cota de 3 req/s é a mesma para sync, enriquecimento e reconciliação. */
 export class LiveBlingCatalogReader implements BlingCatalogReader {
   private readonly tokens = new OAuthTokenManager();
-  private lastCallAt = 0;
 
-  private async call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; data: T }> {
-    let lastStatus = 0;
-    let lastData: T = null as T;
-    let lastError: unknown = null;
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      const wait = 450 - (Date.now() - this.lastCallAt);
-      if (wait > 0) await sleep(wait);
-      this.lastCallAt = Date.now();
-      try {
-        const token = await this.tokens.getValidAccessToken('bling', refreshBlingToken);
-        const res = await httpsSend(method, `${BLING_BASE}${path}`, token, body);
-        lastStatus = res.status;
-        lastData = res.text ? (JSON.parse(res.text) as T) : (null as T);
-        lastError = null;
-        if (res.status !== 429) return { status: lastStatus, data: lastData };
-      } catch (error) {
-        lastError = error;
-      }
-      await sleep(1000 * (attempt + 1));
-    }
-    if (lastError) throw lastError;
-    return { status: lastStatus, data: lastData };
+  protected async call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; data: T }> {
+    return runBlingCall(method, async () => {
+      await acquireBlingRequestSlot();
+      const token = await this.tokens.getValidAccessToken('bling', refreshBlingToken);
+      const res = await httpsSend(method, `${BLING_BASE}${path}`, token, body);
+      const data = res.text ? (JSON.parse(res.text) as T) : (null as T);
+      return { status: res.status, data };
+    });
   }
 
   private async get<T>(path: string): Promise<{ status: number; data: T }> {
@@ -335,9 +381,16 @@ export class LiveBlingCatalogReader implements BlingCatalogReader {
   }
 
   async create(input: CreateProductDTO): Promise<{ erp_id: string; stockWarning: string | null }> {
+    const sku = input.sku.trim();
+    const lookup = await this.get<{ data?: Array<{ codigo?: string | null }> }>(
+      `/produtos?codigo=${encodeURIComponent(sku)}`
+    );
+    if (lookup.status >= 400) throw new ErpRejectedError(blingRejectionMessage(lookup.data, lookup.status));
+    if (blingSkuAlreadyListed(lookup.data.data ?? [], sku)) throw new SkuAlreadyInBlingError(sku);
+
     const created = await this.call<{ data?: { id?: number | string } }>('POST', '/produtos', {
       nome: input.name,
-      codigo: input.sku,
+      codigo: sku,
       preco: input.price,
       tipo: 'P',
       formato: 'S',
@@ -345,40 +398,17 @@ export class LiveBlingCatalogReader implements BlingCatalogReader {
       unidade: 'UN',
       estoque: {
         minimo: 0,
-        maximo: input.stock,
+        maximo: 0,
         crossdocking: 0,
         localizacao: '',
       },
     });
     if (created.status >= 400) throw new ErpRejectedError(blingRejectionMessage(created.data, created.status));
-    const identity = blingRecordToErpIdentity({ id: created.data?.data?.id, codigo: input.sku });
+    const identity = blingRecordToErpIdentity({ id: created.data?.data?.id, codigo: sku });
     if (!identity.erpId) {
       throw new ErpRejectedError('O ERP não devolveu o ID do produto.');
     }
-    const erpId = identity.erpId;
-    if (input.stock <= 0) return { erp_id: erpId, stockWarning: null };
-    try {
-      const deposits = await this.get<{ data?: Array<{ id?: number | string; situacao?: string }> }>(
-        '/depositos?pagina=1&limite=100'
-      );
-      const rows = deposits.status < 400 ? deposits.data.data ?? [] : [];
-      const chosen = rows.find((row) => row.situacao !== 'I' && row.id !== undefined && row.id !== null) ?? rows[0];
-      const depositId = chosen?.id === undefined || chosen?.id === null ? null : String(chosen.id);
-      if (!depositId) return { erp_id: erpId, stockWarning: STOCK_LAUNCH_WARNING };
-      const balance = await this.call('POST', '/estoques', {
-        produto: { id: Number(erpId) },
-        deposito: { id: Number(depositId) },
-        operacao: 'B',
-        quantidade: input.stock,
-        preco: input.price,
-        custo: 0,
-        observacoes: 'Saldo inicial pelo HUB',
-      });
-      if (balance.status >= 400) return { erp_id: erpId, stockWarning: STOCK_LAUNCH_WARNING };
-    } catch {
-      return { erp_id: erpId, stockWarning: STOCK_LAUNCH_WARNING };
-    }
-    return { erp_id: erpId, stockWarning: null };
+    return { erp_id: identity.erpId, stockWarning: null };
   }
 }
 
@@ -470,6 +500,7 @@ export class BlingErpConnector implements ErpConnector {
     return this.reader.children(parentId);
   }
 
+  /** Cria só o cadastro em POST /produtos. Não lança saldo em /estoques. */
   createProduct(productData: CreateProductDTO): Promise<{ erp_id: string; stockWarning: string | null }> {
     if (productWriterForTests) return productWriterForTests.create(productData);
     if (process.env.VITEST === 'true') {

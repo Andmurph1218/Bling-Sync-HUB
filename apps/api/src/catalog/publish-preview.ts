@@ -8,6 +8,7 @@ import {
 } from './channel-attributes.js';
 import { ChecklistResult, evaluateCatalogChecklist } from './completeness.js';
 import { isBlankSku } from './blank-sku.js';
+import { productsWithSellerWarehouse } from './warehouse-stock.js';
 
 export type PublishChannel = 'mercadolivre' | 'nuvemshop';
 
@@ -211,6 +212,22 @@ async function enqueueAutoPublish(productId: string, channel: PublishChannel): P
   }
 }
 
+/** listing_id do vínculo é o external_id do anúncio naquele canal. */
+export async function linkedListingExternalId(productId: string, channel: string): Promise<string | null> {
+  const found = await query<{ listing_id: string }>(
+    `SELECT listing_id
+     FROM channel_listing_links
+     WHERE product_id = $1
+       AND channel = $2
+       AND link_status = 'vinculado'
+       AND listing_id <> ''
+     LIMIT 1`,
+    [productId, channel]
+  );
+  const listingId = found.rows[0]?.listing_id?.trim() ?? '';
+  return listingId || null;
+}
+
 export async function checklistForChannel(
   productId: string,
   channel: PublishChannel
@@ -291,6 +308,8 @@ export async function checklistForChannel(
     );
     duplicate = (owners.rows[0]?.count ?? 0) > 1;
   }
+  const sellerProducts = await productsWithSellerWarehouse([productId]);
+  const existingListingId = await linkedListingExternalId(productId, channel);
   const checklist = evaluateCatalogChecklist({
     erpId: row.erp_id,
     sku: row.erp_sku,
@@ -304,6 +323,8 @@ export async function checklistForChannel(
     ncmFiscalRisk: row.ncm_fiscal_risk,
     price: row.price === null ? null : Number(row.price),
     hasDuplicateCandidate: duplicate,
+    hasSellerWarehouse: sellerProducts.has(productId),
+    existingListingId,
     channels: [channel],
   });
   return { ...checklist, sku: row.erp_sku ?? '' };

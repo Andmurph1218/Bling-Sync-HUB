@@ -84,22 +84,51 @@ describe('enriquecimento do catálogo', () => {
     expect(report.enriched).toBe(1);
     expect(writes).toBe(0);
 
-    const image = await query<{ is_cover_eligible: boolean; url_normalized: string }>(
-      `SELECT is_cover_eligible, url_normalized FROM product_images WHERE master_product_id = $1`,
-      [productId]
+    const image = await query<{
+      master_product_id: string;
+      is_cover_eligible: boolean;
+      rights_status: string;
+      url_normalized: string;
+      position_bling: number;
+    }>(
+      `SELECT master_product_id::text AS master_product_id, is_cover_eligible, rights_status, url_normalized, position_bling
+       FROM product_images
+       WHERE rights_status = 'pending'`
     );
-    expect(image.rows[0]).toEqual({
-      is_cover_eligible: true,
+    // O índice por produto do pg-mem não enxerga a linha depois de recriar o check de rights_status.
+    const mine = image.rows
+      .filter((row) => row.master_product_id === productId)
+      .sort((a, b) => a.position_bling - b.position_bling);
+    expect(mine[0]).toEqual({
+      master_product_id: productId,
+      is_cover_eligible: false,
+      rights_status: 'pending',
       url_normalized: 'https://orgbling.s3.amazonaws.com/capa.jpg',
+      position_bling: 1,
     });
+    expect(mine.every((row) => row.rights_status === 'pending' && row.is_cover_eligible === false)).toBe(true);
+    const queued = await query<{ master_product_id: string; stage: string }>(
+      `SELECT master_product_id::text AS master_product_id, stage FROM image_processing_queue WHERE stage = 'queued'`
+    );
+    expect(queued.rows.filter((row) => row.master_product_id === productId)).toHaveLength(2);
 
-    const product = await query<{ ncm: string; ncm_status: string; category: string; worst_score: number | null }>(
-      `SELECT ncm, ncm_status, category, worst_score FROM master_products WHERE id = $1`,
+    const product = await query<{ ncm: string; ncm_status: string; ncm_fiscal_risk: boolean; category: string; worst_score: number | null }>(
+      `SELECT ncm, ncm_status, ncm_fiscal_risk, category, worst_score FROM master_products WHERE id = $1`,
       [productId]
     );
     expect(product.rows[0]?.ncm).toBe('94051099');
-    expect(product.rows[0]?.ncm_status).toBe('valid');
+    expect(product.rows[0]?.ncm_status).toBe('pending_approval');
+    expect(product.rows[0]?.ncm_fiscal_risk).toBe(true);
     expect(product.rows[0]?.category).toBe('Luminárias');
     expect(product.rows[0]?.worst_score).not.toBeNull();
+    const suggestion = await query<{ status: string; source_platform: string; proposed_ncm: string }>(
+      `SELECT status, source_platform, proposed_ncm FROM ncm_manual_suggestions WHERE master_product_id = $1`,
+      [productId]
+    );
+    expect(suggestion.rows[0]).toEqual({
+      status: 'pending_first',
+      source_platform: 'bling',
+      proposed_ncm: '9405.10.99',
+    });
   });
 });
