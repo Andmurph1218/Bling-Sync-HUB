@@ -398,6 +398,7 @@ function FichaUnicaProdutoPage({
                   <div key={channel.platform}>
                     <div className="flex items-center justify-between text-xs">
                       <span className="font-semibold">{channel.platform === 'nuvemshop' ? 'Nuvemshop' : channel.platform}</span>
+                      <span className={channel.label === 'Vinculado com Pendência' ? 'font-semibold text-amber-800 dark:text-amber-200' : 'text-text-muted'}>{channel.label}</span>
                       <span>{channel.percent}% pronto</span>
                     </div>
                     <div className="mt-1 h-2 overflow-hidden rounded-full bg-bg-base">

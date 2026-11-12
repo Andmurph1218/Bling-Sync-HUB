@@ -9,6 +9,7 @@ import { runAllMigrationsUp } from '../db/migrator.js';
 import { setRedis } from '../lib/redis.js';
 import { MarketplaceListing, ErpConnector } from '../connectors/strategy/types.js';
 import { refreshMissingCommerce } from '../catalog/full-sync.js';
+import { resolveMatchingDecision } from '../engines/pire.js';
 import { reconcileListings } from '../services/reconciliation.service.js';
 
 describe('reconciliação do anúncio', () => {
@@ -95,7 +96,12 @@ describe('reconciliação do anúncio', () => {
     };
     const result = await reconcileListings(async (channel) => (channel === 'mercadolivre' ? listing : null));
     expect(result.snapshots).toBe(1);
-    expect(result.linked).toBe(1);
+    expect(result.linked).toBe(0);
+    const suggested = await query<{ link_status: string }>(
+      `SELECT link_status FROM channel_listing_links WHERE product_id = $1 AND channel = 'mercadolivre'`,
+      [productId]
+    );
+    expect(suggested.rows[0]?.link_status).toBe('sugerido');
 
     const price = await query<{ price: string; stock: string }>(
       `SELECT price::text AS price, stock::text AS stock FROM product_variants WHERE master_product_id = $1`,
@@ -137,21 +143,20 @@ describe('reconciliação do anúncio', () => {
       [atlId]
     );
     const erp = {
-      pullCatalogProduct: async () => ({
-        id: 'erp-atl',
-        nome: 'Produto ATL',
-        codigo: 'ATL-368',
-        preco: '180,00',
-        tipo: 'P',
-        situacao: 'A',
-        formato: 'S',
-        estoqueSaldos: [{
-          produto: { id: 'erp-atl' },
-          saldoVirtualTotal: 4,
-          depositos: [{ id: '1', saldoVirtual: 4, saldoFisico: 4 }],
+      readCommerce: async () => ({
+        externalId: 'erp-atl',
+        sku: 'ATL-368',
+        changedAt: null,
+        lines: [{ externalId: 'erp-atl', sku: 'ATL-368', price: 180 }],
+        balances: [{
+          externalId: 'erp-atl',
+          raw: {
+            produto: { id: 'erp-atl' },
+            saldoVirtualTotal: 4,
+            depositos: [{ id: '1', saldoVirtual: 4, saldoFisico: 4 }],
+          },
         }],
       }),
-      pullStockBalances: async () => [],
     } as unknown as ErpConnector;
     const refreshed = await refreshMissingCommerce(erp, 'erp-atl');
     expect(refreshed.price).toBe(180);
@@ -167,12 +172,12 @@ describe('reconciliação do anúncio', () => {
     const result = await reconcileListings(async (channel, product) => (
       channel === 'nuvemshop' && product.sku === 'ATL-368' ? listing : null
     ), { sku: 'ATL-368' });
-    expect(result.linked).toBe(1);
-    const link = await query<{ listing_id: string }>(
-      `SELECT listing_id FROM channel_listing_links WHERE product_id = $1 AND channel = 'nuvemshop'`,
+    expect(result.linked).toBe(0);
+    const link = await query<{ listing_id: string; link_status: string }>(
+      `SELECT listing_id, link_status FROM channel_listing_links WHERE product_id = $1 AND channel = 'nuvemshop'`,
       [atlId]
     );
-    expect(link.rows[0]?.listing_id).toBe('1578151393');
+    expect(link.rows[0]).toEqual({ listing_id: '1578151393', link_status: 'sugerido' });
     const price = await query<{ price: string }>(
       `SELECT price::text AS price FROM product_variants WHERE master_product_id = $1 AND erp_sku = 'ATL-368'`,
       [atlId]
@@ -229,5 +234,95 @@ describe('reconciliação do anúncio', () => {
       [productId]
     );
     expect(rows.rows).toEqual([{ external_id: 'MLB999' }]);
+  });
+
+  it('mantém o snapshot quando a leitura do canal falha', async () => {
+    await query(
+      `INSERT INTO marketplace_listings_snapshot (product_id, marketplace, external_id, payload_json)
+       VALUES ($1, 'nuvemshop', 'NS-ANTIGO', '{"price":20}')
+       ON CONFLICT (product_id, marketplace) DO UPDATE
+       SET external_id = EXCLUDED.external_id, payload_json = EXCLUDED.payload_json`,
+      [productId]
+    );
+    const result = await reconcileListings(async (channel) => {
+      if (channel === 'nuvemshop') throw new Error('Nuvemshop respondeu 503');
+      return null;
+    }, { sku: 'SKU-RECON' });
+    expect(result.scanned).toBe(1);
+    const kept = await query<{ external_id: string }>(
+      `SELECT external_id FROM marketplace_listings_snapshot WHERE product_id = $1 AND marketplace = 'nuvemshop'`,
+      [productId]
+    );
+    expect(kept.rows).toEqual([{ external_id: 'NS-ANTIGO' }]);
+  });
+
+  it('confirma o vínculo com dois sinais e manda um sinal só para Vínculos', async () => {
+    const created = await query<{ id: string }>(
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
+       VALUES ('erp-sinais', 'SKU-SINAL', 'Lâmpada LED', 'P', 'S')
+       RETURNING id`
+    );
+    const id = created.rows[0]!.id;
+    await query(
+      `INSERT INTO product_variants (master_product_id, erp_sku, ean, is_default, price, stock)
+       VALUES ($1, 'SKU-SINAL', '7891000000001', true, 30, 2)`,
+      [id]
+    );
+    const skuOnly: MarketplaceListing = {
+      externalId: 'NS-UM-SINAL',
+      title: 'Nome diferente do ERP',
+      price: 30,
+      stock: 2,
+      images: [],
+      status: 'Ativo',
+      signals: ['sku'],
+    };
+    const suggested = await reconcileListings(async (channel) => (channel === 'nuvemshop' ? skuOnly : null), { sku: 'SKU-SINAL' });
+    expect(suggested.linked).toBe(0);
+    const one = await query<{ link_status: string }>(
+      `SELECT link_status FROM channel_listing_links WHERE product_id = $1 AND channel = 'nuvemshop'`,
+      [id]
+    );
+    expect(one.rows[0]?.link_status).toBe('sugerido');
+    const queue = await request(app).get('/api/matching/queue').set('Cookie', cookie);
+    expect(queue.status).toBe(200);
+    expect(queue.body.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        platform: 'nuvemshop',
+        platformProductId: 'NS-UM-SINAL',
+        candidate: expect.objectContaining({ erpSku: 'SKU-SINAL' }),
+      }),
+    ]));
+    const operator = await query<{ id: string }>(`SELECT id FROM users WHERE email = 'op.recon@blingsync.local'`);
+    await resolveMatchingDecision({
+      platform: 'nuvemshop',
+      platformProductId: 'NS-UM-SINAL',
+      userId: operator.rows[0]!.id,
+      action: 'confirm',
+      masterProductId: id,
+    });
+    const confirmedSuggestion = await query<{ link_status: string }>(
+      `SELECT link_status FROM channel_listing_links WHERE product_id = $1 AND listing_id = 'NS-UM-SINAL'`,
+      [id]
+    );
+    expect(confirmedSuggestion.rows[0]?.link_status).toBe('vinculado');
+
+    await query(`DELETE FROM channel_listing_links WHERE product_id = $1 AND channel = 'nuvemshop'`, [id]);
+    const both: MarketplaceListing = {
+      externalId: 'NS-DOIS-SINAIS',
+      title: 'Lâmpada LED',
+      price: 30,
+      stock: 2,
+      images: [],
+      status: 'Ativo',
+      signals: ['sku', 'ean'],
+    };
+    const confirmed = await reconcileListings(async (channel) => (channel === 'nuvemshop' ? both : null), { sku: 'SKU-SINAL' });
+    expect(confirmed.linked).toBe(1);
+    const two = await query<{ link_status: string }>(
+      `SELECT link_status FROM channel_listing_links WHERE product_id = $1 AND listing_id = 'NS-DOIS-SINAIS'`,
+      [id]
+    );
+    expect(two.rows[0]?.link_status).toBe('vinculado');
   });
 });

@@ -45,12 +45,22 @@ export function createMarketplaceConnector(id: string): MarketplaceConnector {
 
 export const DEFAULT_ERP_ID = 'bling';
 
+/** O ERP soberano vem da configuração. Sem a variável, o Bling continua ativo. */
+export function activeErpId(): string {
+  const configured = (process.env.ACTIVE_ERP ?? '').trim();
+  return configured || DEFAULT_ERP_ID;
+}
+
+export function activeErpConnector(): ErpConnector {
+  return createErpConnector(activeErpId());
+}
+
 export function getMarketplaceConnector(id: string): MarketplaceConnector {
   return createMarketplaceConnector(id);
 }
 
 export function erpRecordUrl(erpId: string): string {
-  const connector = createErpConnector(DEFAULT_ERP_ID);
+  const connector = createErpConnector(activeErpId());
   return connector.recordUrl ? connector.recordUrl(erpId) : '';
 }
 

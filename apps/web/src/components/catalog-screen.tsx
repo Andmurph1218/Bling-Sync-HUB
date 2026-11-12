@@ -40,7 +40,7 @@ interface ChecklistItem {
 
 interface ChannelIntegration {
   platform: 'mercadolivre' | 'nuvemshop';
-  visual: 'connected' | 'pending' | 'blocked' | 'absent';
+  visual: 'connected' | 'pending' | 'blocked' | 'absent' | 'attention';
   label: string;
   tooltip: string;
   percent: number;
@@ -928,7 +928,7 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                 <div>
                   <p className="text-[11px] uppercase tracking-wider text-text-muted">Status de integração</p>
                   <h2 id="channel-focus-title" className="mt-1 text-base font-bold">{channelFocus.item.name || 'Sem nome no ERP'}</h2>
-                  <p className="text-xs text-text-muted">{channelName} · {focus?.label ?? 'Sem leitura'}</p>
+                  <p className={`text-xs ${focus?.visual === 'attention' ? 'font-semibold text-amber-800 dark:text-amber-200' : 'text-text-muted'}`}>{channelName} · {focus?.label ?? 'Sem leitura'}</p>
                 </div>
                 <button type="button" className="text-xs text-text-muted underline" onClick={() => setChannelFocus(null)}>Fechar</button>
               </div>

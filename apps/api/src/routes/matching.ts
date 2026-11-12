@@ -80,7 +80,7 @@ matchingRouter.get(
               ean: row.ean,
               price: money(row.price),
               stock: row.stock === null ? null : Math.floor(Number(row.stock)),
-              status: row.link_status === 'vinculado' ? 'Vinculado' : 'Sem vínculo',
+              status: row.link_status === 'vinculado' ? 'Vinculado' : row.link_status === 'sugerido' ? 'Sugerido' : 'Sem vínculo',
               listingId: row.listing_id,
             }
           : null,

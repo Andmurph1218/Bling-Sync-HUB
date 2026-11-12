@@ -1,6 +1,7 @@
 import { refreshMissingCommerce } from '../catalog/full-sync.js';
 import { productsWithSellerWarehouse } from '../catalog/warehouse-stock.js';
-import { createErpConnector, getMarketplaceConnector } from '../connectors/strategy/factory.js';
+import { activeErpConnector, getMarketplaceConnector } from '../connectors/strategy/factory.js';
+import { collectListingSignals, linkStatusFromSignals, ListingSignal } from '../connectors/strategy/listing-signals.js';
 import { MarketplaceListing, MasterProduct } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
@@ -24,6 +25,7 @@ interface HubRow {
   id: string;
   erp_id: string;
   erp_sku: string;
+  name: string | null;
   ean: string | null;
   price: string | null;
   stock: string | null;
@@ -47,19 +49,96 @@ function asNumber(value: string | null): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-async function linkIfMissing(productId: string, marketplace: string, listing: MarketplaceListing): Promise<boolean> {
+function signalsFor(row: Omit<HubRow, 'image_count'>, listing: MarketplaceListing): ListingSignal[] {
+  const matchedBy = (listing.signals ?? []).filter((signal): signal is 'sku' | 'ean' => signal === 'sku' || signal === 'ean');
+  const collected = collectListingSignals({
+    hubSku: row.erp_sku,
+    hubEan: row.ean,
+    hubName: row.name,
+    channelSku: listing.sku,
+    channelEan: listing.ean,
+    channelTitle: listing.title,
+    matchedBy,
+  });
+  if (listing.signals?.includes('title') && !collected.includes('title')) collected.push('title');
+  return collected.length > 0 ? collected : ['sku'];
+}
+
+async function rememberSuggestion(
+  row: Omit<HubRow, 'image_count'>,
+  channel: string,
+  listing: MarketplaceListing,
+  signals: ListingSignal[]
+): Promise<void> {
+  if (channel !== 'mercadolivre' && channel !== 'nuvemshop') return;
+  const raw = channel === 'nuvemshop'
+    ? { name: { pt: listing.title }, published: true, variants: [{ sku: row.erp_sku, barcode: row.ean, price: listing.price }] }
+    : {
+        title: listing.title,
+        seller_custom_field: row.erp_sku,
+        price: listing.price,
+        status: listing.status,
+        attributes: row.ean ? [{ id: 'GTIN', value_name: row.ean }] : [],
+      };
+  const item = await query<{ id: string }>(
+    `INSERT INTO platform_items (platform, platform_product_id, status, master_product_id)
+     VALUES ($1, $2, 'suggestion', $3)
+     ON CONFLICT (platform, platform_product_id) DO UPDATE
+       SET master_product_id = COALESCE(platform_items.master_product_id, EXCLUDED.master_product_id),
+           updated_at = now()
+     RETURNING id`,
+    [channel, listing.externalId, row.id]
+  );
+  const platformItemId = item.rows[0]?.id;
+  if (!platformItemId) return;
+  const open = await query<{ id: string }>(
+    `SELECT id FROM matching_queue WHERE platform_item_id = $1 AND status = 'pending' LIMIT 1`,
+    [platformItemId]
+  );
+  if (open.rows[0]) return;
+  await query(
+    `INSERT INTO matching_queue (platform_item_id, platform_raw_data, suggested_matches, best_score, status, expires_at)
+     VALUES ($1, $2, $3, 80, 'pending', NULL)`,
+    [platformItemId, JSON.stringify(raw), JSON.stringify([{
+      master_product_id: row.id,
+      erp_sku: row.erp_sku,
+      name: row.name,
+      strongSignals: signals,
+      auxiliarySignals: [],
+      score: 80,
+    }])]
+  );
+}
+
+async function linkIfMissing(row: Omit<HubRow, 'image_count'>, marketplace: string, listing: MarketplaceListing): Promise<boolean> {
+  const signals = signalsFor(row, listing);
+  const status = linkStatusFromSignals(signals);
   try {
-    const inserted = await query(
-      `INSERT INTO channel_listing_links (product_id, channel, listing_id, listing_title, listing_price, listing_status, link_status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'vinculado')
-       ON CONFLICT DO NOTHING
-       RETURNING id`,
-      [productId, marketplace, listing.externalId, listing.title, listing.price, listing.status]
+    const existing = await query<{ link_status: string }>(
+      `SELECT link_status FROM channel_listing_links WHERE product_id = $1 AND channel = $2`,
+      [row.id, marketplace]
     );
-    return (inserted.rowCount ?? 0) > 0;
+    if (existing.rows[0]?.link_status === 'vinculado') return false;
+    if (existing.rows[0]) {
+      if (status !== 'vinculado') return false;
+      await query(
+        `UPDATE channel_listing_links
+         SET listing_id = $3, listing_title = $4, listing_price = $5, listing_status = $6, link_status = 'vinculado'
+         WHERE product_id = $1 AND channel = $2 AND link_status = 'sugerido'`,
+        [row.id, marketplace, listing.externalId, listing.title, listing.price, listing.status]
+      );
+      return true;
+    }
+    await query(
+      `INSERT INTO channel_listing_links (product_id, channel, listing_id, listing_title, listing_price, listing_status, link_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [row.id, marketplace, listing.externalId, listing.title, listing.price, listing.status, status]
+    );
+    if (status === 'sugerido') await rememberSuggestion(row, marketplace, listing, signals);
+    return status === 'vinculado';
   } catch (error) {
     logger.warn('Conflito de vínculo ignorado', {
-      productId,
+      productId: row.id,
       marketplace,
       listingId: listing.externalId,
       error: error instanceof Error ? error.message : String(error),
@@ -180,7 +259,7 @@ export async function reconcileListings(
   if (ids.length === 0) return { snapshots: 0, alerts: 0, linked: 0, scanned: 0, lastId: null };
   const idList = ids.map((_, index) => `$${index + 1}`).join(', ');
   const found = await query<Omit<HubRow, 'image_count'> & { is_default: boolean; variant_sku: string | null }>(
-    `SELECT mp.id, mp.erp_id, mp.erp_sku, pv.erp_sku AS variant_sku, pv.is_default,
+    `SELECT mp.id, mp.erp_id, mp.erp_sku, mp.name, pv.erp_sku AS variant_sku, pv.is_default,
             pv.ean, pv.price::text AS price, pv.stock::text AS stock
      FROM master_products mp
      INNER JOIN product_variants pv ON pv.master_product_id = mp.id
@@ -190,7 +269,7 @@ export async function reconcileListings(
   const chosen = new Map<string, Omit<HubRow, 'image_count'>>();
   for (const row of found.rows) {
     const current = chosen.get(row.id);
-    const candidate = { id: row.id, erp_id: row.erp_id, erp_sku: row.variant_sku?.trim() || row.erp_sku, ean: row.ean, price: row.price, stock: row.stock };
+    const candidate = { id: row.id, erp_id: row.erp_id, erp_sku: row.variant_sku?.trim() || row.erp_sku, name: row.name, ean: row.ean, price: row.price, stock: row.stock };
     if (!current) {
       chosen.set(row.id, candidate);
       continue;
@@ -220,7 +299,7 @@ export async function reconcileListings(
   for (const raw of products.rows) {
     const row: HubRow = { ...raw, image_count: imagesByProduct.get(raw.id) ?? 0 };
     if (process.env.VITEST !== 'true' && (asNumber(row.price) === null || (asNumber(row.price) ?? 0) <= 0 || asNumber(row.stock) === null)) {
-      const refreshed = await refreshMissingCommerce(createErpConnector('bling'), row.erp_id);
+      const refreshed = await refreshMissingCommerce(activeErpConnector(), row.erp_id);
       if (refreshed.price !== null) row.price = String(refreshed.price);
       if (refreshed.stock !== null) row.stock = String(refreshed.stock);
     }
@@ -233,6 +312,7 @@ export async function reconcileListings(
             id: row.id,
             sku,
             ean: row.ean,
+            name: row.name,
             price: asNumber(row.price),
             stock: asNumber(row.stock),
           };
@@ -254,7 +334,7 @@ export async function reconcileListings(
         );
         continue;
       }
-      if (await linkIfMissing(row.id, channel, listing)) linked += 1;
+      if (await linkIfMissing(row, channel, listing)) linked += 1;
       const found = compare(row, channel, listing, sellerProducts.has(row.id));
       await saveSnapshot(row.id, channel, listing, found.map((item) => ({ kind: item.kind, message: item.message })));
       snapshots += 1;

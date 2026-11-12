@@ -1,15 +1,19 @@
 import crypto from 'node:crypto';
 import request from 'supertest';
+import { UnrecoverableError } from 'bullmq';
 import { newDb, DataType } from 'pg-mem';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { createUser } from '../auth/service.js';
 import { EXISTING_LISTING_MESSAGE, NO_SELLER_WAREHOUSE_MESSAGE } from '../catalog/completeness.js';
+import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
+import { resetNuvemshopRateLimitForTests, setNuvemshopFetchForTests } from '../connectors/strategy/nuvemshop-http.js';
+import { NuvemshopPublishError } from '../connectors/strategy/nuvemshop-publish.js';
 import { ListingDraft } from '../connectors/strategy/types.js';
 import { DbPoolLike, query, setPool } from '../db/pool.js';
 import { runAllMigrationsUp } from '../db/migrator.js';
 import { setRedis } from '../lib/redis.js';
-import { CHECKLIST_BLOCKED_MESSAGE, DRY_RUN_LOG, processPublishQueueItem } from '../queues/publish-queue.js';
+import { CHECKLIST_BLOCKED_MESSAGE, DRY_RUN_LOG, processPublishQueueItem, PublishPausedError, setPublishingPaused } from '../queues/publish-queue.js';
 
 describe('P2 — fila de publicação', () => {
   const app = createApp();
@@ -397,5 +401,202 @@ describe('P2 — fila de publicação', () => {
     expect(response.body.pendencies).toEqual(
       expect.arrayContaining([expect.objectContaining({ code: 'hub_category', href: '/catalogo?status=completude&pendencia=hub_category' })])
     );
+  });
+
+  it('o admin pausa e libera a fila de publicação', async () => {
+    const paused = await request(app)
+      .put('/api/admin/publish-pause')
+      .set('Cookie', cookie)
+      .send({ paused: true });
+    expect(paused.status).toBe(200);
+    expect(paused.body.paused).toBe(true);
+    const read = await request(app).get('/api/admin/publish-pause').set('Cookie', cookie);
+    expect(read.status).toBe(200);
+    expect(read.body.paused).toBe(true);
+    const resumed = await request(app)
+      .put('/api/admin/publish-pause')
+      .set('Cookie', cookie)
+      .send({ paused: false });
+    expect(resumed.status).toBe(200);
+    expect(resumed.body.paused).toBe(false);
+  });
+
+  it('cria o anúncio na Nuvemshop uma vez, com o preço atual, e não repete o POST', async () => {
+    const category = await query<{ id: string }>(`INSERT INTO hub_categories (name) VALUES ('Nuvemshop') RETURNING id`);
+    const categoryId = category.rows[0]!.id;
+    const product = await query<{ id: string }>(
+      `INSERT INTO master_products (erp_id, erp_sku, name, brand, bling_tipo, product_format)
+       VALUES ('ns-novo', 'NS-NOVO', 'Produto Nuvemshop', 'JHS', 'P', 'S')
+       RETURNING id`
+    );
+    const productId = product.rows[0]!.id;
+    await query(
+      `UPDATE master_products
+       SET hub_category_id = $2, ncm_status = 'valid', ncm_fiscal_risk = false
+       WHERE id = $1`,
+      [productId, categoryId]
+    );
+    const variant = await query<{ id: string }>(
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, stock, catalog_stock)
+       VALUES ($1, 'NS-NOVO', true, 'S', 10, 2, 2)
+       RETURNING id`,
+      [productId]
+    );
+    await query(
+      `INSERT INTO product_images (master_product_id, source_url, url_normalized, source_platform, is_cover_eligible)
+       VALUES ($1, 'https://example.com/ns.jpg', 'https://example.com/ns.jpg', 'bling', true)`,
+      [productId]
+    );
+    await query(
+      `INSERT INTO stock_warehouses (bling_warehouse_id, name, role, include_in_push)
+       VALUES ('DEP-NS', 'Loja Nuvemshop', 'seller', true)`
+    );
+    await query(
+      `INSERT INTO variant_stock_balances (variant_id, bling_warehouse_id, saldo_fisico, saldo_virtual)
+       VALUES ($1, 'DEP-NS', 2, 2)`,
+      [variant.rows[0]!.id]
+    );
+    await request(app)
+      .put(`/api/catalog/categories/${categoryId}/channels/nuvemshop`)
+      .set('Cookie', cookie)
+      .send({
+        channelCategoryId: 'NS-CAT',
+        channelCategoryName: 'Casa',
+        attributes: [
+          { channelAttributeId: 'BRAND', channelAttributeName: 'Marca', required: true, mode: 'fixed', fixedValue: 'JHS' },
+        ],
+      });
+    await query(
+      `UPDATE product_variants SET price = 49.9, stock = 7 WHERE id = $1`,
+      [variant.rows[0]!.id]
+    );
+
+    const previousStore = process.env.NUVEMSHOP_STORE_ID;
+    const previousAllow = process.env.LIVE_PUBLISH_ALLOWLIST;
+    process.env.NUVEMSHOP_STORE_ID = '998877';
+    delete process.env.LIVE_PUBLISH_ALLOWLIST;
+    resetNuvemshopRateLimitForTests();
+    await new OAuthTokenManager().upsertToken({
+      provider: 'nuvemshop',
+      accessToken: 'token-de-teste',
+      refreshToken: null,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+
+    const posts: string[] = [];
+    let mode: 'retry' | 'reject' | 'create' | 'exists' = 'retry';
+    setNuvemshopFetchForTests(async (url, init) => {
+      const json = (status: number, body: unknown) => new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json', 'x-rate-limit-remaining': '20' },
+      });
+      if (init?.method === 'POST') {
+        posts.push(String(init.body ?? ''));
+        if (mode === 'retry') return json(503, { message: 'indisponível' });
+        if (mode === 'reject') return json(400, { description: 'nome inválido' });
+        return json(201, { id: 88421 });
+      }
+      if (url.includes('/products/sku/')) {
+        if (mode === 'exists') return json(200, { product_id: 88421, sku: 'NS-NOVO', price: '49.90', stock: 7 });
+        return json(404, {});
+      }
+      return json(200, []);
+    });
+
+    const enqueue = async () => {
+      const inserted = await query<{ id: string }>(
+        `INSERT INTO publish_queue (product_id, channel, payload_json)
+         VALUES ($1, 'nuvemshop', $2)
+         RETURNING id`,
+        [productId, JSON.stringify({ sku: 'NS-NOVO', title: 'Preço velho', price: 1, stock: 1, attributes: [] })]
+      );
+      return inserted.rows[0]!.id;
+    };
+
+    try {
+      await setPublishingPaused(true);
+      const heldId = await enqueue();
+      await expect(processPublishQueueItem(heldId, { live: true })).rejects.toBeInstanceOf(PublishPausedError);
+      const held = await query<{ status: string }>(`SELECT status FROM publish_queue WHERE id = $1`, [heldId]);
+      expect(held.rows[0]?.status).toBe('pending');
+      expect(posts).toHaveLength(0);
+      await setPublishingPaused(false);
+
+      const simulatedId = await enqueue();
+      await processPublishQueueItem(simulatedId, { live: true });
+      const simulated = await query<{ status: string; error_message: string }>(
+        `SELECT status, error_message FROM publish_queue WHERE id = $1`,
+        [simulatedId]
+      );
+      expect(simulated.rows[0]).toEqual({ status: 'success', error_message: DRY_RUN_LOG });
+      expect(posts).toHaveLength(0);
+
+      process.env.LIVE_PUBLISH_ALLOWLIST = 'NS-NOVO';
+      const retryId = await enqueue();
+      await expect(processPublishQueueItem(retryId, { live: true })).rejects.toBeInstanceOf(NuvemshopPublishError);
+      const retryRow = await query<{ status: string }>(`SELECT status FROM publish_queue WHERE id = $1`, [retryId]);
+      expect(retryRow.rows[0]?.status).toBe('pending');
+      expect(posts).toHaveLength(1);
+
+      mode = 'reject';
+      const rejectedId = await enqueue();
+      await expect(processPublishQueueItem(rejectedId, { live: true })).rejects.toBeInstanceOf(UnrecoverableError);
+      const rejected = await query<{ status: string; error_message: string }>(
+        `SELECT status, error_message FROM publish_queue WHERE id = $1`,
+        [rejectedId]
+      );
+      expect(rejected.rows[0]?.status).toBe('failed');
+      expect(rejected.rows[0]?.error_message).toContain('400');
+      expect(posts).toHaveLength(2);
+
+      mode = 'create';
+      const createdId = await enqueue();
+      await processPublishQueueItem(createdId, { live: true });
+      expect(posts).toHaveLength(3);
+      const sent = JSON.parse(posts[2]!) as { name: { pt: string }; variants: Array<{ price: string; stock: number; sku: string }> };
+      expect(sent.name.pt).toBe('Produto Nuvemshop');
+      expect(sent.variants[0]).toMatchObject({ price: '49.90', stock: 7, sku: 'NS-NOVO' });
+      const stored = await query<{ status: string; payload_json: { price: number } | string }>(
+        `SELECT status, payload_json FROM publish_queue WHERE id = $1`,
+        [createdId]
+      );
+      const saved = stored.rows[0]?.payload_json;
+      const savedPayload = typeof saved === 'string' ? JSON.parse(saved) as { price: number } : saved;
+      expect(stored.rows[0]?.status).toBe('success');
+      expect(savedPayload?.price).toBe(49.9);
+      const link = await query<{ listing_id: string }>(
+        `SELECT listing_id FROM channel_listing_links WHERE product_id = $1 AND channel = 'nuvemshop'`,
+        [productId]
+      );
+      expect(link.rows).toEqual([{ listing_id: '88421' }]);
+
+      const duplicateId = await enqueue();
+      await processPublishQueueItem(duplicateId, { live: true });
+      expect(posts).toHaveLength(3);
+      const duplicate = await query<{ status: string; error_message: string }>(
+        `SELECT status, error_message FROM publish_queue WHERE id = $1`,
+        [duplicateId]
+      );
+      expect(duplicate.rows[0]).toEqual({ status: 'failed', error_message: EXISTING_LISTING_MESSAGE });
+
+      await query(`DELETE FROM channel_listing_links WHERE product_id = $1 AND channel = 'nuvemshop'`, [productId]);
+      mode = 'exists';
+      const replayId = await enqueue();
+      await processPublishQueueItem(replayId, { live: true });
+      expect(posts).toHaveLength(3);
+      const rebound = await query<{ listing_id: string }>(
+        `SELECT listing_id FROM channel_listing_links WHERE product_id = $1 AND channel = 'nuvemshop'`,
+        [productId]
+      );
+      expect(rebound.rows).toEqual([{ listing_id: '88421' }]);
+    } finally {
+      setNuvemshopFetchForTests(null);
+      resetNuvemshopRateLimitForTests();
+      if (previousStore === undefined) delete process.env.NUVEMSHOP_STORE_ID;
+      else process.env.NUVEMSHOP_STORE_ID = previousStore;
+      if (previousAllow === undefined) delete process.env.LIVE_PUBLISH_ALLOWLIST;
+      else process.env.LIVE_PUBLISH_ALLOWLIST = previousAllow;
+      await setPublishingPaused(false);
+    }
   });
 });

@@ -1,7 +1,7 @@
 import React from 'react';
 import { BrandLogo } from './brand-logo';
 
-export type IntegrationBadgeKind = 'blocked' | 'ready' | 'synced' | 'unlinked';
+export type IntegrationBadgeKind = 'blocked' | 'ready' | 'synced' | 'unlinked' | 'attention';
 
 const COPY: Record<IntegrationBadgeKind, { label: string; tooltip: string; className: string }> = {
   blocked: {
@@ -24,10 +24,16 @@ const COPY: Record<IntegrationBadgeKind, { label: string; tooltip: string; class
     tooltip: 'Produto não existe neste canal',
     className: 'border-border-color bg-bg-base text-text-muted',
   },
+  attention: {
+    label: 'Vinculado com Pendência',
+    tooltip: 'Vinculado ao canal, com pendência fiscal de NCM.',
+    className: 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-100',
+  },
 };
 
 export function integrationBadgeKind(input: { visual: string; ready: boolean }): IntegrationBadgeKind {
   if (input.visual === 'blocked') return 'blocked';
+  if (input.visual === 'attention') return 'attention';
   if (input.visual === 'connected') return 'synced';
   if (input.ready) return 'ready';
   return 'unlinked';

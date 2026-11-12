@@ -58,6 +58,18 @@ describe('status de integração por canal', () => {
     expect(view.blockers.map((item) => item.code)).toEqual(expect.arrayContaining(['sku', 'ncm']));
   });
 
+  it('mostra âmbar quando o produto vinculado tem NCM bloqueado', () => {
+    const view = describeChannelIntegration({
+      platform: 'nuvemshop',
+      linkStatus: 'vinculado',
+      sendRequested: false,
+      checklist: checklist({ ncmStatus: 'pending_approval' }),
+    });
+    expect(view.visual).toBe('attention');
+    expect(view.label).toBe('Vinculado com Pendência');
+    expect(view.ready).toBe(false);
+  });
+
   it('mostra o canal como vinculado mesmo quando a completude ainda tem pendência', () => {
     const view = describeChannelIntegration({
       platform: 'nuvemshop',

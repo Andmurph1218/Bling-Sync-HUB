@@ -4,7 +4,7 @@ import { Redis } from 'ioredis';
 import { FullSyncHooks, runFullCatalogSync } from '../catalog/full-sync.js';
 import { env } from '../config/env.js';
 import { loadConnectors } from '../connectors/load.js';
-import { createErpConnector } from '../connectors/strategy/factory.js';
+import { activeErpConnector } from '../connectors/strategy/factory.js';
 import { ErpConnector } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
@@ -186,11 +186,12 @@ export async function processErpSyncPage(
       stopReason: report.stopReason,
       erros: report.errors,
     });
+    const message = report.errors[report.errors.length - 1] ?? 'Falha ao ler o ERP.';
     await query(
       `UPDATE sync_status SET status = 'failed', error_message = $1, updated_at = now() WHERE id = 1`,
-      [report.errors[report.errors.length - 1] ?? 'Falha ao ler o ERP.']
+      [message]
     );
-    return;
+    throw new Error(message);
   }
   const latest = await readErpSyncStatus();
   if (latest.lastCompletedPage >= page) return;
@@ -237,7 +238,7 @@ export function startErpSyncWorker(): Worker<PageJob> {
     async (job, token) => {
       try {
         await loadConnectors();
-        const erp = createErpConnector('bling');
+        const erp = activeErpConnector();
         await processErpSyncPage(erp, job.data.page, {
           pageSize: ERP_SYNC_PAGE_SIZE,
           delayMs: ERP_SYNC_DELAY_MS,

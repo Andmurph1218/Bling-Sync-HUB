@@ -16,6 +16,14 @@ interface PauseRedis {
 
 let resumeAt = 0;
 let chain: Promise<void> = Promise.resolve();
+let fetchOverride: ((input: string, init?: RequestInit) => Promise<Response>) | null = null;
+
+/** A simulação troca o transporte. Fora do teste, a chamada segue para a Nuvemshop. */
+export function setNuvemshopFetchForTests(
+  fetchImpl: ((input: string, init?: RequestInit) => Promise<Response>) | null
+): void {
+  fetchOverride = fetchImpl;
+}
 
 export function resetNuvemshopRateLimitForTests(): void {
   resumeAt = 0;
@@ -131,6 +139,6 @@ export async function withNuvemshopLimit<T>(
 }
 
 export async function nuvemshopFetch(url: string, init?: RequestInit, clock?: NuvemshopClock): Promise<Response> {
-  const call = clock?.fetch ?? fetch;
+  const call = clock?.fetch ?? fetchOverride ?? fetch;
   return withNuvemshopLimit(() => call(url, init), (response) => response.headers, clock);
 }

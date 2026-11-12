@@ -3,7 +3,7 @@ import { ErpConnector } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { isAllowedImageHost, EnqueueImageCandidate } from '../engines/iqre.js';
 import { checklistForChannels } from './publish-preview.js';
-import { applyVariantStockBalancesFromBling, blingChangedAt, isNewerHubSync, runFullProductCatalogPipeline } from '../orchestrator/pipeline.js';
+import { applyVariantStockBalancesFromBling, isNewerHubSync, runFullProductCatalogPipeline } from '../orchestrator/pipeline.js';
 import { StockBalanceItem } from '../contracts/mappers.js';
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -242,17 +242,6 @@ async function archiveVariationProduct(externalId: string): Promise<number> {
   }
 }
 
-function inboundPrice(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
-    const text = value.trim();
-    const normalized = text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text;
-    const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
-
 /** Atualiza preço e estoque de um produto que já está no HUB, pelo SKU da variante. */
 export async function refreshMissingCommerce(
   erp: ErpConnector,
@@ -274,50 +263,36 @@ export async function refreshMissingCommerce(
       stock: priced?.stock == null ? null : Number(priced.stock),
     };
   }
-  let raw: unknown;
+  if (!erp.readCommerce) return { price: null, stock: null };
+  let snapshot: Awaited<ReturnType<NonNullable<ErpConnector['readCommerce']>>>;
   try {
-    raw = await erp.pullCatalogProduct(externalId);
+    snapshot = await erp.readCommerce(externalId);
   } catch {
     return { price: null, stock: null };
   }
-  const payload = asProduct(raw);
-  if (!payload) return { price: null, stock: null };
-  const changedAt = blingChangedAt(payload);
+  if (!snapshot) return { price: null, stock: null };
   const stamp = await query<{ last_bling_sync: Date | null }>(
     `SELECT last_bling_sync FROM master_products WHERE erp_id = $1`,
     [externalId]
   );
-  const stale = isNewerHubSync(changedAt, stamp.rows[0]?.last_bling_sync ?? null);
-  if (payload.formato === 'V') await hydrateVariations(erp, payload);
-  const variants = payload.formato === 'V' && (payload.variacoes ?? []).length > 0
-    ? payload.variacoes ?? []
-    : [{ id: payload.id, codigo: payload.codigo, preco: payload.preco }];
+  const stale = isNewerHubSync(snapshot.changedAt, stamp.rows[0]?.last_bling_sync ?? null);
   let price: number | null = null;
-  for (const variant of variants) {
+  for (const line of snapshot.lines) {
     if (stale) break;
-    const nextPrice = inboundPrice(variant.preco);
-    if (variant.preco === undefined || variant.preco === null || nextPrice <= 0) continue;
-    const sku = String(variant.codigo ?? '').trim();
-    const target = current.rows.find((row) => (row.erp_sku ?? '').trim() === sku)
+    if (line.price === null || line.price <= 0) continue;
+    const target = current.rows.find((row) => (row.erp_sku ?? '').trim() === line.sku)
       ?? current.rows.find((row) => row.is_default)
       ?? current.rows[0];
     if (!target) continue;
     await query(
       `UPDATE product_variants SET price = $2, updated_at = now() WHERE id = $1`,
-      [target.id, nextPrice]
+      [target.id, line.price]
     );
-    if (sku === String(payload.codigo ?? '').trim() || target.is_default) price = nextPrice;
+    if (line.sku === snapshot.sku || target.is_default) price = line.price;
   }
-  const balances = await stockForBatch(erp, [payload]);
-  const attached = (payload as { estoqueSaldos?: unknown[] }).estoqueSaldos;
-  if (Array.isArray(attached)) {
-    for (const item of attached) {
-      const balance = item as StockBalanceItem;
-      const id = balance.produto?.id;
-      if (id !== undefined && id !== null) balances.set(String(id), item as InboundStockBalance);
-    }
-  }
-  await refreshStoredStock(balances, String(payload.codigo ?? ''), changedAt);
+  const balances = new Map<string, InboundStockBalance>();
+  for (const balance of snapshot.balances) balances.set(balance.externalId, balance.raw as InboundStockBalance);
+  await refreshStoredStock(balances, snapshot.sku, snapshot.changedAt);
   const stockRow = await query<{ stock: string | null }>(
     `SELECT pv.stock::text AS stock
      FROM product_variants pv

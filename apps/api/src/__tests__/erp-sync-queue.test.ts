@@ -4,7 +4,7 @@ import { newDb, DataType } from 'pg-mem';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
 import { createUser } from '../auth/service.js';
-import { DbPoolLike, setPool } from '../db/pool.js';
+import { DbPoolLike, query, setPool } from '../db/pool.js';
 import { runAllMigrationsUp } from '../db/migrator.js';
 import { setRedis } from '../lib/redis.js';
 import { ErpConnector } from '../connectors/strategy/types.js';
@@ -111,5 +111,22 @@ describe('fila de sync do ERP', () => {
     const done = await request(app).get('/api/admin/sync-status').set('Cookie', cookie);
     expect(done.body).toMatchObject({ status: 'completed', processed: 3, total: 3 });
     expect(saved).toEqual(['SKU-1', 'SKU-2', 'SKU-3']);
+  });
+
+  it('lança a falha da página para o BullMQ repetir sem avançar o cursor', async () => {
+    await query(
+      `UPDATE sync_status
+       SET status = 'idle', processed = 0, last_completed_page = 0, error_message = NULL
+       WHERE id = 1`
+    );
+    const failing = erp();
+    failing.listCatalogPage = async () => {
+      throw new Error('erp indisponível');
+    };
+    await expect(processErpSyncPage(failing, 1, { pageSize: 2, delayMs: 0 })).rejects.toThrow('erp indisponível');
+    const status = await readErpSyncStatus();
+    expect(status.status).toBe('failed');
+    expect(status.lastCompletedPage).toBe(0);
+    expect(status.errorMessage).toBe('erp indisponível');
   });
 });

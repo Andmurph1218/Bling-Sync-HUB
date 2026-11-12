@@ -1,6 +1,6 @@
 import { CatalogChannel, ChecklistResult } from './completeness.js';
 
-export type IntegrationVisual = 'connected' | 'pending' | 'blocked' | 'absent';
+export type IntegrationVisual = 'connected' | 'pending' | 'blocked' | 'absent' | 'attention';
 
 export interface ChannelBlocker {
   code: string;
@@ -24,6 +24,7 @@ const LABEL: Record<IntegrationVisual, string> = {
   pending: 'Pendente',
   blocked: 'Bloqueado',
   absent: 'Não integrado',
+  attention: 'Vinculado com Pendência',
 };
 
 function bottleneckTitle(code: string, fallback: string, percent: number): string {
@@ -58,15 +59,19 @@ export function describeChannelIntegration(input: {
   }));
   const critical = blockers.filter((item) => item.code === 'sku' || item.code === 'ncm');
   const linked = input.linkStatus === 'linked' || input.linkStatus === 'vinculado';
+  const ncmBlocked = failing.some((item) => item.code === 'ncm' || item.code === 'ncm_approval');
 
   let visual: IntegrationVisual;
-  if (linked) visual = 'connected';
+  if (linked && ncmBlocked) visual = 'attention';
+  else if (linked) visual = 'connected';
   else if (critical.length > 0) visual = 'blocked';
   else if (failing.length > 0) visual = 'pending';
   else if (!input.sendRequested) visual = 'absent';
   else visual = 'pending';
 
-  const tooltip = linked
+  const tooltip = visual === 'attention'
+    ? 'Vinculado ao canal, com pendência fiscal de NCM.'
+    : linked
     ? input.checklist.ready
       ? 'Vinculado e apto para o canal'
       : 'Vinculado ao canal'

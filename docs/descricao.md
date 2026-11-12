@@ -1,119 +1,68 @@
-# Resumo Simples do Projeto
+# JH Sync Hub — Resumo Executivo e Arquitetura (iPaaS)
 
-Estado em 11/11/2026: o painel está em `https://hub.jhshopping.com.br`. O detalhe operacional está em [status-implantacao.md](status-implantacao.md), seção 13. A volta do canal está em [arquitetura-reversa.md](arquitetura-reversa.md).
+**Estado em 12/11/2026:** O HUB está no ar em `https://hub.jhshopping.com.br` (DigitalOcean). 
+A versão V2 está concluída. O sistema opera em **Modo Shadow** (`ENABLE_LIVE_PUBLISHING=false`), pronto para o Teste Canário (Go-Live controlado).
 
-## O Que É
+## 1. O Que É
+O **JH Sync Hub** é um **iPaaS (Integration Platform as a Service)** focado em normalização de catálogo. Ele atua como maestro entre o **ERP (Bling)** e os **Marketplaces (Mercado Livre, Nuvemshop, Shopee)**.
 
-O **JH Sync Hub** sincroniza produtos entre o **Bling (ERP)** e os marketplaces **Mercado Livre** e **Nuvemshop**.
+## 2. O Problema Que Resolve
+O catálogo estava fragmentado e incompleto. O ERP era "pobre" em conteúdo, e os marketplaces exigiam atributos diferentes, gerando retrabalho, anúncios duplicados e riscos de *overselling* (vender o que não tem).
 
-## O Problema Que Resolve
+## 3. A Ideia Central: Soberania e Enriquecimento
+**"O Bling manda. Os marketplaces enriquecem. O HUB orquestra."**
 
-Hoje você tem produtos cadastrados em três lugares diferentes, com informações incompletas e desalinhadas. Cada marketplace tem campos obrigatórios próprios, e o Bling acaba ficando "pobre" de dados. Você precisa **centralizar tudo no Bling** e distribuir para os canais automaticamente.
+- **O Bling é intocável:** Preço, Estoque, NCM, CEST, EAN e Custo são de propriedade exclusiva do ERP. O HUB nunca sobrescreve esses dados no Bling. Se houver divergência no marketplace, o HUB apenas **alerta** o operador.
+- **O HUB é o maestro (PIM):** Ele lê do Bling, enriquece com dados dos canais (ex: imagens melhores), valida as regras de cada marketplace e distribui.
+- **O Marketplace é o destino:** O HUB prepara o pacote perfeito para a Nuvemshop ou Mercado Livre, respeitando os limites de API e a soberania fiscal.
 
-## A Ideia Central
+## 4. Arquitetura de Software (Hexagonal / Ports & Adapters)
+O HUB foi refatorado para ser **agnóstico ao ERP**. 
+- O núcleo do sistema não conhece o Bling. Ele apenas fala a língua universal (`erp_id`, `erp_sku`).
+- O `BlingConnector` é uma caixa-preta isolada em `apps/api/src/connectors/bling`.
+- Um teste de arquitetura (`architecture.test.ts`) impede que o Bling "vaze" para o núcleo. Se amanhã você integrar a Omie ou o SAP, o núcleo não muda uma linha.
 
-**O Bling manda. Os marketplaces ajudam.**
+## 5. O Motor de Integração (Como funciona na prática)
 
-- **Bling é o dono** de: preço, estoque, NCM, EAN, CEST, custo — ninguém sobrescreve.
-- **Marketplaces enriquecem** o que o Bling não tem: título otimizado, descrição rica, imagens extras, atributos específicos de canal.
-- **Nada fiscal ou financeiro é tocado** por dado vindo de marketplace.
+1. **Ingestão (Sync & Webhooks):** O HUB puxa 10.000 produtos do Bling em lotes (respeitando rate limit) ou via webhook em tempo real.
+2. **Enriquecimento (Worker assíncrono):** O HUB busca NCM e imagens no Bling, atualiza seu banco local e recalcula a completude em tempo real na tela do operador.
+3. **Reconciliação (A "Volta" do Diagrama):** A cada 6 horas, o HUB lê os anúncios da Nuvemshop/ML, compara com o ERP e gera alertas (ex: "Preço do ML está R$ 10 mais barato que o Bling" ou "Vendeu no canal, estoque do Bling não baixou").
+4. **Publicação (BullMQ):** O operador simula o envio (Dry-run). Se o checklist estiver verde, o job vai para a fila e é publicado. O HUB previne duplicidade: se o produto já existe no canal, ele vincula (`channel_listing_links`) em vez de criar um anúncio novo.
 
-## Como Funciona na Prática
+## 6. Governança de Dados (Regras Blindadas pela Auditoria)
 
-```
-1. Lê o produto no Bling
-2. Compara com o mesmo produto no ML e na Nuvemshop
-3. Decide campo por campo quem tem o melhor valor:
-   - Fiscal/financeiro? → Bling sempre
-   - Conteúdo vazio ou ruim no Bling? → pega do marketplace
-   - Imagens? → junta todas, sem repetir
-4. Se preço, estoque ou fiscal divergirem → gera alerta. O HUB não grava isso de volta no Bling
-5. Publica nos canais a partir do HUB, com preço e estoque lidos do ERP. A escrita ao vivo só liga com `ENABLE_LIVE_PUBLISHING=true`
-```
+| Grupo de Dado | Soberania | Regra de Ouro |
+| :--- | :--- | :--- |
+| **A (Comercial/Fiscal)** | Bling | Preço, Estoque, NCM, CEST. Nunca alterados pelo HUB. |
+| **A.5 (EAN)** | Bling | Se importado de marketplace, exige aprovação humana (NVE). |
+| **B (Conteúdo)** | Bling/HUB | Título e descrição. O HUB pode sobrescrever para otimizar SEO. |
+| **C (Mídia)** | HUB | Imagens e vídeos. O HUB importa imagens dos canais para enriquecer. |
+| **Estoque** | Bling | Somente depósitos do tipo `seller` entram na soma. O Full (`ml_full`) é ignorado. |
 
-## Os 4 Grupos de Dados
+## 7. Os Motores (Internos) Traduzidos para o Operador
+Para o usuário, o HUB não mostra "NVE" ou "IQRE". Ele mostra:
+- **Catálogo:** Onde os produtos vivem.
+- **Problemas:** Onde os erros (fiscais, duplicidade, divergência) aparecem com o botão "Corrigir".
+- **Atributos:** Onde se faz o "De/Para" das categorias do Bling para o Mercado Livre/Nuvemshop.
+- **Lista de Envio:** Onde os produtos 100% prontos são publicados.
 
-| Grupo | O Que É | Quem Manda |
-|---|---|---|
-| **A** | Preço, estoque, NCM, CEST, custo, SKU | Bling (intocável) |
-| **A.5** | EAN (código de barras) | Bling, mas se vazio, precisa de aprovação humana |
-| **B** | Nome, descrição, marca, peso, dimensões | Bling se já tem; senão, marketplace enriquece |
-| **C** | Imagens, keywords, vídeos | Soma de todas as fontes |
-| **D** | Envio Bling → marketplaces | Preço e estoque vão do Bling para os canais |
+## 8. Stack Técnica e Infraestrutura
+- **Infraestrutura:** DigitalOcean (Droplet Ubuntu), Caddy (HTTPS/Proxy), Systemd.
+- **Backend:** Node.js + TypeScript, Express, BullMQ (Filas assíncronas).
+- **Banco:** PostgreSQL (com índices otimizados e migrations versionadas via `tsx`).
+- **Frontend:** Next.js, Tailwind CSS (Dark/Light mode), Design focado em UX Operacional.
+- **Segurança:** AES-256-GCM para criptografia de tokens, HMAC nos webhooks, RBAC (Admin vs. Operador).
 
-## Os 10 "Motores" (Componentes)
+## 9. O Que Fica de Fora (Escopo Atual)
+- Emissão de NF-e (continua no Bling).
+- Processamento de Pedidos e Frete.
+- Escrita de Preço e Estoque no ERP.
 
-Cada um cuida de uma parte:
+## 10. Próximos Passos (Rumo ao Go-Live Total)
 
-1. **PIRE** — Descobre qual produto do Bling corresponde a qual anúncio no ML/Nuvemshop
-2. **VIR** — Mesma coisa, mas para variações (cor, tamanho)
-3. **GVE** — Valida EAN (código de barras) com algoritmo oficial
-4. **NVE** — Valida NCM (código fiscal) com 8 dígitos
-5. **CQS** — Avalia qualidade do texto (nome, descrição, marca)
-6. **IQRE** — Cuida das imagens (deduplica, valida, verifica direitos)
-7. **CRE** — Dá 3 notas por produto (uma por canal)
-8. **APE** — Faz o envio para os marketplaces de forma atômica
-9. **WIG** — Evita processar webhook duplicado
-10. **DLM** — Limpa dados velhos e arquiva o que é fiscal
-
-## Decisões Importantes de Segurança
-
-- **NCM nunca é preenchido automaticamente** — precisa de 2 pessoas aprovando
-- **EAN do marketplace não entra sozinho** — fica em fila de aprovação humana
-- **Divergência fiscal bloqueia publicação** — não ignora silenciosamente
-- **Nada é sobrescrito sem rastro** — tudo vai para log com quem, quando, o quê
-- **Dados fiscais ficam guardados 5 anos** — obrigação legal
-- **Preço abaixo do custo gera alerta crítico** — mas não bloqueia
-
-## Convivência com a Integração Nativa do Bling
-
-O Bling já tem integração nativa com ML e Nuvemshop. **O hub não disputa essa escrita**:
-
-- Enquanto a integração nativa do Bling estiver ligada, é ela quem atualiza estoque e preço de anúncio já publicado.
-- O hub cuida de **conteúdo** (título, descrição, imagens) e de **criação de anúncio novo**.
-- Para o hub assumir estoque/preço, você precisa **desligar a nativa no Bling primeiro** (manual, por canal).
-
-## Estoque: Regra Clara
-
-- **Estoque publicado** = soma dos depósitos do vendedor marcados como "usar no push"
-- **Estoque Full do Mercado Livre** (`meli_facility`) = **propriedade do ML**, o hub não escreve nem lê
-- **Kit do Bling** = 1 SKU vendável, não explode em vários anúncios
-
-## O Que Fica de Fora
-
-- Pedidos
-- Financeiro
-- Emissão de NF-e (continua no Bling)
-- Frete e transportadora
-
-## Stack Técnica
-
-- **Backend**: Node.js + TypeScript
-- **Banco**: PostgreSQL (com particionamento)
-- **Cache/Fila**: Redis + BullMQ
-- **Frontend**: Next.js + Tailwind
-- **Imagens**: Sharp
-- **Deploy**: Docker
-
-## Cronograma
-
-**31 a 46 dias úteis** para o backend completo (sem contar as telas).
-
-Fases principais:
-1. Setup e banco (1 semana)
-2. Conectores e motores (2-3 semanas)
-3. Webhook, push e DLM (1 semana)
-4. Testes com dados reais (1 semana)
-
-## O Que Você Ganha
-
-- **Catálogo centralizado** no Bling, com dados completos
-- **3 notas de qualidade** por produto (uma por canal)
-- **Alertas automáticos** de divergência fiscal
-- **Enriquecimento controlado** — você decide o que é automático
-- **Sem overselling** — estoque sempre coerente
-- **Rastreabilidade total** — sabe quem mudou o quê, quando e por quê
+1. **Correções Pré-Voo (P0 da Auditoria):** Classificar depósitos (Seller x Full), impedir criação de anúncio duplicado, e colocar NCM importado em aprovação.
+2. **Teste Canário:** Ligar a flag para 1 produto, publicar na Nuvemshop e validar.
+3. **Inteligência de Estoque (Futuro):** Implementar leitura de pedidos (somente leitura) para calcular Curva ABC, alertas de ruptura e capital parado.
 
 ---
-
-**Em uma frase**: É um "maestro" que faz o Bling ser o cérebro do catálogo, usa os marketplaces como fontes de conteúdo, e nunca deixa dado fiscal ou financeiro ser bagunçado por informação externa.
+**Em uma frase:** O JH Sync Hub transforma o Bling no cérebro absoluto da operação, blindando os dados fiscais, e usa a inteligência dos marketplaces para garantir que nenhum produto fique sem vender por falta de informação.

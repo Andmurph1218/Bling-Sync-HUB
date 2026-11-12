@@ -192,6 +192,7 @@ async function enqueueAutoPublish(productId: string, channel: PublishChannel): P
       channel,
       JSON.stringify({
         sku: preview.payload.seller_custom_field,
+        title: preview.payload.title,
         price: preview.payload.price,
         stock: preview.payload.available_quantity,
         attributes: preview.payload.attributes,

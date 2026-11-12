@@ -1,5 +1,6 @@
 import { OAuthTokenManager } from '../oauth-token-manager.js';
 import { refreshMlTokenViaHttp } from '../../routes/oauth.js';
+import { collectListingSignals, sameIdentity } from './listing-signals.js';
 import { ListingSearchInput, MarketplaceListing, RemoteListing } from './types.js';
 
 const ML_API = 'https://api.mercadolibre.com';
@@ -67,18 +68,10 @@ export async function searchMercadoLivreListings(input: {
       : '';
   if (!sellerId) return [];
 
-  const tried = new Set<string>();
-  const candidates = [input.sku, input.ean ?? ''].map((value) => value.trim()).filter(Boolean);
-  let found: string[] = [];
-  for (const value of candidates) {
-    if (tried.has(value)) continue;
-    tried.add(value);
-    found = await searchIds(sellerId, token, value);
-    if (found.length > 0) break;
-  }
-  if (found.length === 0) return [];
+  const found = await firstMercadoLivreHit(sellerId, token, input);
+  if (!found) return [];
 
-  const item = await mlGet(`/items/${encodeURIComponent(found[0]!)}`, token);
+  const item = await mlGet(`/items/${encodeURIComponent(found.id)}`, token);
   const listing = toListing(item);
   return listing ? [listing] : [];
 }
@@ -117,17 +110,52 @@ export async function fetchMercadoLivreListing(input: ListingSearchInput): Promi
       ? String((me as { id: number | string }).id)
       : '';
   if (!sellerId) return null;
-  const candidates = [input.sku, input.ean ?? ''].map((value) => value.trim()).filter(Boolean);
-  let found: string[] = [];
-  for (const value of candidates) {
-    found = await searchIds(sellerId, token, value);
-    if (found.length > 0) break;
-  }
-  if (found.length === 0 || !found[0]) return null;
-  const item = await mlGet(`/items/${encodeURIComponent(found[0])}`, token);
+  const hit = await firstMercadoLivreHit(sellerId, token, input);
+  if (!hit) return null;
+  const item = await mlGet(`/items/${encodeURIComponent(hit.id)}`, token);
   const listing = toMarketplaceListing(item);
   if (!listing) return null;
   const status = listing.status.toLowerCase();
   if (status !== 'ativo' && status !== 'active') return null;
-  return listing;
+  const attributes = item && typeof item === 'object' && Array.isArray((item as { attributes?: unknown }).attributes)
+    ? (item as { attributes: Array<{ id?: string; value_name?: string }> }).attributes
+    : [];
+  const attribute = (id: string) => attributes.find((entry) => entry.id === id)?.value_name ?? null;
+  const channelSku = attribute('SELLER_SKU');
+  const channelEan = attribute('GTIN') ?? attribute('EAN');
+  return {
+    ...listing,
+    sku: channelSku,
+    ean: channelEan,
+    signals: collectListingSignals({
+      hubSku: input.sku,
+      hubEan: input.ean,
+      hubName: input.name,
+      channelSku,
+      channelEan,
+      channelTitle: listing.title,
+      matchedBy: hit.matchedBy,
+    }),
+  };
+}
+
+function searchValues(input: ListingSearchInput): string[] {
+  return [input.sku, input.ean ?? ''].map((value) => value.trim()).filter((value, index, all) => value.length > 0 && all.indexOf(value) === index);
+}
+
+async function firstMercadoLivreHit(
+  sellerId: string,
+  token: string,
+  input: ListingSearchInput
+): Promise<{ id: string; matchedBy: Array<'sku' | 'ean'> } | null> {
+  for (const value of searchValues(input)) {
+    const found = await searchIds(sellerId, token, value);
+    const id = found[0];
+    if (!id) continue;
+    const matchedBy: Array<'sku' | 'ean'> = [];
+    if (sameIdentity(value, input.sku)) matchedBy.push('sku');
+    if (sameIdentity(value, input.ean)) matchedBy.push('ean');
+    return { id, matchedBy };
+  }
+  return null;
 }

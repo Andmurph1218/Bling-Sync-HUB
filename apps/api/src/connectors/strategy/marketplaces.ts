@@ -2,6 +2,7 @@ import { lookupChannelAttributeSpecs } from '../../catalog/channel-attributes.js
 import { fetchMercadoLivreListing, searchMercadoLivreListings } from './ml-listing-search.js';
 import { isOrderOrInvoiceEvent } from './catalog-mode.js';
 import { fetchNuvemshopListing } from './nuvemshop-listing.js';
+import { createNuvemshopListing } from './nuvemshop-publish.js';
 import {
   IncomingWebhook,
   ListingDraft,
@@ -101,7 +102,7 @@ export class NuvemshopMarketplaceConnector implements MarketplaceConnector {
   }
 
   async createListing(draft: ListingDraft): Promise<ListingResult> {
-    return refuseListing(draft);
+    return createNuvemshopListing(draft);
   }
 
   async updateStock(update: StockUpdate): Promise<StockUpdateResult> {

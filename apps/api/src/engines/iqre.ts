@@ -157,15 +157,16 @@ export interface EnqueueImageCandidate {
  */
 export async function enqueueProductImagesForSync(
   masterProductId: string,
-  candidates: EnqueueImageCandidate[]
+  candidates: EnqueueImageCandidate[],
+  client?: PoolClient
 ): Promise<{ enqueuedCount: number; skippedDuplicatesCount: number }> {
-  return withTransaction(async (client: PoolClient) => {
+  const enqueue = async (db: PoolClient) => {
     let enqueuedCount = 0;
     let skippedDuplicatesCount = 0;
 
     for (const cand of candidates) {
       const urlNormalized = normalizeImageUrl(cand.source_url);
-      const existing = await client.query<{ id: string }>(
+      const existing = await db.query<{ id: string }>(
         `SELECT id FROM image_processing_queue
          WHERE master_product_id = $1 AND url_normalized = $2`,
         [masterProductId, urlNormalized]
@@ -176,7 +177,7 @@ export async function enqueueProductImagesForSync(
         continue;
       }
 
-      await client.query(
+      await db.query(
         `INSERT INTO image_processing_queue (
            master_product_id, variant_id, source_url, url_normalized,
            source_platform, stage, attempts, max_attempts, available_at
@@ -193,7 +194,9 @@ export async function enqueueProductImagesForSync(
     }
 
     return { enqueuedCount, skippedDuplicatesCount };
-  });
+  };
+  if (client) return enqueue(client);
+  return withTransaction(enqueue);
 }
 
 export interface FetchedImageProbe {
