@@ -205,7 +205,13 @@ export function startEnrichmentWorker(): Worker<EnrichJob> {
         await holdQueueForBlingQuota(job, token, error);
       }
     },
-    { connection: redisConnection(), concurrency: 1, settings: { backoffStrategy: jitteredBackoffStrategy } }
+    {
+      connection: redisConnection(),
+      concurrency: 1,
+      lockDuration: 300_000,
+      stalledInterval: 120_000,
+      settings: { backoffStrategy: jitteredBackoffStrategy },
+    }
   );
   worker.on('failed', (job, error) => {
     logger.error('Lote de enriquecimento falhou', { jobId: job?.id, error: error.message });

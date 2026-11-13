@@ -3,7 +3,7 @@ import { getMarketplaceConnector } from '../connectors/strategy/factory.js';
 import { ListingSearchInput, RemoteListing } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
-import { reconcileListings } from './reconciliation.service.js';
+import { connectedActiveChannels, reconcileAll } from './reconciliation.service.js';
 
 const CHANNELS = ['mercadolivre', 'nuvemshop'] as const;
 const READY_LIMIT = 40;
@@ -148,6 +148,8 @@ async function detectErpDuplicates(): Promise<number> {
 }
 
 async function detectMarketplaceDuplicates(search: DuplicateSearch): Promise<number> {
+  const activeChannels = search === searchWithFactory ? await connectedActiveChannels() : CHANNELS;
+  if (activeChannels.length === 0) return 0;
   const ready = await query<{ id: string; erp_sku: string; ean: string | null }>(
     `SELECT DISTINCT mp.id, mp.erp_sku, pv.ean
      FROM master_products mp
@@ -163,7 +165,7 @@ async function detectMarketplaceDuplicates(search: DuplicateSearch): Promise<num
   );
   let created = 0;
   for (const product of ready.rows) {
-    for (const channel of CHANNELS) {
+    for (const channel of activeChannels) {
       let listings: RemoteListing[] = [];
       try {
         listings = await search(channel, { sku: product.erp_sku, ean: product.ean });
@@ -196,19 +198,27 @@ export async function detectDuplicates(search: DuplicateSearch = searchWithFacto
   return { erp, marketplace };
 }
 
+let scheduledRunning = false;
+
 export function startDuplicateDetector(): void {
-  const run = () => {
-    void detectDuplicates().catch((error: unknown) => {
-      logger.error('Detector de duplicidade falhou', {
-        error: error instanceof Error ? error.message : String(error),
+  const run = async () => {
+    if (scheduledRunning) return;
+    scheduledRunning = true;
+    try {
+      await detectDuplicates().catch((error: unknown) => {
+        logger.error('Detector de duplicidade falhou', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       });
-    });
-    void reconcileListings().catch((error: unknown) => {
-      logger.error('Reconciliação do canal falhou', {
-        error: error instanceof Error ? error.message : String(error),
+      await reconcileAll().catch((error: unknown) => {
+        logger.error('Reconciliação do canal falhou', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       });
-    });
+    } finally {
+      scheduledRunning = false;
+    }
   };
-  setTimeout(run, 60_000);
-  setInterval(run, SIX_HOURS_MS);
+  setTimeout(() => void run(), 60_000);
+  setInterval(() => void run(), SIX_HOURS_MS);
 }

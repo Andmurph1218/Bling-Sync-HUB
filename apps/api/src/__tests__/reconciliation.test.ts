@@ -10,7 +10,7 @@ import { setRedis } from '../lib/redis.js';
 import { MarketplaceListing, ErpConnector } from '../connectors/strategy/types.js';
 import { refreshMissingCommerce } from '../catalog/full-sync.js';
 import { resolveMatchingDecision } from '../engines/pire.js';
-import { reconcileListings } from '../services/reconciliation.service.js';
+import { connectedActiveChannels, reconcileListings } from '../services/reconciliation.service.js';
 
 describe('reconciliação do anúncio', () => {
   const app = createApp();
@@ -236,6 +236,8 @@ describe('reconciliação do anúncio', () => {
       statusLabel: 'Conectado',
       linkedCount: 0,
     });
+    const channels = await connectedActiveChannels();
+    expect(channels).toEqual(['nuvemshop']);
   });
 
   it('atualiza o snapshot do canal sem abrir uma segunda linha', async () => {

@@ -221,6 +221,13 @@ async function defaultReader(channel: string, product: MasterProduct): Promise<M
   return getMarketplaceConnector(channel).fetchListings(product);
 }
 
+/** Retorna apenas canais ativos no produto e que possuem credencial OAuth salva. */
+export async function connectedActiveChannels(): Promise<string[]> {
+  const found = await query<{ provider: string }>(`SELECT provider FROM oauth_tokens`);
+  const connected = new Set(found.rows.map((row) => row.provider));
+  return ACTIVE_CATALOG_CHANNELS.filter((channel) => connected.has(channel));
+}
+
 /**
  * Lê o anúncio do canal, guarda o retrato e avisa divergência.
  * Não altera preço, estoque, NCM nem EAN no ERP.
@@ -242,7 +249,10 @@ export async function reconcileListings(
   const limit = options.limit ?? READY_LIMIT;
   const afterId = options.afterId?.trim() ?? '';
   const sku = options.sku?.trim() ?? '';
-  const activeChannels = options.channels ?? CHANNELS;
+  const activeChannels = options.channels ?? (read === defaultReader ? await connectedActiveChannels() : CHANNELS);
+  if (activeChannels.length === 0) {
+    return { snapshots: 0, alerts: 0, linked: 0, scanned: 0, lastId: null };
+  }
   const page = await query<{ id: string }>(
     `SELECT mp.id
      FROM master_products mp
@@ -360,17 +370,22 @@ export async function reconcileAll(read: ListingReader = defaultReader): Promise
   let channels: readonly string[] = CHANNELS;
 
   if (read === defaultReader) {
-    channels = ACTIVE_CATALOG_CHANNELS;
+    channels = await connectedActiveChannels();
+    if (channels.length === 0) {
+      return { snapshots: 0, alerts: 0, linked: 0 };
+    }
     let nuvemshopBatch: ((product: MasterProduct) => MarketplaceListing | null) | null = null;
-    try {
-      nuvemshopBatch = await createNuvemshopBatchReader();
-      logger.info('Índice em lote da Nuvemshop carregado para reconciliação', {
-        enabled: nuvemshopBatch !== null,
-      });
-    } catch (error) {
-      logger.warn('Falha ao carregar índice em lote da Nuvemshop; usando leitura individual', {
-        error: error instanceof Error ? error.message : String(error),
-      });
+    if (channels.includes('nuvemshop')) {
+      try {
+        nuvemshopBatch = await createNuvemshopBatchReader();
+        logger.info('Índice em lote da Nuvemshop carregado para reconciliação', {
+          enabled: nuvemshopBatch !== null,
+        });
+      } catch (error) {
+        logger.warn('Falha ao carregar índice em lote da Nuvemshop; usando leitura individual', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
     if (nuvemshopBatch !== null) {
       const lookup = nuvemshopBatch;

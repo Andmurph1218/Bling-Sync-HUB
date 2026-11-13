@@ -60,10 +60,7 @@ async function verifyStoreIdWithToken(storeId: string, accessToken: string): Pro
   try {
     const res = await nuvemshopFetch(
       `https://api.nuvemshop.com.br/2025-03/${encodeURIComponent(storeId)}/store`,
-      {
-        headers: nuvemshopHeaders(accessToken),
-        signal: AbortSignal.timeout(NUVEMSHOP_FETCH_TIMEOUT_MS),
-      }
+      { headers: nuvemshopHeaders(accessToken) }
     );
     return res.status >= 200 && res.status < 300;
   } catch {
@@ -200,7 +197,6 @@ export async function createNuvemshopBatchReader(): Promise<((product: MasterPro
   for (let page = 1; page <= MAX_CATALOG_PAGES; page += 1) {
     const res = await nuvemshopFetch(`${base}/products?page=${page}&per_page=${PAGE_SIZE}`, {
       headers,
-      signal: AbortSignal.timeout(NUVEMSHOP_FETCH_TIMEOUT_MS),
     });
     if (assertNuvemshopReadable(res.status) === 'missing') break;
     const items = (await res.json()) as NuvemshopProduct[];
@@ -234,8 +230,7 @@ export async function fetchNuvemshopListing(product: MasterProduct): Promise<Mar
   if (!stored) return null;
   const headers = nuvemshopHeaders(stored.accessToken);
   const base = `https://api.nuvemshop.com.br/2025-03/${encodeURIComponent(storeId)}`;
-  const signal = AbortSignal.timeout(NUVEMSHOP_FETCH_TIMEOUT_MS);
-  const bySku = await nuvemshopFetch(`${base}/products/sku/${encodeURIComponent(sku)}`, { headers, signal });
+  const bySku = await nuvemshopFetch(`${base}/products/sku/${encodeURIComponent(sku)}`, { headers });
   if (assertNuvemshopReadable(bySku.status) === 'ok') {
     const body = (await bySku.json()) as NuvemshopProduct & {
       product_id?: number | string;
@@ -272,7 +267,7 @@ export async function fetchNuvemshopListing(product: MasterProduct): Promise<Mar
     if (listing) return listing;
   }
 
-  const response = await nuvemshopFetch(`${base}/products?q=${encodeURIComponent(sku)}`, { headers, signal });
+  const response = await nuvemshopFetch(`${base}/products?q=${encodeURIComponent(sku)}`, { headers });
   if (assertNuvemshopReadable(response.status) === 'missing') return null;
   const payload = (await response.json()) as NuvemshopProduct[];
   const match = (Array.isArray(payload) ? payload : []).find((item) =>

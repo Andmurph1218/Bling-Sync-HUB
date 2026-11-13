@@ -4,6 +4,7 @@ import { logger } from '../../lib/logger.js';
 const PAUSE_KEY = 'nuvemshop:http:resume-at';
 const MAX_WAIT_MS = 60_000;
 const EMPTY_BUCKET_FALLBACK_MS = 1_000;
+export const NUVEMSHOP_DEFAULT_TIMEOUT_MS = 15_000;
 
 export interface HeaderSource {
   get(name: string): string | null;
@@ -140,5 +141,14 @@ export async function withNuvemshopLimit<T>(
 
 export async function nuvemshopFetch(url: string, init?: RequestInit, clock?: NuvemshopClock): Promise<Response> {
   const call = clock?.fetch ?? fetchOverride ?? fetch;
-  return withNuvemshopLimit(() => call(url, init), (response) => response.headers, clock);
+  return withNuvemshopLimit(
+    () => {
+      const effectiveInit: RequestInit = init?.signal
+        ? init
+        : { ...init, signal: AbortSignal.timeout(NUVEMSHOP_DEFAULT_TIMEOUT_MS) };
+      return call(url, effectiveInit);
+    },
+    (response) => response.headers,
+    clock
+  );
 }
