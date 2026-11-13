@@ -12,6 +12,26 @@ export interface MappedVariantAttribute {
   value: string;
 }
 
+/** Converte preço informado como número ou texto ("180.00" / "180,00"). */
+export function asCatalogPrice(value: unknown, fallback = 0): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return fallback;
+    const normalized = text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+/** Campo ausente não vira 0. O upsert mantém o último preço conhecido. */
+export function catalogPriceOrNull(value: unknown): number | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  return asCatalogPrice(value);
+}
+
 export interface MappedComponent {
   component_bling_id: string;
   quantity: number;

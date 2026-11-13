@@ -8,14 +8,17 @@ import { acquireBlingRequestSlot } from './bling-http-limit.js';
 import { query } from '../../db/pool.js';
 import {
   CreateProductDTO,
+  ERP_POST_TIMEOUT_MESSAGE,
   ErpCatalogPage,
   ErpCommerceSnapshot,
   ErpConnector,
+  ErpPostTimeoutError,
   ErpPriceSnapshot,
   ErpProductSnapshot,
   ErpRejectedError,
   ErpStockBalance,
   ErpStockSnapshot,
+  SkuAlreadyInErpError,
 } from '../strategy/types.js';
 
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
@@ -218,26 +221,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export const BLING_POST_TIMEOUT_MESSAGE =
-  'O Bling não confirmou a tempo. A criação não foi repetida. Verifique no Bling se o produto foi cadastrado.';
-
-export class BlingPostTimeoutError extends Error {
-  constructor() {
-    super(BLING_POST_TIMEOUT_MESSAGE);
-    this.name = 'BlingPostTimeoutError';
-  }
-}
-
-export class SkuAlreadyInBlingError extends Error {
-  constructor(sku: string, readonly erpId: string | null = null) {
-    super(
-      erpId
-        ? `O SKU ${sku} já existe no Bling. O HUB vai recuperar o cadastro ${erpId}.`
-        : `O SKU ${sku} já existe no Bling. A criação foi cancelada. Verifique o cadastro no ERP.`
-    );
-    this.name = 'SkuAlreadyInBlingError';
-  }
-}
+export const BLING_POST_TIMEOUT_MESSAGE = ERP_POST_TIMEOUT_MESSAGE;
+export const BlingPostTimeoutError = ErpPostTimeoutError;
+export type BlingPostTimeoutError = ErpPostTimeoutError;
+export const SkuAlreadyInBlingError = SkuAlreadyInErpError;
+export type SkuAlreadyInBlingError = SkuAlreadyInErpError;
 
 export function isBlingTimeout(error: unknown): boolean {
   return error instanceof Error && error.message === 'bling_timeout';

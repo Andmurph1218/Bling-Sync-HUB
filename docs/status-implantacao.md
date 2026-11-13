@@ -1,10 +1,11 @@
 # Documentação de Implantação — JH Sync Hub
 
-Data de referência: **11 de novembro de 2026**  
-Estado publicado em `https://hub.jhshopping.com.br`. O estado atual está na seção 13. A seção 12 registra a auditoria de 10 de novembro. O histórico de 6 de novembro permanece nas seções 11 e anteriores.  
+Data de referência: **12 de novembro de 2026**  
+Estado publicado em `https://hub.jhshopping.com.br` (`30e088f`). O estado atual está na **seção 14** e na auditoria de prontidão [auditoria-go-live.md](auditoria-go-live.md). As seções 13 e anteriores preservam o histórico cronológico da implantação.  
 Especificação normativa: [plano-mestre.md](plano-mestre.md)  
 Resumo executivo: [descricao.md](descricao.md)  
-Registro de revisão e maturidade: [revisao-plano-mestre.md](revisao-plano-mestre.md)  
+Auditoria pré-go-live: [auditoria-go-live.md](auditoria-go-live.md)  
+Leitura reversa e contrato ERP: [arquitetura-reversa.md](arquitetura-reversa.md) · [contrato-erp.md](contrato-erp.md)  
 Plano de evolução do dashboard: [bling_sync_hub_evolucao_dashboard.md](bling_sync_hub_evolucao_dashboard.md)
 
 ---
@@ -97,7 +98,7 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 - **Mappers Puros (`mappers.ts`)**:
   - `mapBlingProductToCatalog`, `computePublishableStockFromBalances`, `resolveVariantChannelPrice`, `resolveBlingLifecycleSignal`, `classifyApiHttpError`, `mapMercadoLivreListingGroup`, `mapMercadoLivreStockLocations`, `applyMlUptinMigration` e `mapNuvemshopProduct`.
 
-#### 2.3 Banco de Dados — As 16 Migrations (`apps/api/src/db/migrations/*`)
+#### 2.3 Banco de Dados — As 33 Migrations (`apps/api/src/db/migrations/*`)
 1. `1729080000001_identity-and-controls.ts`: `users`, `user_roles`, `sessions`, `oauth_tokens`, `stock_warehouses`, `channel_stores`, `channel_sync_owners`, `enrichment_controls`, `control_changes` (com trigger de imutabilidade), `sync_cursors`, `hub_writes`.
 2. `1729080000002_products-variants-and-axes.ts`: `master_products`, `product_variants` (com índice único parcial `uq_one_default_variant`), `product_components`, `variant_stock_balances`, `variant_channel_prices`, `attribute_axes`, `product_axes`, `attribute_value_aliases`, `variant_attributes`.
 3. `1729080000003_platform-links-and-matching.ts`: `platform_links` (com constraint `family_confidence` para `user_product`), `platform_variant_links`, `ml_selling_conditions`, `ml_stock_locations`, `platform_items`, `matching_queue`, `match_rejections`, `variant_matrix_analysis`.
@@ -111,9 +112,26 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 11. `1729080000011_indexes.ts`: 15 índices operacionais de busca e fila.
 12. `1729080000012_partitions-and-seeds.ts`: 70 partições mensais (14 meses para as 5 tabelas particionadas) + seeds iniciais (`attribute_axes`, `attribute_value_aliases`, `platform_image_limits`, `dlm_retention_policies`, `channel_sync_owners`, `enrichment_controls`, `stock_warehouses`, `channel_stores`).
 13. `1729080000013_empty-sku-handling.ts`: corrige colisão de SKU vazio na constraint `UNIQUE` ao importar catálogo real do Bling (homologação 22/10).
-14. `1729080000014_must-change-password.ts`: coluna `users.must_change_password` e marcação dos quatro usuários do bootstrap (P0.2, aplicada no banco local em 05/11/2026).
+14. `1729080000014_must-change-password.ts`: coluna `users.must_change_password` e marcação dos quatro usuários do bootstrap (P0.2, 05/11/2026).
 15. `1729080000015_catalog-v2.ts`: `master_products.archived_at`, `hub_categories`, vínculo `hub_category_id` e mapas `channel_category_maps`, `channel_attribute_maps`, `channel_attribute_value_maps` (P1, 06/11/2026).
-16. `1729080000016_catalog-list-indexes.ts`: índices de `archived_at`, `hub_category_id`, `hub_categories.parent_id`, mapa de atributos e capa elegível. SKU e `catalog_status` já tinham índice nas migrations 13 e 11.
+16. `1729080000016_catalog-list-indexes.ts`: índices de `archived_at`, `hub_category_id`, `hub_categories.parent_id`, mapa de atributos e capa elegível.
+17. `1729080000017_publish-queue.ts`: tabela `publish_queue` para a Lista de Envio v2.
+18. `1729080000018_channel-app-credentials.ts`: credenciais criptografadas de aplicativos por canal (`channel_app_credentials`).
+19. `1729080000019_channel-listing-links.ts`: vínculos diretos de anúncios por produto e canal (`channel_listing_links`).
+20. `1729080000020_integration-catalog.ts`: catálogo da Loja de Apps (`integration_catalog` e solicitações).
+21. `1729080000021_ops-cache-and-jobs.ts`: cache operacional e jobs em lote (`batch_jobs`).
+22. `1729080000022_problem-dismissals.ts`: descarte auditável de itens no painel de Problemas.
+23. `1729080000023_viewer-role.ts`: papel `viewer` somente leitura.
+24. `1729080000024_import-job-progress.ts`: histórico e progresso de importações de planilha.
+25. `1729080000025_governance.ts`: permissões granulares, convites, configurações gerais e MFA.
+26. `1729080000026_erp-identity.ts`: renomeação canônica de identidade para `erp_id` / `erp_sku` com recriação de constraints no PostgreSQL.
+27. `1729080000027_sync-status.ts`: checkpoint persistente de paginação da `erp-sync-queue` (`sync_status`).
+28. `1729080000028_duplicate-alerts.ts`: alertas de duplicidade de SKU/EAN/anúncio (`duplicate_alerts`).
+29. `1729080000029_marketplace-reconciliation.ts`: retratos de reconciliação (`marketplace_listings_snapshot`).
+30. `1729080000030_stock-split.ts`: separação entre `stock` (publicável, somente `seller`) e `catalog_stock` (exibição).
+31. `1729080000031_pending-review.ts`: marcação `needs_review` e revisão pendente em falhas de detalhe/fiscal.
+32. `1729080000032_dead-letters.ts`: fila persistente de cartas mortas (`dead_letters`) com suporte a reprocessamento.
+33. `1729080000033_snapshot-upsert.ts`: constraint única `(product_id, marketplace)` em `marketplace_listings_snapshot` para upsert atômico.
 
 #### 2.4 Conectores, Rate Limiter Global e OAuth Single-Flight (`apps/api/src/connectors/*`)
 - **`bling-rate-limiter.ts`**: Balde único de 3 req/s com fila ordenada por prioridade (`token` > `webhook_p1_push_stock` > `stock_sync` > `price_check` > `delta_enrich` > `full_enrich`), proteção de 20 req/60s em `/oauth/token` e repartição da cota diária de 120.000 chamadas (`full_enrich` pausa em 96.000; jobs não-P1 param em 108.000 preservando 12.000 chamadas para P1/webhook/push).
@@ -545,4 +563,36 @@ O painel público continua `https://hub.jhshopping.com.br`. A suíte da API sobe
 ### Conectores
 
 Nuvemshop é o canal ativo. Mercado Livre permanece no código e inativo no produto. Shopee está implementada na fábrica (Open Platform v2) e ainda não tem checklist de publicação. Amazon e TikTok Shop seguem em breve.
+
+---
+
+## 14. Proteções Pré-Go-Live, Retomada da Sync e Reconciliação em Lote — 12/11/2026
+
+Produção atualizada em `https://hub.jhshopping.com.br` (commit `30e088f`, **33 migrations** aplicadas, `bling-hub-api`, `bling-hub-web` e `caddy` ativos). Detalhamento completo de cada ponto em [auditoria-go-live.md](auditoria-go-live.md).
+
+### O que entrou em produção entre 11/11 e 12/11 (`adbfce8` → `30e088f`)
+
+1. **Proteções P0, P1 e P2 da Auditoria de Go-Live:**
+   - **Estoque dividido (`stock` vs `catalog_stock`):** somente depósitos `role = 'seller'` com `include_in_push = true` compõem o estoque de envio; sem depósito de venda o checklist bloqueia publicação.
+   - **Bloqueio de criação duplicada e governança fiscal/mídia:** `CREATE` é bloqueado se já houver `listing_id`; NCM importado nasce `pending_approval` (dupla aprovação fiscal) e imagens entram na fila do IQRE sem virar capa automaticamente.
+   - **Vínculo multi-sinal na reconciliação:** dois sinais concordantes (`SKU + EAN` ou `SKU + título compatível`) gravam `vinculado`; um único sinal grava `sugerido` e abre revisão em `/vinculos` (substituindo o vínculo automático de sinal único descrito na seção 13).
+   - **Escritor Nuvemshop + Allowlist + Botão de Pânico:** payload reconstruído na hora da execução, retry exponencial com jitter apenas em `429`/`5xx`, `LIVE_PUBLISH_ALLOWLIST` restringindo SKUs do piloto e botão de pânico em `/configuracoes/geral` (`ENABLE_LIVE_PUBLISHING` permanece `false`).
+   - **Resiliência de filas (migrations 032 e 033):** `dead_letters` com reprocessamento em `/problemas`, cota global do Bling no Redis (3 req/s + pausa em 80% de 120.000/dia), pausa preventiva pelos headers `x-rate-limit-*` da Nuvemshop, upsert atômico de `marketplace_listings_snapshot` e detector de jobs presos em `processing` > 15 min.
+
+2. **Destravamento real do Sync do Bling acima de 10.000 itens:**
+   - Diagnóstico em produção mostrou que `sync_status` havia parado na página `195` (`last_completed_page = 194`, `9.957` produtos ativos) com `job stalled more than allowable limit` no BullMQ (páginas com 50 `pull` inéditos ou produtos-pai com centenas de variações excediam o `lockDuration` padrão de 30 s, deixando o ID da página bloqueado em `failed`).
+   - Ajustes aplicados: listagem explícita de ativos (`tipo=P&criterio=2`), teto de `5.000` páginas (`250.000` itens), `lockDuration = 300.000 ms` (5 min), substituição de job `failed`/`completed` ao reenfileirar e retomada automática de `lastCompletedPage + 1` no boot do worker. O sync retomou imediatamente na Droplet a partir da página `195`.
+   - Diferença em relação aos ~27 mil registros da listagem "Últimos Incluídos" do Bling: o filtro do Bling soma Ativos + Inativos e conta cada variação filha como linha individual, enquanto o HUB importa somente Ativos (`criterio=2`) e agrupa variações filhas em `product_variants` sob o produto-pai (exibindo agora ambos os números na Visão Geral).
+
+3. **Nuvemshop como Canal Ativo e Reconciliação em Lote:**
+   - Na produção, `sync_cursors` estava vazio, impedindo `resolveNuvemshopStoreId()` de localizar a loja. O HUB passou a validar o token em `GET /2025-03/{id}/store`, gravou automaticamente `nuvemshop-store-id = 6667412` e iniciou a vinculação em lote (`createNuvemshopBatchReader`, páginas de 200 produtos), registrando já os primeiros `41+` anúncios vinculados em `channel_listing_links`.
+   - Na Visão Geral (`/`), o card **Canais Ativos** agora separa visualmente o status da conexão (**`Nuvemshop · Conectado`**, **`Mercado Livre · Pausado`**) da contagem de anúncios vinculados.
+
+### Estado verificado no banco de produção (12/11/2026)
+
+- **Depósitos (`stock_warehouses`):** classificados em produção (zero `unclassified`: `14886768228` Geral com saldo virtual `11.624` e `14888973769` com saldo `0`).
+- **Isolamento arquitetural (`architecture.test.ts`):** concluído (`50/50` suítes e `176/176` testes aprovados). Nenhum módulo fora de `connectors/bling` importa dessa pasta.
+- **Pendências antes de iniciar o piloto de 48 h:**
+  1. Preparar os SKUs do piloto em produção: hoje `hub_categories = 0` e `channel_category_maps = 0` (é preciso criar a categoria + mapa Nuvemshop em `/atributos`, concluir a troca de senha inicial dos 2 usuários `fiscal_approver` pendentes e aprovar NCM + capa dos SKUs escolhidos).
+  2. Definir até 10 SKUs em `LIVE_PUBLISH_ALLOWLIST` antes de ligar `ENABLE_LIVE_PUBLISHING=true`.
 

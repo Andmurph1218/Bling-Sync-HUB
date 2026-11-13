@@ -5,7 +5,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { query } from '../db/pool.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
 import { loadConnectors } from '../connectors/load.js';
-import { acquireBlingRequestSlot } from '../connectors/bling/bling-http-limit.js';
+import { acquireErpRequestSlot } from '../connectors/rate-limit-port.js';
 import { nuvemshopFetch } from '../connectors/strategy/nuvemshop-http.js';
 import { getPublicBaseUrl as readPublicBaseUrl } from '../config/public-url.js';
 import { loadAppCredentials } from '../connectors/app-credentials.js';
@@ -160,7 +160,7 @@ export async function refreshBlingTokenViaHttp(
     refresh_token: currentRefreshToken,
   });
 
-  await acquireBlingRequestSlot('critical');
+  await acquireErpRequestSlot('critical');
   const response = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
     method: 'POST',
     headers: {
@@ -214,7 +214,7 @@ export async function discoverBlingWarehousesAndStores(): Promise<{
 
   const fetchBlingJson = async <T>(path: string): Promise<T> => {
     await loadConnectors();
-    await acquireBlingRequestSlot();
+    await acquireErpRequestSlot();
     const res = await fetch(`https://api.bling.com.br/Api/v3${path}`, {
         method: 'GET',
         headers: {
@@ -364,7 +364,7 @@ oauthRouter.get(
         code,
       });
 
-      await acquireBlingRequestSlot('critical');
+      await acquireErpRequestSlot('critical');
       const tokenRes = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
         method: 'POST',
         headers: {

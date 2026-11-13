@@ -37,8 +37,7 @@ import { activeErpConnector, INTEGRATION_APPS, resolveInstallStatus } from '../c
 import { MERCADO_LIVRE_ACTIVE } from '../config/channels.js';
 import { STOCK_LAUNCH_WARNING } from '../connectors/strategy/types.js';
 import { getFullSyncStatus } from '../catalog/full-sync.js';
-import { ErpRejectedError } from '../connectors/strategy/types.js';
-import { BlingPostTimeoutError, SkuAlreadyInBlingError } from '../connectors/bling/bling-erp.js';
+import { ErpPostTimeoutError, ErpRejectedError, SkuAlreadyInErpError } from '../connectors/strategy/types.js';
 
 export const catalogRouter = Router();
 
@@ -838,7 +837,7 @@ catalogRouter.post(
         erpId = createdErp.erp_id;
         stockWarning = createdErp.stockWarning;
       } catch (error) {
-        if (error instanceof SkuAlreadyInBlingError) {
+        if (error instanceof SkuAlreadyInErpError) {
           if (error.erpId) {
             const recovered = await saveQuickProduct({
               erpId: error.erpId,
@@ -855,7 +854,7 @@ catalogRouter.post(
           res.status(409).json({ error: 'sku_exists_in_bling', message: error.message });
           return;
         }
-        if (error instanceof BlingPostTimeoutError) {
+        if (error instanceof ErpPostTimeoutError) {
           res.status(422).json({ error: 'bling_unconfirmed', message: error.message });
           return;
         }

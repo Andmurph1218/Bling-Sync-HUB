@@ -4,10 +4,10 @@
 
 import { PoolClient } from 'pg';
 import { query, withTransaction } from '../db/pool.js';
-import { catalogPriceOrNull } from '../connectors/bling/mappers.js';
 import { InboundProduct } from '../connectors/strategy/inbound.js';
 import { loadConnectors } from '../connectors/load.js';
 import {
+  catalogPriceOrNull,
   computePublishableStockFromBalances,
   StockBalanceItem,
   WarehouseConfig,

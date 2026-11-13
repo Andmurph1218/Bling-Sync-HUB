@@ -86,6 +86,27 @@ export class ErpRejectedError extends Error {
   }
 }
 
+export const ERP_POST_TIMEOUT_MESSAGE =
+  'O Bling não confirmou a tempo. A criação não foi repetida. Verifique no Bling se o produto foi cadastrado.';
+
+export class ErpPostTimeoutError extends Error {
+  constructor(message = ERP_POST_TIMEOUT_MESSAGE) {
+    super(message);
+    this.name = 'BlingPostTimeoutError';
+  }
+}
+
+export class SkuAlreadyInErpError extends Error {
+  constructor(sku: string, readonly erpId: string | null = null) {
+    super(
+      erpId
+        ? `O SKU ${sku} já existe no Bling. O HUB vai recuperar o cadastro ${erpId}.`
+        : `O SKU ${sku} já existe no Bling. A criação foi cancelada. Verifique o cadastro no ERP.`
+    );
+    this.name = 'SkuAlreadyInBlingError';
+  }
+}
+
 /** Contrato do ERP soberano. Bling é a implementação atual; outro ERP entra como nova classe. */
 export interface ErpConnector {
   readonly id: string;

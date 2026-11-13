@@ -6,7 +6,7 @@ HUB / iPaaS de normalização de catálogo. Sistemas internos (ERP e apps) entre
 
 O ERP instalado hoje é o Bling. Os canais com código são Nuvemshop (ativo) e Mercado Livre (código presente, produto inativo). Shopee, Amazon e TikTok Shop aparecem na loja como em breve. Preço, estoque e fiscal continuam soberanos no ERP. O canal enriquece conteúdo e mídia. Pedido e NF-e ficam fora.
 
-O painel público é `https://hub.jhshopping.com.br`. O acompanhamento está em [docs/status-implantacao.md](docs/status-implantacao.md), seção 12.
+O painel público é `https://hub.jhshopping.com.br`. O acompanhamento está em [docs/status-implantacao.md](docs/status-implantacao.md) (seção 14) e a auditoria pré-go-live em [docs/auditoria-go-live.md](docs/auditoria-go-live.md).
 
 ## Escopo
 

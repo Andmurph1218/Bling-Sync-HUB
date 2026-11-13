@@ -1,5 +1,11 @@
 import { getRedis } from '../../lib/redis.js';
 import { logger } from '../../lib/logger.js';
+import {
+  ErpCallClass,
+  ErpDailyQuotaPausedError,
+  ErpDailyState,
+  quotaPauseDelayMs,
+} from '../rate-limit-port.js';
 
 export const BLING_MAX_REQUESTS_PER_SECOND = 3;
 /** Cota diária da conta. As filas de leitura param em 80% e deixam o resto para o token. */
@@ -9,41 +15,16 @@ const WINDOW_MS = 1000;
 const SLOT_KEY = 'bling:http:slots';
 const DAY_TTL_SECONDS = 36 * 60 * 60;
 
-export type BlingCallClass = 'bulk' | 'critical';
-export type BlingDailyState = 'open' | 'paused' | 'exhausted';
-
-export class BlingDailyQuotaPausedError extends Error {
-  constructor(
-    readonly used: number,
-    readonly state: Exclude<BlingDailyState, 'open'>
-  ) {
-    super(
-      state === 'exhausted'
-        ? `Cota diária do Bling esgotada (${used} chamadas).`
-        : `Filas do Bling pausadas: ${used} chamadas no dia, acima de 80% da cota.`
-    );
-    this.name = 'BlingDailyQuotaPausedError';
-  }
-}
+export type BlingCallClass = ErpCallClass;
+export type BlingDailyState = ErpDailyState;
+export const BlingDailyQuotaPausedError = ErpDailyQuotaPausedError;
+export type BlingDailyQuotaPausedError = ErpDailyQuotaPausedError;
+export { quotaPauseDelayMs };
 
 export function decideDailyQuota(used: number, callClass: BlingCallClass): BlingDailyState {
   if (used >= BLING_DAILY_QUOTA) return 'exhausted';
   if (callClass === 'bulk' && used >= BLING_DAILY_PAUSE_AT) return 'paused';
   return 'open';
-}
-
-export function quotaPauseDelayMs(state: Exclude<BlingDailyState, 'open'>, now = Date.now()): number {
-  if (state === 'paused') return 15 * 60_000;
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Sao_Paulo',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(new Date(now));
-  const pick = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value ?? 0);
-  const elapsed = ((pick('hour') * 60 + pick('minute')) * 60 + pick('second')) * 1000;
-  return Math.max(60_000, 24 * 60 * 60 * 1000 - elapsed);
 }
 
 const SLOT_SCRIPT = `

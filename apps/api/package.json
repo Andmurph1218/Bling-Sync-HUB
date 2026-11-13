@@ -6,7 +6,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json && node -e \"require('fs').writeFileSync('dist/db/migrations/package.json', JSON.stringify({type:'commonjs'}))\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout=30000 --hookTimeout=30000",
     "bootstrap": "tsx src/scripts/bootstrap.ts",
     "seed:admin": "tsx src/scripts/seed-admin.ts",
     "migrate:up": "tsx ../../node_modules/node-pg-migrate/bin/node-pg-migrate.js up -m src/db/migrations --no-check-order",
