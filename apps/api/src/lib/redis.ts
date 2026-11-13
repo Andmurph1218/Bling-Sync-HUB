@@ -11,6 +11,10 @@ let activeRedis: RedisPingable | null = null;
 
 export function getRedis(): RedisPingable {
   if (!activeRedis) {
+    if (process.env.VITEST === 'true') {
+      activeRedis = { ping: async () => 'PONG', quit: async () => 'OK' };
+      return activeRedis;
+    }
     const client = new Redis(env.REDIS_URL, {
       maxRetriesPerRequest: null,
       lazyConnect: true,
