@@ -4,7 +4,10 @@ async function refreshBlingToken(currentRefreshToken: string) {
   const oauth = await import('../../routes/oauth.js');
   return oauth.refreshBlingTokenViaHttp(currentRefreshToken);
 }
-import { acquireBlingRequestSlot } from './bling-http-limit.js';
+import {
+  acquireBlingRequestSlot,
+  notifyBlingGlobalPenalty,
+} from './bling-http-limit.js';
 import { query } from '../../db/pool.js';
 import {
   CreateProductDTO,
@@ -264,30 +267,53 @@ export function blingBackoffMs(attempt: number): number {
   return Math.min(30_000, 1000 * 2 ** Math.max(0, attempt));
 }
 
+/** Backoff exponencial com jitter aleatório (ex.: 1s..1.5s, 2s..3s, 4s..5s) quando não há Retry-After. */
+export function blingJitteredBackoffMs(
+  attempt: number,
+  random: () => number = Math.random
+): number {
+  const base = blingBackoffMs(attempt);
+  const maxJitter = Math.min(1_000, Math.floor(base * 0.5));
+  const jitter = Math.floor(Math.max(0, Math.min(0.999999, random())) * (maxJitter + 1));
+  return Math.min(BLING_RETRY_CAP_MS, base + jitter);
+}
+
 /** 429 e 5xx podem repetir. 4xx de cliente não. */
 export function blingRetryDelayMs(
   attempt: number,
   status: number,
   headers?: Record<string, string | undefined>,
-  now = Date.now()
+  now = Date.now(),
+  random?: () => number
 ): number | null {
   if (status !== 429 && status < 500) return null;
-  return blingRetryAfterMs(headers, now) ?? blingBackoffMs(attempt);
+  const fromHeader = blingRetryAfterMs(headers, now);
+  if (fromHeader !== null) return fromHeader;
+  return random ? blingJitteredBackoffMs(attempt, random) : blingBackoffMs(attempt);
+}
+
+export interface RunBlingCallOptions {
+  maxAttempts?: number;
+  random?: () => number;
+  onRateLimit?: (delayMs: number) => Promise<void> | void;
 }
 
 /**
- * GET repete timeout, 429 e 5xx. A espera segue Retry-After ou dobra a cada tentativa.
+ * GET repete timeout, 429 e 5xx. A espera segue Retry-After ou backoff exponencial (com jitter em produção).
  * POST com timeout ou 5xx não repete: o Bling pode ter gravado o produto.
  */
 export async function runBlingCall<T>(
   method: 'GET' | 'POST',
   send: () => Promise<{ status: number; data: T; headers?: Record<string, string | undefined> }>,
-  wait: (ms: number) => Promise<void> = sleep
+  wait: (ms: number) => Promise<void> = sleep,
+  options?: RunBlingCallOptions
 ): Promise<{ status: number; data: T }> {
   let lastStatus = 0;
   let lastData: T = null as T;
   let lastError: unknown = null;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
+  const maxAttempts = Math.max(1, options?.maxAttempts ?? 4);
+  const lastAttemptIndex = maxAttempts - 1;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       const res = await send();
       lastStatus = res.status;
@@ -295,32 +321,47 @@ export async function runBlingCall<T>(
       lastError = null;
       const delay = method === 'POST' && res.status !== 429
         ? null
-        : blingRetryDelayMs(attempt, res.status, res.headers);
-      if (delay === null || attempt === 3) return { status: res.status, data: res.data };
+        : blingRetryDelayMs(attempt, res.status, res.headers, Date.now(), options?.random);
+      if (delay === null || attempt === lastAttemptIndex) return { status: res.status, data: res.data };
+      if (res.status === 429 && options?.onRateLimit) {
+        await options.onRateLimit(delay);
+      }
       await wait(delay);
     } catch (error) {
       if (method === 'POST' && isBlingTimeout(error)) throw new BlingPostTimeoutError();
       lastError = error;
-      if (method === 'POST' || attempt === 3) break;
-      await wait(blingBackoffMs(attempt));
+      if (method === 'POST' || attempt === lastAttemptIndex) break;
+      const errDelay = options?.random
+        ? blingJitteredBackoffMs(attempt, options.random)
+        : blingBackoffMs(attempt);
+      await wait(errDelay);
     }
   }
   if (lastError) throw lastError;
   return { status: lastStatus, data: lastData };
 }
 
-/** Leitura e escrita na API v3. A cota de 3 req/s é a mesma para sync, enriquecimento e reconciliação. */
+/** Leitura e escrita na API v3. A cota global (`bling:rate_limit`, máx 3 req/s) vale para sync, enriquecimento e reconciliação. */
 export class LiveBlingCatalogReader implements BlingCatalogReader {
   private readonly tokens = new OAuthTokenManager();
 
   protected async call<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<{ status: number; data: T }> {
-    return runBlingCall(method, async () => {
-      await acquireBlingRequestSlot();
-      const token = await this.tokens.getValidAccessToken('bling', refreshBlingToken);
-      const res = await httpsSend(method, `${BLING_BASE}${path}`, token, body);
-      const data = res.text ? (JSON.parse(res.text) as T) : (null as T);
-      return { status: res.status, data, headers: res.headers };
-    });
+    return runBlingCall(
+      method,
+      async () => {
+        await acquireBlingRequestSlot();
+        const token = await this.tokens.getValidAccessToken('bling', refreshBlingToken);
+        const res = await httpsSend(method, `${BLING_BASE}${path}`, token, body);
+        const data = res.text ? (JSON.parse(res.text) as T) : (null as T);
+        return { status: res.status, data, headers: res.headers };
+      },
+      sleep,
+      {
+        maxAttempts: 5,
+        random: Math.random,
+        onRateLimit: (delayMs) => notifyBlingGlobalPenalty(delayMs),
+      }
+    );
   }
 
   private async get<T>(path: string): Promise<{ status: number; data: T }> {

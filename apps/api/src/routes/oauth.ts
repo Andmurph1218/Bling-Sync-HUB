@@ -5,7 +5,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { query } from '../db/pool.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
 import { loadConnectors } from '../connectors/load.js';
-import { acquireErpRequestSlot } from '../connectors/rate-limit-port.js';
+import { acquireErpRequestSlot, notifyErpRateLimitPenalty } from '../connectors/rate-limit-port.js';
 import { nuvemshopFetch } from '../connectors/strategy/nuvemshop-http.js';
 import { getPublicBaseUrl as readPublicBaseUrl } from '../config/public-url.js';
 import { loadAppCredentials } from '../connectors/app-credentials.js';
@@ -214,19 +214,31 @@ export async function discoverBlingWarehousesAndStores(): Promise<{
 
   const fetchBlingJson = async <T>(path: string): Promise<T> => {
     await loadConnectors();
-    await acquireErpRequestSlot();
-    const res = await fetch(`https://api.bling.com.br/Api/v3${path}`, {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await acquireErpRequestSlot();
+      const res = await fetch(`https://api.bling.com.br/Api/v3${path}`, {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${accessToken}`,
           Accept: 'application/json',
         },
       });
+      if (res.status === 429 && attempt < 3) {
+        const retryAfterSec = Number(res.headers.get('retry-after') ?? '');
+        const waitMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+          ? Math.min(60_000, Math.round(retryAfterSec * 1000))
+          : 1000 * 2 ** attempt + Math.floor(Math.random() * 500);
+        await notifyErpRateLimitPenalty(waitMs);
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
       if (!res.ok) {
         const text = await res.text();
         throw new Error(`Erro em GET ${path} (${res.status}): ${text}`);
       }
       return (await res.json()) as T;
+    }
+    throw new Error(`Limite de tentativas excedido em GET ${path}`);
   };
 
   const depositosRes = await fetchBlingJson<{

@@ -45,9 +45,11 @@ export interface ScheduledLimiter {
 }
 
 type SlotAcquirer = (callClass?: ErpCallClass) => Promise<void>;
+type PenaltyNotifier = (delayMs: number) => Promise<void>;
 
 let limiter: ScheduledLimiter | null = null;
 let slotAcquirer: SlotAcquirer | null = null;
+let penaltyNotifier: PenaltyNotifier | null = null;
 
 export function registerRateLimiter(next: ScheduledLimiter): void {
   limiter = next;
@@ -57,12 +59,25 @@ export function registerErpSlotAcquirer(next: SlotAcquirer): void {
   slotAcquirer = next;
 }
 
+export function registerErpPenaltyNotifier(next: PenaltyNotifier): void {
+  penaltyNotifier = next;
+}
+
 export async function acquireErpRequestSlot(callClass: ErpCallClass = 'bulk'): Promise<void> {
   if (!slotAcquirer) {
     await loadConnectors();
   }
   if (slotAcquirer) {
     await slotAcquirer(callClass);
+  }
+}
+
+export async function notifyErpRateLimitPenalty(delayMs: number): Promise<void> {
+  if (!penaltyNotifier) {
+    await loadConnectors();
+  }
+  if (penaltyNotifier) {
+    await penaltyNotifier(delayMs);
   }
 }
 

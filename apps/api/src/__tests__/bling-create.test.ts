@@ -4,6 +4,7 @@ import {
   BlingPostTimeoutError,
   LiveBlingCatalogReader,
   SkuAlreadyInBlingError,
+  blingJitteredBackoffMs,
   blingRetryDelayMs,
   blingCommerceFromPayload,
   blingSkuAlreadyListed,
@@ -156,5 +157,38 @@ describe('criação de produto no Bling', () => {
     });
     await expect(connector.pullCatalogProduct('1')).resolves.toEqual({ id: 1, nome: 'Luminária' });
     expect(calls).toEqual(['pull']);
+  });
+
+  it('usa backoff exponencial com jitter quando 429 não traz Retry-After e notifica penalidade global', async () => {
+    expect(blingJitteredBackoffMs(0, () => 0)).toBe(1000);
+    expect(blingJitteredBackoffMs(0, () => 0.5)).toBeGreaterThan(1000);
+    expect(blingJitteredBackoffMs(1, () => 0.5)).toBeGreaterThan(2000);
+
+    const penalties: number[] = [];
+    const waits: number[] = [];
+    let calls = 0;
+    const res = await runBlingCall(
+      'GET',
+      async () => {
+        calls += 1;
+        if (calls === 1) return { status: 429, data: null, headers: {} };
+        if (calls === 2) return { status: 429, data: null, headers: { 'retry-after': '2' } };
+        return { status: 200, data: { ok: true }, headers: {} };
+      },
+      async (ms) => {
+        waits.push(ms);
+      },
+      {
+        maxAttempts: 5,
+        random: () => 0.5,
+        onRateLimit: (ms) => {
+          penalties.push(ms);
+        },
+      }
+    );
+    expect(res.status).toBe(200);
+    expect(waits[0]).toBeGreaterThan(1000);
+    expect(waits[1]).toBe(2000);
+    expect(penalties).toEqual(waits);
   });
 });

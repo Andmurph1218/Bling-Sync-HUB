@@ -131,4 +131,35 @@ describe('enriquecimento do catálogo', () => {
       proposed_ncm: '9405.10.99',
     });
   });
+
+  it('recupera de 429 transitório e isola falha individual sem derrubar o lote inteiro', async () => {
+    await query(
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format, ncm, ncm_status)
+       VALUES ('erp-z-429', 'Z-429', 'Produto com 429', 'P', 'S', NULL, 'unknown'),
+              ('erp-z-err', 'Z-ERR', 'Produto com erro isolado', 'P', 'S', NULL, 'unknown'),
+              ('erp-z-ok',  'Z-OK',  'Produto seguinte ok', 'P', 'S', NULL, 'unknown')`
+    );
+
+    let attempts429 = 0;
+    const erp = {
+      fetchProductEnrichmentData: async (erpId: string) => {
+        if (erpId === 'erp-z-429') {
+          attempts429 += 1;
+          if (attempts429 === 1) {
+            throw new Error('bling /produtos/erp-z-429 -> 429 TOO_MANY_REQUESTS');
+          }
+          return { images: [], ncm: '85365090', category: 'Elétrica' };
+        }
+        if (erpId === 'erp-z-err') {
+          throw new Error('falha isolada de cadastro');
+        }
+        return { images: [], ncm: '85369090', category: 'Elétrica' };
+      },
+    } as unknown as ErpConnector;
+
+    const report = await processEnrichmentBatch(erp, 'erp-z-');
+    expect(attempts429).toBe(2);
+    expect(report.processed).toBe(3);
+    expect(report.enriched).toBe(2);
+  });
 });

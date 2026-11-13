@@ -5,6 +5,10 @@ import { PoolClient } from 'pg';
 import { recalculateCompleteness } from '../catalog/publish-preview.js';
 import { env } from '../config/env.js';
 import { loadConnectors } from '../connectors/load.js';
+import {
+  ErpDailyQuotaPausedError,
+  notifyErpRateLimitPenalty,
+} from '../connectors/rate-limit-port.js';
 import { activeErpConnector } from '../connectors/strategy/factory.js';
 import { ErpConnector } from '../connectors/strategy/types.js';
 import { query, withTransaction } from '../db/pool.js';
@@ -104,6 +108,37 @@ async function saveNcmAndCategory(client: PoolClient, productId: string, ncm: st
   return saved;
 }
 
+function isRateLimitFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b429\b|TOO_MANY_REQUESTS/i.test(message);
+}
+
+function jitteredRetryMs(attempt: number): number {
+  const base = 1000 * 2 ** Math.max(0, attempt);
+  const jitter = Math.floor(Math.random() * Math.min(1000, Math.floor(base * 0.5) + 1));
+  return Math.min(30_000, base + jitter);
+}
+
+async function fetchEnrichmentWithResilience(
+  erp: ErpConnector,
+  erpId: string
+): Promise<{ images: string[]; ncm: string; category: string }> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await erp.fetchProductEnrichmentData(erpId);
+    } catch (error) {
+      if (error instanceof ErpDailyQuotaPausedError) throw error;
+      lastError = error;
+      if (!isRateLimitFailure(error) || attempt === 3) break;
+      const waitMs = jitteredRetryMs(attempt);
+      await notifyErpRateLimitPenalty(waitMs);
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
+  throw lastError;
+}
+
 /**
  * Lê um lote de produtos sem capa ou sem NCM. A escrita fica no HUB.
  * O cursor evita repetir o mesmo lote quando o ERP não tem o dado.
@@ -134,7 +169,7 @@ export async function processEnrichmentBatch(
   const enrichedIds: string[] = [];
   for (const row of rows.rows) {
     try {
-      const data = await erp.fetchProductEnrichmentData(row.erp_id);
+      const data = await fetchEnrichmentWithResilience(erp, row.erp_id);
       const wrote = await withTransaction(async (client) => {
         const imageSaved = data.images.length > 0 ? await saveImages(client, row.id, data.images) : false;
         const ncmSaved = await saveNcmAndCategory(client, row.id, data.ncm, data.category);
@@ -144,6 +179,7 @@ export async function processEnrichmentBatch(
       enriched += 1;
       enrichedIds.push(row.id);
     } catch (error) {
+      if (error instanceof ErpDailyQuotaPausedError) throw error;
       logger.error('Enriquecimento do produto falhou', {
         erpId: row.erp_id,
         error: error instanceof Error ? error.message : String(error),
@@ -167,11 +203,18 @@ export async function processEnrichmentBatch(
 async function enqueueBatch(runToken: string, afterErpId: string): Promise<void> {
   const jobId = `enrich-${runToken}-${afterErpId || 'start'}`;
   const existing = await getEnrichmentQueue().getJob(jobId);
-  if (existing) return;
+  if (existing) {
+    const state = await existing.getState().catch(() => 'unknown');
+    if (state === 'failed' || state === 'completed') {
+      await existing.remove().catch(() => undefined);
+    } else {
+      return;
+    }
+  }
   await getEnrichmentQueue().add(
     'batch',
     { afterErpId, runToken },
-    { jobId, removeOnComplete: 50, removeOnFail: 20, attempts: 3, backoff: JITTERED_BACKOFF }
+    { jobId, removeOnComplete: 50, removeOnFail: 20, attempts: 5, backoff: JITTERED_BACKOFF }
   );
 }
 
@@ -208,6 +251,7 @@ export function startEnrichmentWorker(): Worker<EnrichJob> {
     {
       connection: redisConnection(),
       concurrency: 1,
+      limiter: { max: 3, duration: 1_000 },
       lockDuration: 300_000,
       stalledInterval: 120_000,
       settings: { backoffStrategy: jitteredBackoffStrategy },

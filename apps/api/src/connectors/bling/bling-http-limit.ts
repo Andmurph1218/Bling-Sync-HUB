@@ -2,17 +2,22 @@ import { getRedis } from '../../lib/redis.js';
 import { logger } from '../../lib/logger.js';
 import {
   ErpCallClass,
+  ErpCallLane,
   ErpDailyQuotaPausedError,
   ErpDailyState,
   quotaPauseDelayMs,
+  ScheduledLimiter,
 } from '../rate-limit-port.js';
 
 export const BLING_MAX_REQUESTS_PER_SECOND = 3;
+/** Espaçamento mínimo global (360 ms => máx ~2,77 req/s, zero rajada simultânea entre workers). */
+export const BLING_MIN_INTERVAL_MS = 360;
+/** Chave global compartilhada no Redis entre sync, enriquecimento, reconciliação e OAuth. */
+export const BLING_RATE_LIMIT_KEY = 'bling:rate_limit';
 /** Cota diária da conta. As filas de leitura param em 80% e deixam o resto para o token. */
 export const BLING_DAILY_QUOTA = 120_000;
 export const BLING_DAILY_PAUSE_AT = 96_000;
 const WINDOW_MS = 1000;
-const SLOT_KEY = 'bling:http:slots';
 const DAY_TTL_SECONDS = 36 * 60 * 60;
 
 export type BlingCallClass = ErpCallClass;
@@ -27,24 +32,37 @@ export function decideDailyQuota(used: number, callClass: BlingCallClass): Bling
   return 'open';
 }
 
-const SLOT_SCRIPT = `
+/**
+ * Reserva atomicamente o próximo horário disponível na chave global `bling:rate_limit`.
+ * Garante espaçamento mínimo `minGap` (360ms => <= 2,77 req/s, nunca > 3 req/s em nenhuma borda)
+ * e respeita qualquer penalidade de `Retry-After` gravada na mesma chave.
+ */
+const RESERVE_SLOT_SCRIPT = `
 local key = KEYS[1]
 local now = tonumber(ARGV[1])
-local window = tonumber(ARGV[2])
-local limit = tonumber(ARGV[3])
-local member = ARGV[4]
-redis.call('ZREMRANGEBYSCORE', key, '-inf', now - window)
-local count = redis.call('ZCARD', key)
-if count >= limit then
-  local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
-  if oldest[2] then
-    return {0, oldest[2]}
-  end
-  return {0, now}
+local minGap = tonumber(ARGV[2])
+local nextAt = tonumber(redis.call('GET', key) or '0')
+local scheduled = now
+if nextAt > now then
+  scheduled = nextAt
 end
-redis.call('ZADD', key, now, member)
-redis.call('PEXPIRE', key, window + 1000)
-return {1, now}
+local updatedNext = scheduled + minGap
+local ttlMs = math.max(2000, updatedNext - now + 2000)
+redis.call('SET', key, tostring(updatedNext), 'PX', ttlMs)
+return scheduled - now
+`;
+
+/** Empurra `bling:rate_limit` quando qualquer worker recebe HTTP 429 / Retry-After. */
+const PENALTY_SCRIPT = `
+local key = KEYS[1]
+local target = tonumber(ARGV[1])
+local ttlMs = tonumber(ARGV[2])
+local current = tonumber(redis.call('GET', key) or '0')
+if target > current then
+  redis.call('SET', key, tostring(target), 'PX', ttlMs)
+  return target
+end
+return current
 `;
 
 const DAILY_SCRIPT = `
@@ -72,6 +90,7 @@ interface SlotRedis {
 }
 
 let stamps: number[] = [];
+let localNextAt = 0;
 let redisOverride: SlotRedis | null = null;
 let localDay = '';
 let localUsed = 0;
@@ -91,6 +110,7 @@ function dailyKey(now = Date.now()): string {
 
 export function resetBlingRequestSlotsForTests(): void {
   stamps = [];
+  localNextAt = 0;
   redisOverride = null;
   localDay = '';
   localUsed = 0;
@@ -122,6 +142,11 @@ function sharedRedis(): SlotRedis | null {
 }
 
 async function waitLocal(): Promise<void> {
+  const now = Date.now();
+  const scheduled = Math.max(now, localNextAt);
+  localNextAt = scheduled + BLING_MIN_INTERVAL_MS;
+  const gapWait = scheduled - now;
+  if (gapWait > 0) await sleep(gapWait);
   for (;;) {
     const slot = takeBlingSlot();
     if (slot.ok) return;
@@ -166,7 +191,29 @@ async function consumeDaily(callClass: BlingCallClass): Promise<{ state: BlingDa
   }
 }
 
-/** Uma vaga da cota global do Bling. Sync, enriquecimento e reconciliação passam por aqui. */
+/** Registra globalmente no Redis (`bling:rate_limit`) uma pausa após HTTP 429 / Retry-After. */
+export async function notifyBlingGlobalPenalty(retryAfterMs: number): Promise<void> {
+  const effectiveWait = Math.max(BLING_MIN_INTERVAL_MS, Math.min(60_000, Math.ceil(retryAfterMs)));
+  const target = Date.now() + effectiveWait;
+  localNextAt = Math.max(localNextAt, target);
+  const redis = sharedRedis();
+  if (!redis) return;
+  try {
+    await redis.eval(
+      PENALTY_SCRIPT,
+      1,
+      BLING_RATE_LIMIT_KEY,
+      String(target),
+      String(effectiveWait + 2_000)
+    );
+  } catch (error) {
+    logger.warn('Não foi possível gravar penalidade 429 do Bling no Redis; aplicando localmente.', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/** Uma vaga da cota global do Bling (`bling:rate_limit`). Sync, enriquecimento, reconciliação e OAuth passam por aqui. */
 export async function acquireBlingRequestSlot(callClass: BlingCallClass = 'bulk'): Promise<void> {
   const gate = await consumeDaily(callClass);
   if (gate.state !== 'open') throw new BlingDailyQuotaPausedError(gate.used, gate.state);
@@ -175,30 +222,40 @@ export async function acquireBlingRequestSlot(callClass: BlingCallClass = 'bulk'
     await waitLocal();
     return;
   }
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    try {
-      const now = Date.now();
-      const reply = await redis.eval(
-        SLOT_SCRIPT,
-        1,
-        SLOT_KEY,
-        String(now),
-        String(WINDOW_MS),
-        String(BLING_MAX_REQUESTS_PER_SECOND),
-        `${now}:${attempt}:${Math.random().toString(36).slice(2)}`
-      );
-      const row = Array.isArray(reply) ? reply : [1, now];
-      if (Number(row[0]) === 1) return;
-      const oldest = Number(row[1]);
-      const waitMs = Number.isFinite(oldest) ? Math.max(20, oldest + WINDOW_MS - Date.now()) : WINDOW_MS;
-      await sleep(Math.min(waitMs, WINDOW_MS));
-    } catch (error) {
-      logger.warn('Cota do Bling no Redis indisponível. O processo segue no limite local de 3 req/s.', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      await waitLocal();
-      return;
+  try {
+    const now = Date.now();
+    const reply = await redis.eval(
+      RESERVE_SLOT_SCRIPT,
+      1,
+      BLING_RATE_LIMIT_KEY,
+      String(now),
+      String(BLING_MIN_INTERVAL_MS)
+    );
+    const waitMs = Number(reply);
+    if (Number.isFinite(waitMs) && waitMs > 0) {
+      await sleep(waitMs);
     }
+    return;
+  } catch (error) {
+    logger.warn('Limitador global bling:rate_limit no Redis indisponível. Seguindo no limite local.', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await waitLocal();
   }
-  await waitLocal();
 }
+
+/** Implementação de `ScheduledLimiter` respaldada por `bling:rate_limit` no Redis. */
+export class RedisScheduledBlingLimiter implements ScheduledLimiter {
+  async schedule<T>(caller: ErpCallLane, task: (grantedAtMs: number) => Promise<T>): Promise<T> {
+    const callClass: BlingCallClass =
+      caller === 'token' || caller === 'webhook_p1_push_stock' ? 'critical' : 'bulk';
+    await acquireBlingRequestSlot(callClass);
+    return task(Date.now());
+  }
+
+  notifyRateLimitPenalty(retryAfterMs: number): void {
+    void notifyBlingGlobalPenalty(retryAfterMs);
+  }
+}
+
+export const redisScheduledBlingLimiter = new RedisScheduledBlingLimiter();
