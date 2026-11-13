@@ -1,7 +1,7 @@
 # Documentação de Implantação — JH Sync Hub
 
 Data de referência: **12 de novembro de 2026**  
-Estado publicado em `https://hub.jhshopping.com.br` (`30e088f`). O estado atual está na **seção 14** e na auditoria de prontidão [auditoria-go-live.md](auditoria-go-live.md). As seções 13 e anteriores preservam o histórico cronológico da implantação.  
+Estado publicado em `https://hub.jhshopping.com.br` (`0671858`). O estado atual está na **seção 14** e na auditoria de prontidão [auditoria-go-live.md](auditoria-go-live.md). As seções 13 e anteriores preservam o histórico cronológico da implantação.  
 Especificação normativa: [plano-mestre.md](plano-mestre.md)  
 Resumo executivo: [descricao.md](descricao.md)  
 Auditoria pré-go-live: [auditoria-go-live.md](auditoria-go-live.md)  
@@ -585,8 +585,9 @@ Produção atualizada em `https://hub.jhshopping.com.br` (commit `30e088f`, **33
    - Diferença em relação aos ~27 mil registros da listagem "Últimos Incluídos" do Bling: o filtro do Bling soma Ativos + Inativos e conta cada variação filha como linha individual, enquanto o HUB importa somente Ativos (`criterio=2`) e agrupa variações filhas em `product_variants` sob o produto-pai (exibindo agora ambos os números na Visão Geral).
 
 3. **Nuvemshop como Canal Ativo e Reconciliação em Lote:**
-   - Na produção, `sync_cursors` estava vazio, impedindo `resolveNuvemshopStoreId()` de localizar a loja. O HUB passou a validar o token em `GET /2025-03/{id}/store`, gravou automaticamente `nuvemshop-store-id = 6667412` e iniciou a vinculação em lote (`createNuvemshopBatchReader`, páginas de 200 produtos), registrando já os primeiros `41+` anúncios vinculados em `channel_listing_links`.
+   - Na produção, `sync_cursors` estava vazio, impedindo `resolveNuvemshopStoreId()` de localizar a loja. O HUB passou a validar o token em `GET /2025-03/{id}/store`, gravou automaticamente `nuvemshop-store-id = 6667412` e concluiu a vinculação em lote (`createNuvemshopBatchReader`, páginas de 200 produtos, filtrando apenas canais conectados e iniciando `AbortSignal.timeout` após a espera de rate-limit), registrando **`964` anúncios vinculados automaticamente** (2 sinais) e **`2` sugeridos** (1 sinal) em `channel_listing_links`.
    - Na Visão Geral (`/`), o card **Canais Ativos** agora separa visualmente o status da conexão (**`Nuvemshop · Conectado`**, **`Mercado Livre · Pausado`**) da contagem de anúncios vinculados.
+   - Todas as chamadas HTTP ao Bling (sync, enriquecimento, reconciliação e OAuth) foram unificadas no agendador atômico `bling:rate_limit` no Redis (`360 ms` de espaçamento mínimo, `~2,7 req/s` medidos em produção, zero erros `429`), respeitando `Retry-After` e backoff exponencial com jitter (`attempts = 5` no `enrichment-worker`).
 
 ### Estado verificado no banco de produção (12/11/2026)
 
