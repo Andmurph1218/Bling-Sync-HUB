@@ -6,6 +6,7 @@ import { collectListingSignals, linkStatusFromSignals, ListingSignal } from '../
 import { createNuvemshopBatchReader } from '../connectors/strategy/nuvemshop-listing.js';
 import { MarketplaceListing, MasterProduct } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
+import { enqueueProductImagesForSync, isAllowedImageHost } from '../engines/iqre.js';
 import { logger } from '../lib/logger.js';
 
 const CHANNELS = ['mercadolivre', 'nuvemshop'] as const;
@@ -357,6 +358,19 @@ export async function reconcileListings(
       if (await linkIfMissing(row, channel, listing)) linked += 1;
       const found = compare(row, channel, listing, sellerProducts.has(row.id));
       await saveSnapshot(row.id, channel, listing, found.map((item) => ({ kind: item.kind, message: item.message })));
+      if (channel === 'nuvemshop' && row.image_count === 0 && listing.images.length > 0) {
+        const candidates = listing.images
+          .filter((url) => isAllowedImageHost(url, 'nuvemshop'))
+          .map((source_url) => ({ source_url, source_platform: 'nuvemshop' as const }));
+        if (candidates.length > 0) {
+          await enqueueProductImagesForSync(row.id, candidates).catch((err: unknown) => {
+            logger.warn('Não foi possível enfileirar imagens da Nuvemshop no IQRE', {
+              productId: row.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }
+      }
       snapshots += 1;
       alerts += found.length;
     }

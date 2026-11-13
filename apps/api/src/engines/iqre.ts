@@ -26,13 +26,30 @@ import { jitteredBackoffMs } from '../queues/backoff.js';
 
 const ALLOWED_HOST_SUFFIXES = [
   'bling.com.br',
+  'amazonaws.com',
+  'cloudfront.net',
   'mlstatic.com',
   'mercadolivre.com.br',
   'mercadolibre.com',
   'mitiendanube.com',
   'nuvemshop.com.br',
   'tiendanube.com',
+  'tcdn.com.br',
+  'vtexassets.com',
 ];
+
+const S3_EPHEMERAL_PARAMS = new Set([
+  'awsaccesskeyid',
+  'expires',
+  'signature',
+  'x-amz-algorithm',
+  'x-amz-credential',
+  'x-amz-date',
+  'x-amz-expires',
+  'x-amz-security-token',
+  'x-amz-signature',
+  'x-amz-signedheaders',
+]);
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB
 
@@ -41,20 +58,61 @@ export function normalizeImageUrl(rawUrl: string): string {
   parsed.hash = '';
   parsed.protocol = 'https:';
   parsed.hostname = parsed.hostname.toLowerCase();
+  for (const key of [...parsed.searchParams.keys()]) {
+    const lower = key.toLowerCase();
+    if (S3_EPHEMERAL_PARAMS.has(lower) || lower.startsWith('x-amz-')) {
+      parsed.searchParams.delete(key);
+    }
+  }
   parsed.searchParams.sort();
   return parsed.toString();
 }
 
-export function isAllowedImageHost(rawUrl: string): boolean {
+function isPrivateOrLocalHostname(host: string): boolean {
+  if (
+    host === 'localhost' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host.startsWith('127.') ||
+    host.startsWith('10.') ||
+    host.startsWith('192.168.') ||
+    host.startsWith('169.254.')
+  ) {
+    return true;
+  }
+  const m172 = host.match(/^172\.(\d{1,3})\./);
+  if (m172 && Number(m172[1]) >= 16 && Number(m172[1]) <= 31) return true;
+  return false;
+}
+
+export function isAllowedImageHost(
+  rawUrl: string,
+  sourcePlatform?: 'bling' | 'erp' | 'mercadolivre' | 'nuvemshop'
+): boolean {
   try {
     const parsed = new URL(rawUrl.trim());
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
       return false;
     }
     const host = parsed.hostname.toLowerCase();
-    return ALLOWED_HOST_SUFFIXES.some(
-      (suffix) => host === suffix || host.endsWith(`.${suffix}`)
-    );
+    if (isPrivateOrLocalHostname(host)) return false;
+    if (
+      ALLOWED_HOST_SUFFIXES.some(
+        (suffix) => host === suffix || host.endsWith(`.${suffix}`)
+      )
+    ) {
+      return true;
+    }
+    if (
+      (sourcePlatform === 'bling' || sourcePlatform === 'erp' || sourcePlatform === 'nuvemshop') &&
+      parsed.protocol === 'https:' &&
+      host.includes('.')
+    ) {
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
@@ -173,6 +231,12 @@ export async function enqueueProductImagesForSync(
       );
 
       if (existing.rowCount && existing.rowCount > 0) {
+        await db.query(
+          `UPDATE image_processing_queue
+           SET source_url = $2
+           WHERE id = $1 AND stage IN ('queued', 'failed')`,
+          [existing.rows[0]!.id, cand.source_url]
+        );
         skippedDuplicatesCount += 1;
         continue;
       }
@@ -273,7 +337,7 @@ export async function processQueuedImagesWorkerBatch(options: {
     touchedProducts.add(row.master_product_id);
 
     try {
-      if (!isAllowedImageHost(row.source_url)) {
+      if (!isAllowedImageHost(row.source_url, row.source_platform)) {
         throw new Error(`Host de imagem não autorizado: ${row.source_url}`);
       }
 
@@ -332,7 +396,8 @@ export async function processQueuedImagesWorkerBatch(options: {
              quality_score, updated_at
            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, now())
            ON CONFLICT (master_product_id, url_normalized) DO UPDATE
-             SET average_hash = EXCLUDED.average_hash,
+             SET source_url = EXCLUDED.source_url,
+                 average_hash = EXCLUDED.average_hash,
                  sha256_hash = EXCLUDED.sha256_hash,
                  width = EXCLUDED.width,
                  height = EXCLUDED.height,

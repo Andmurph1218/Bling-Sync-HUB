@@ -191,4 +191,19 @@ describe('criação de produto no Bling', () => {
     expect(waits[1]).toBe(2000);
     expect(penalties).toEqual(waits);
   });
+
+  it('consulta variações pelo endpoint oficial /produtos/variacoes/:id em vez do filtro inexistente idProdutoPai', async () => {
+    const reader = new ScriptedReader((_method, path) => {
+      if (path === '/produtos/variacoes/16551376555') {
+        return {
+          status: 200,
+          data: { data: { id: 16551376555, formato: 'V', variacoes: [{ id: 901 }, { id: 902 }] } },
+        };
+      }
+      return { status: 200, data: { data: [{ id: 999999 }] } };
+    });
+    const childIds = await reader.children('16551376555');
+    expect(reader.calls).toEqual(['GET /produtos/variacoes/16551376555']);
+    expect(childIds).toEqual(['901', '902']);
+  });
 });

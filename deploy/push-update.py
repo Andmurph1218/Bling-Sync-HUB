@@ -10,7 +10,7 @@ host = "201.79.39.118"
 password = os.environ["HUB_SSH_PW"]
 root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 tar_path = os.path.join(os.environ["TEMP"], "bling-src.tar")
-skip_dirs = {"node_modules", "dist", ".next", ".git"}
+skip_dirs = {"node_modules", "dist", ".next", ".git", "data"}
 
 def should_skip(path: str) -> bool:
     name = os.path.basename(path)

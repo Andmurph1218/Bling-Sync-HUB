@@ -3,6 +3,7 @@ import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { startEnrichmentWorker } from './queues/enrichment-worker.js';
 import { startErpSyncWorker } from './queues/erp-sync-worker.js';
+import { startImageWorker } from './queues/image-worker.js';
 import { startPublishWorker } from './queues/publish-queue.js';
 import { startBatchWorker } from './catalog/batch-jobs.js';
 import { startImportWorker } from './catalog/import-jobs.js';
@@ -15,6 +16,7 @@ if (process.env.VITEST !== 'true') {
   startPublishWorker();
   startErpSyncWorker();
   startEnrichmentWorker();
+  startImageWorker();
   startDuplicateDetector();
   startStuckPublishDetector();
   startBatchWorker();

@@ -119,6 +119,8 @@ async function hydrateVariations(erp: ErpConnector, payload: InboundProduct): Pr
       continue;
     }
     if (!child || child.tipo !== 'P') continue;
+    const declaredParent = parentId(child);
+    if (declaredParent !== null && declaredParent !== String(payload.id)) continue;
     const named = child as InboundProduct & { variacao?: { nome?: string; ordem?: number } };
     variations.push({
       id: named.id,
@@ -151,7 +153,7 @@ function imageCandidates(payload: InboundProduct): EnqueueImageCandidate[] {
   }).midia;
   const links = [...(midia?.imagens?.internas ?? []), ...(midia?.imagens?.externas ?? [])]
     .map((image) => image.link?.trim() ?? '')
-    .filter((link) => link.length > 0 && isAllowedImageHost(link));
+    .filter((link) => link.length > 0 && isAllowedImageHost(link, 'erp'));
   return links.map((source_url) => ({ source_url, source_platform: 'erp' }));
 }
 

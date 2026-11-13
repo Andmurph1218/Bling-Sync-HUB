@@ -109,4 +109,39 @@ describe('sync completo do ERP', () => {
     expect(report.upserted).toBe(1);
     expect(report.failed).toBe(0);
   });
+
+  it('ignora falso filho que pertence a outro pai (ou produto independente sem vínculo) e rebaixa pai órfão para formato S', async () => {
+    const erp = {
+      id: 'bling',
+      syncProduct: async () => ({ found: false, productId: null, externalId: null, sku: null, name: null }),
+      getStock: async () => ({ found: false, quantity: null }),
+      getPrice: async () => ({ found: false, price: null }),
+      listCatalogPage: async (page: number, pageSize: number) => ({
+        page,
+        pageSize,
+        externalIds: page === 1 ? ['50'] : [],
+        done: true,
+      }),
+      pullCatalogProduct: async (externalId: string) => {
+        if (externalId === '50') return product(50, 'P', { formato: 'V', variacoes: [] });
+        return product(99, 'P', { codigo: 'SKU-OUTRO', variacao: { produtoPai: { id: 777 } } });
+      },
+      listChildIds: async () => ['99'],
+      fetchProductEnrichmentData: async () => ({ images: [], ncm: '', category: '' }),
+      createProduct: async () => ({ erp_id: '0', stockWarning: null }),
+    } as ErpConnector;
+
+    const saved: Array<{ codigo: string; formato: string; variacoes: number }> = [];
+    const report = await runFullCatalogSync(erp, {
+      pageSize: 2,
+      upsertProduct: async (payload) => {
+        saved.push({ codigo: payload.codigo, formato: payload.formato, variacoes: payload.variacoes?.length ?? 0 });
+        return { masterProductId: 'm50', variantIdsBySku: { [payload.codigo]: 'v50' } };
+      },
+      scoreProduct: async () => false,
+    });
+
+    expect(saved).toEqual([{ codigo: 'SKU-50', formato: 'S', variacoes: 0 }]);
+    expect(report.failed).toBe(0);
+  });
 });

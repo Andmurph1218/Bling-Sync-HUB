@@ -1,5 +1,9 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { PoolClient } from 'pg';
 import { query } from '../db/pool.js';
+import { getPublicBaseUrl } from '../config/public-url.js';
+import { extFromImageFormat, getMediaStorageDir } from '../routes/media.js';
 import {
   AttributeMapInput,
   isChannelMappingGreen,
@@ -384,9 +388,19 @@ export async function listCatalog(input: {
     gapCounts,
   ] = await Promise.all([
     ids.length
-      ? query<{ master_product_id: string; url_normalized: string }>(
-          `SELECT master_product_id, url_normalized FROM product_images
-           WHERE is_cover_eligible = true AND master_product_id IN (${placeholders})`,
+      ? query<{
+          master_product_id: string;
+          source_url: string | null;
+          url_normalized: string;
+          sha256_hash: string | null;
+          format: string | null;
+          is_cover_eligible: boolean;
+        }>(
+          `SELECT master_product_id, source_url, url_normalized, sha256_hash, format, is_cover_eligible
+           FROM product_images
+           WHERE rights_status NOT IN ('third_party_risk', 'rejected')
+             AND master_product_id IN (${placeholders})
+           ORDER BY is_cover_eligible DESC, position_ns ASC NULLS LAST, position_bling ASC NULLS LAST, quality_score DESC NULLS LAST`,
           ids
         )
       : empty,
@@ -498,9 +512,26 @@ export async function listCatalog(input: {
     ),
   ]);
 
+  const mediaDir = getMediaStorageDir();
+  const publicBase = getPublicBaseUrl();
   const coverByProduct = new Map<string, string>();
+  const eligibleCoverIds = new Set<string>();
   for (const row of covers.rows) {
-    if (!coverByProduct.has(row.master_product_id)) coverByProduct.set(row.master_product_id, row.url_normalized);
+    if (row.is_cover_eligible) {
+      eligibleCoverIds.add(row.master_product_id);
+    }
+    if (!coverByProduct.has(row.master_product_id)) {
+      let resolvedUrl = row.source_url?.trim() || row.url_normalized;
+      if (row.sha256_hash && /^[0-9a-f]{64}$/.test(row.sha256_hash)) {
+        const ext = extFromImageFormat(row.format);
+        const cachedFile = path.join(mediaDir, `${row.sha256_hash}.${ext}`);
+        if (fs.existsSync(cachedFile)) {
+          const base = publicBase || `http://localhost:${process.env.PORT ?? 3001}`;
+          resolvedUrl = `${base}/api/media/${row.sha256_hash}.${ext}`;
+        }
+      }
+      coverByProduct.set(row.master_product_id, resolvedUrl);
+    }
   }
   const publishedIds = new Set(published.rows.map((row) => row.master_product_id));
   const rejectedIds = new Set(rejected.rows.map((row) => row.master_product_id));
@@ -555,7 +586,7 @@ export async function listCatalog(input: {
           .map(([platform]) => platform) as CatalogChannel[])
       : [];
     const price = num(row.price);
-    const hasCover = coverByProduct.has(row.id);
+    const hasCover = eligibleCoverIds.has(row.id);
     const isPublished = publishedIds.has(row.id);
     const isRejected = rejectedIds.has(row.id);
     const checklist = evaluateCatalogChecklist({

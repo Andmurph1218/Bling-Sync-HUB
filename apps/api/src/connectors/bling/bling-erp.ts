@@ -442,18 +442,15 @@ export class LiveBlingCatalogReader implements BlingCatalogReader {
   }
 
   async children(parentId: string): Promise<string[]> {
-    const ids: string[] = [];
-    for (let page = 1; page <= 20; page += 1) {
-      const path = `/produtos?pagina=${page}&limite=100&idProdutoPai=${encodeURIComponent(parentId)}`;
-      const res = await this.get<{ data?: Array<{ id?: number | string }> }>(path);
-      if (res.status >= 400) throw blingError(path, res.status, res.data);
-      const pageIds = (res.data.data ?? [])
-        .map((row) => (row.id === undefined || row.id === null ? '' : String(row.id)))
-        .filter((id) => id.length > 0);
-      ids.push(...pageIds);
-      if (pageIds.length < 100) break;
-    }
-    return ids;
+    const path = `/produtos/variacoes/${encodeURIComponent(parentId)}`;
+    const res = await this.get<{
+      data?: { variacoes?: Array<{ id?: number | string }> };
+    }>(path);
+    if (res.status === 404) return [];
+    if (res.status >= 400) throw blingError(path, res.status, res.data);
+    return (res.data?.data?.variacoes ?? [])
+      .map((row) => (row.id === undefined || row.id === null ? '' : String(row.id)))
+      .filter((id) => id.length > 0);
   }
 
   async create(input: CreateProductDTO): Promise<{ erp_id: string; stockWarning: string | null }> {
