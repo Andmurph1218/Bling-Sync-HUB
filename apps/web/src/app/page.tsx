@@ -3,7 +3,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Toaster, ToastMessage } from '../components/toaster';
 import Link from 'next/link';
-import { ChevronDown, RefreshCw, Shield } from 'lucide-react';
+import {
+  Boxes,
+  Check,
+  ChevronDown,
+  RefreshCw,
+  Share2,
+  Shield,
+  Star,
+  Users,
+} from 'lucide-react';
 import {
   fetchOperationalState,
   OperationalStatePayload,
@@ -81,13 +90,13 @@ function activityBadge(status: string, reason: string | null): { label: string; 
   if (ignored) {
     return {
       label: 'Atualização Ignorada (sem alteração)',
-      className: 'border-border-color bg-bg-base text-text-muted',
+      className: 'border-border-color bg-bg-base text-text-muted dark:border-white/10 dark:bg-white/[0.04]',
     };
   }
   if (normalized === 'processed' || normalized === 'processado' || normalized === 'completed') {
     return {
       label: 'Sucesso',
-      className: 'border-emerald-600/30 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200',
+      className: 'border-emerald-600/30 bg-emerald-500/15 text-emerald-800 dark:border-[#3ecf74]/30 dark:bg-[#3ecf74]/12 dark:text-[#66e094]',
     };
   }
   if (normalized === 'failed' || normalized === 'error' || normalized === 'erro') {
@@ -99,10 +108,23 @@ function activityBadge(status: string, reason: string | null): { label: string; 
   return { label: status, className: 'border-border-color bg-bg-base text-text-muted' };
 }
 
-function healthTone(score: number): { bar: string; text: string } {
-  if (score > 80) return { bar: 'bg-emerald-600', text: 'text-emerald-800 dark:text-emerald-200' };
-  if (score > 50) return { bar: 'bg-amber-500', text: 'text-amber-800 dark:text-amber-200' };
-  return { bar: 'bg-rose-600', text: 'text-rose-800 dark:text-rose-200' };
+function healthTone(score: number): { bar: string; meta: string } {
+  if (score > 80) {
+    return {
+      bar: 'bg-emerald-600 dark:bg-[#3ecf74]',
+      meta: 'text-emerald-800 dark:text-[#52dc86]',
+    };
+  }
+  if (score > 50) {
+    return {
+      bar: 'bg-amber-500 dark:bg-[#f09a42]',
+      meta: 'text-amber-800 dark:text-[#f2a65a]',
+    };
+  }
+  return {
+    bar: 'bg-rose-600 dark:bg-[#d97324]',
+    meta: 'text-rose-800 dark:text-[#f2a65a]',
+  };
 }
 
 export default function HomePage() {
@@ -298,27 +320,51 @@ export default function HomePage() {
   const syncRunning = syncState === 'processing' || syncStarting;
   const syncBusy = syncRunning || reconciling || enriching;
 
-  return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
-      {shadow && (
-        <div className="sticky top-16 z-40 -mx-6 mb-6 flex items-start gap-2 border-b border-sky-800/30 bg-sky-200 px-6 py-2.5 text-sm font-medium text-sky-950 shadow-sm dark:border-sky-300/30 dark:bg-sky-900 dark:text-sky-50">
-          <Shield className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          <p>Modo Simulação (Shadow) Ativo: O HUB está validando os dados, mas nenhuma alteração está sendo enviada aos marketplaces.</p>
-        </div>
-      )}
+  const missingSku = catalogHome?.gaps.missingSku ?? state?.emptySkuCount ?? 0;
+  const missingCover = catalogHome?.gaps.missingCover ?? 0;
+  const missingCategory = catalogHome?.gaps.missingCategory ?? 0;
+  const withSku = Math.max(0, products - missingSku);
+  const withCover = Math.max(0, products - missingCover);
+  const withCategory = Math.max(0, products - missingCategory);
+  const ncmValid = Math.max(0, products - awaitingNcm - fiscalConflicts);
 
+  const stageBars = [
+    { label: 'Catálogo', value: products, highlight: false },
+    { label: 'Com SKU', value: withSku, highlight: false },
+    { label: 'Com Capa', value: withCover, highlight: false },
+    { label: 'Nuvemshop', value: nuvemshopPublished, highlight: true },
+    { label: 'NCM OK', value: ncmValid, highlight: false },
+    { label: 'Categoria', value: withCategory, highlight: false },
+    { label: 'Prontos', value: readyToPublish, highlight: false },
+  ];
+  const maxStageValue = Math.max(1, ...stageBars.map((b) => b.value));
+
+  return (
+    <main className="mx-auto max-w-6xl px-6 py-7">
       {forbidden && (
-        <p role="alert" className="mb-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-800 dark:text-rose-100">
+        <p role="alert" className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2.5 text-sm text-rose-800 dark:text-rose-100">
           Acesso negado (403). A loja de integrações é exclusiva do administrador.
         </p>
       )}
 
-      <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-6 lg:flex-row lg:items-end">
+      <header className="flex flex-col justify-between gap-4 pb-6 lg:flex-row lg:items-center">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-text-primary">Visão Geral</h1>
-          <p className="mt-1 max-w-xl text-sm text-text-muted">Quantos produtos estão prontos, o que ainda trava a venda e o estado dos canais.</p>
+          <h1 className="text-2xl font-bold tracking-tight text-text-primary sm:text-[28px]">
+            Visão Geral
+          </h1>
+          <p className="mt-1 text-sm text-text-muted">
+            JH Sync Hub · {shadow ? 'Modo Simulação (Shadow) ativo — nenhuma escrita externa' : 'Sincronização operacional ativa'}
+          </p>
         </div>
+
         <div className="flex flex-wrap items-center gap-2.5">
+          {shadow && (
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-sky-700/30 bg-sky-200/70 px-3.5 py-1.5 text-xs font-semibold text-sky-950 dark:border-[#d97324]/45 dark:bg-[#d97324]/12 dark:text-[#f59f4c]">
+              <Shield className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>Shadow Ativo</span>
+            </div>
+          )}
+
           {hasRole('admin') && (
             <div className="relative" ref={syncMenuRef}>
               <button
@@ -327,29 +373,29 @@ export default function HomePage() {
                 aria-haspopup="menu"
                 aria-busy={syncBusy}
                 onClick={() => setSyncMenuOpen((open) => !open)}
-                className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg-base"
+                className="inline-flex items-center gap-2 rounded-full bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:focus-visible:ring-[#d97324]"
               >
                 Sincronização
-                <ChevronDown className={`h-4 w-4 transition ${syncMenuOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-150 ${syncMenuOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
               </button>
               {syncMenuOpen && (
-                <div role="menu" className="absolute right-0 z-20 mt-2 w-80 rounded-xl border border-border-color bg-bg-surface p-2 shadow-[0_12px_30px_-18px_rgba(0,0,0,0.45)]">
+                <div role="menu" className="absolute right-0 z-20 mt-2 w-80 rounded-2xl border border-border-color bg-bg-surface p-2 shadow-[0_18px_40px_-16px_rgba(0,0,0,0.65)]">
                   <button
                     type="button"
                     role="menuitem"
                     disabled={syncRunning}
                     onClick={() => void startSync()}
-                    className="block w-full rounded-lg px-3 py-2 text-left hover:bg-bg-base disabled:opacity-60"
+                    className="block w-full rounded-xl px-3 py-2.5 text-left transition hover:bg-bg-base dark:hover:bg-white/[0.05] disabled:opacity-60"
                   >
                     <span className="block text-sm font-semibold text-text-primary">{syncRunning ? 'Sincronizando o ERP...' : 'Sync Completo ERP (Bling)'}</span>
-                    <span className="mt-0.5 block text-xs text-text-muted">Lê preço, estoque e cadastro do Bling.</span>
+                    <span className="mt-0.5 block text-xs text-text-muted">Lê preço, estoque e cadastro ativo do Bling.</span>
                   </button>
                   <button
                     type="button"
                     role="menuitem"
                     disabled={reconciling}
                     onClick={() => void startReconcile()}
-                    className="mt-1 block w-full rounded-lg px-3 py-2 text-left hover:bg-bg-base disabled:opacity-60"
+                    className="mt-1 block w-full rounded-xl px-3 py-2.5 text-left transition hover:bg-bg-base dark:hover:bg-white/[0.05] disabled:opacity-60"
                   >
                     <span className="block text-sm font-semibold text-text-primary">{reconciling ? 'Buscando vínculos...' : 'Reconciliação de Vínculos (Marketplaces)'}</span>
                     <span className="mt-0.5 block text-xs text-text-muted">Encontra o anúncio pelo SKU e grava o vínculo.</span>
@@ -359,7 +405,7 @@ export default function HomePage() {
                     role="menuitem"
                     disabled={enriching}
                     onClick={() => void startEnrichment()}
-                    className="mt-1 block w-full rounded-lg px-3 py-2 text-left hover:bg-bg-base disabled:opacity-60"
+                    className="mt-1 block w-full rounded-xl px-3 py-2.5 text-left transition hover:bg-bg-base dark:hover:bg-white/[0.05] disabled:opacity-60"
                   >
                     <span className="block text-sm font-semibold text-text-primary">{enriching ? 'Enriquecendo...' : 'Enriquecimento em Massa (Imagens/NCM)'}</span>
                     <span className="mt-0.5 block text-xs text-text-muted">Copia imagem e NCM do ERP para o HUB.</span>
@@ -368,10 +414,11 @@ export default function HomePage() {
               )}
             </div>
           )}
+
           <button
             type="button"
             onClick={() => void loadState()}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border-color bg-bg-surface px-3 py-2 text-xs font-semibold text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+            className="craft-pill inline-flex items-center gap-1.5 rounded-full border border-border-color bg-bg-surface px-3.5 py-2 text-xs font-semibold text-text-primary transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:focus-visible:ring-[#d97324]"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>Atualizar</span>
@@ -380,13 +427,13 @@ export default function HomePage() {
       </header>
 
       {!state && (
-        <p className="mt-6 text-sm text-text-muted" role="status">
+        <p className="mb-5 text-sm text-text-muted" role="status">
           {loading ? 'Lendo o catálogo...' : loadError}
         </p>
       )}
 
       {state && state.emptySkuCount > 0 && (
-        <section className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border-color bg-bg-surface px-4 py-3">
+        <section className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border-color bg-bg-surface px-4 py-3">
           <div className="flex items-center gap-2 text-sm text-text-primary">
             <EmptySkuNotice />
             <span>{formatCount(state.emptySkuCount)} produto(s) sem SKU. Eles não entram na lista de envio.</span>
@@ -396,7 +443,7 @@ export default function HomePage() {
       )}
 
       {syncState === 'processing' && (
-        <section className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-600/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-950 dark:text-emerald-100" role="status">
+        <section className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-600/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-950 dark:border-[#d97324]/35 dark:bg-[#d97324]/10 dark:text-[#f7f3ed]" role="status">
           <span>
             Sincronizando produtos ativos do Bling — página {formatCount(syncStatus?.page ?? 1)} ({formatCount(syncStatus?.processed ?? 0)} produtos pai verificados).
           </span>
@@ -404,7 +451,7 @@ export default function HomePage() {
       )}
 
       {syncState === 'failed' && (
-        <section className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-600/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100" role="alert">
+        <section className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-600/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100" role="alert">
           <span>
             A sincronização do Bling parou na página {formatCount(syncStatus?.page ?? 1)} ({formatCount(syncStatus?.lastCompletedPage ?? 0)} páginas concluídas).
             {syncStatus?.errorMessage ? ` Motivo: ${syncStatus.errorMessage}` : ''}
@@ -414,7 +461,7 @@ export default function HomePage() {
               type="button"
               onClick={() => void startSync()}
               disabled={syncStarting}
-              className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+              className="rounded-full bg-emerald-700 px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
             >
               Retomar sincronização
             </button>
@@ -422,117 +469,228 @@ export default function HomePage() {
         </section>
       )}
 
-      <section className="mt-6">
+      <section>
         {catalogHomeError && <p className="mb-3 text-sm text-rose-700 dark:text-rose-200" role="alert">{catalogHomeError}</p>}
+
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Link href="/catalogo" className="rounded-xl border border-border-color bg-bg-surface p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
-            <p className="text-sm font-semibold text-text-primary">Total no Catálogo</p>
-            <p className="mt-3 text-3xl font-bold tracking-tight text-text-primary">{formatCount(products)}</p>
-            <p className="mt-1 text-xs text-text-muted">
+          <Link
+            href="/problemas"
+            className="group rounded-2xl border border-border-color bg-bg-surface p-5 transition hover:border-border-color/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:focus-visible:ring-[#d97324]"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-amber-600/30 bg-amber-500/10 text-amber-800 dark:border-[#d97324]/35 dark:bg-[#d97324]/12 dark:text-[#f29a4b]">
+                <Check className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <span className="text-xs font-medium text-text-muted">
+                {duplicateCount > 0 ? `${formatCount(duplicateCount)} duplicidades` : 'Resolver pendências'}
+              </span>
+            </div>
+            <p className="mt-5 text-[32px] font-bold leading-none tracking-tight tabular-nums text-text-primary">
+              {formatCount(pendingActions)}
+            </p>
+            <p className="mt-2 text-xs text-text-muted">Ações necessárias (fiscais e cadastro)</p>
+          </Link>
+
+          <Link
+            href="/catalogo"
+            className="group rounded-2xl border border-border-color bg-bg-surface p-5 transition hover:border-border-color/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:focus-visible:ring-[#d97324]"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-sky-600/30 bg-sky-500/10 text-sky-800 dark:border-[#5ea4e6]/30 dark:bg-[#5ea4e6]/12 dark:text-[#6db2f2]">
+                <Boxes className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <span className="text-xs font-medium text-emerald-800 dark:text-[#52dc86]">
+                +{formatCount(readyToPublish)} prontos p/ venda
+              </span>
+            </div>
+            <p className="mt-5 text-[32px] font-bold leading-none tracking-tight tabular-nums text-text-primary">
+              {formatCount(products)}
+            </p>
+            <p className="mt-2 text-xs text-text-muted">
               {totalVariants > products
-                ? `${formatCount(totalVariants)} SKUs com variações · ${formatCount(readyToPublish)} prontos para venda`
-                : `${formatCount(readyToPublish)} produtos prontos para venda`}
+                ? `Total no catálogo (${formatCount(totalVariants)} SKUs c/ variações)`
+                : 'Total de produtos no catálogo'}
             </p>
           </Link>
-          <div className="rounded-xl border border-border-color bg-bg-surface p-4">
-            <p className="text-sm font-semibold text-text-primary">Saúde do Catálogo</p>
-            <p className={`mt-3 text-3xl font-bold tracking-tight ${tone.text}`}>{averageScore}% Completo</p>
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-bg-base" role="meter" aria-valuenow={averageScore} aria-valuemin={0} aria-valuemax={100} aria-label="Média de completude">
-              <div className={`h-full ${tone.bar}`} style={{ width: `${Math.max(0, Math.min(100, averageScore))}%` }} />
+
+          <Link
+            href="/completude"
+            className="group rounded-2xl border border-border-color bg-bg-surface p-5 transition hover:border-border-color/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:focus-visible:ring-[#d97324]"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-600/30 bg-emerald-500/10 text-emerald-800 dark:border-[#3ecf74]/30 dark:bg-[#3ecf74]/12 dark:text-[#4dd882]">
+                <Star className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <span className={`text-xs font-medium ${tone.meta}`}>
+                Meta operacional 80%
+              </span>
+            </div>
+            <p className="mt-5 text-[32px] font-bold leading-none tracking-tight tabular-nums text-text-primary">
+              {averageScore}%
+            </p>
+            <p className="mt-2 text-xs text-text-muted">Saúde e completude do catálogo</p>
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-bg-base dark:bg-white/[0.07]" role="meter" aria-valuenow={averageScore} aria-valuemin={0} aria-valuemax={100} aria-label="Média de completude">
+              <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${Math.max(4, Math.min(100, averageScore))}%` }} />
+            </div>
+          </Link>
+
+          <div className="rounded-2xl border border-border-color bg-bg-surface p-5">
+            <div className="flex items-start justify-between gap-2">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-amber-600/30 bg-amber-500/10 text-amber-800 dark:border-[#d97324]/35 dark:bg-[#d97324]/12 dark:text-[#f29a4b]">
+                <Share2 className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <span className={`text-xs font-medium ${nuvemshopTokenConnected ? 'text-emerald-800 dark:text-[#52dc86]' : 'text-text-muted'}`}>
+                {nuvemshopTokenConnected ? 'Nuvemshop conectada' : 'Sem canal ativo'}
+              </span>
+            </div>
+            <p className="mt-5 text-[32px] font-bold leading-none tracking-tight tabular-nums text-text-primary">
+              {formatCount(nuvemshopPublished)}
+            </p>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="text-xs text-text-muted">Anúncios vinculados</p>
+              <Link href="/canais" className="text-xs font-semibold text-text-primary underline">
+                Canais
+              </Link>
             </div>
           </div>
-          <div className="rounded-xl border border-border-color bg-bg-surface p-4">
-            <p className="text-sm font-semibold text-text-primary">Ações Necessárias</p>
-            <p className="mt-3 text-3xl font-bold tracking-tight text-text-primary">{formatCount(pendingActions)}</p>
-            <p className="mt-1 text-xs text-text-muted">Fiscais, incompletos e duplicidades</p>
-            <Link href="/problemas" className="mt-3 inline-flex rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
-              Resolver Pendências
-            </Link>
+        </div>
+
+        {syncNotice && <p className="mt-3 text-xs text-text-muted" role="status">{syncNotice}</p>}
+      </section>
+
+      <section className="mt-6 grid gap-5 lg:grid-cols-2">
+        <div className="rounded-2xl border border-border-color bg-bg-surface p-6">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold tracking-tight text-text-primary">Cobertura por etapa do catálogo</h2>
+              <p className="mt-0.5 text-xs text-text-muted">
+                {formatCount(products)} produtos monitorados · destaque em vínculos Nuvemshop ({formatCount(nuvemshopPublished)})
+              </p>
+            </div>
           </div>
-          <div className="rounded-xl border border-border-color bg-bg-surface p-4">
+
+          <div className="mt-6 grid h-44 grid-cols-7 items-end gap-2.5 border-b border-dashed border-border-color/50 pb-2 pt-4 dark:border-white/10">
+            {stageBars.map((bar) => {
+              const heightPct = Math.max(10, Math.round((bar.value / maxStageValue) * 100));
+              return (
+                <div key={bar.label} className="flex h-full flex-col items-center justify-end gap-2">
+                  <span className="text-[10px] font-semibold tabular-nums text-text-muted">
+                    {formatCount(bar.value)}
+                  </span>
+                  <div
+                    className={`w-full max-w-[44px] rounded-t-xl transition-all ${
+                      bar.highlight
+                        ? 'bg-emerald-700 dark:bg-[#d97324] shadow-[0_6px_18px_-6px_rgba(217,115,36,0.65)]'
+                        : 'bg-emerald-900/20 dark:bg-[#f5dbb6]'
+                    }`}
+                    style={{ height: `${heightPct}%` }}
+                    title={`${bar.label}: ${formatCount(bar.value)}`}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-2.5 grid grid-cols-7 gap-2 text-center">
+            {stageBars.map((bar) => (
+              <span key={bar.label} className="truncate text-[11px] font-medium text-text-muted">
+                {bar.label}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col justify-between rounded-2xl border border-border-color bg-bg-surface p-6">
+          <div>
             <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-text-primary">Canais Ativos</p>
-              <Link href="/canais" className="text-xs font-medium text-text-muted underline">Gerenciar</Link>
+              <div>
+                <h2 className="text-base font-bold tracking-tight text-text-primary">Canais ativos &amp; ciclo operacional</h2>
+                <p className="mt-0.5 text-xs text-text-muted">Estado das conexões OAuth, vínculos por canal e etapas do HUB</p>
+              </div>
+              <Link href="/canais" className="text-xs font-semibold text-text-muted underline hover:text-text-primary">
+                Gerenciar
+              </Link>
             </div>
-            <ul className="mt-3 space-y-2.5">
+
+            <ul className="mt-5 space-y-2.5">
               {channelEntries.map((ch) => (
-                <li key={ch.id} className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <span className="flex items-center gap-2 text-sm font-medium text-text-primary">
-                      <BrandLogo id={ch.id as 'nuvemshop' | 'mercadolivre'} name={ch.name} size={20} />
-                      <span className="truncate">{ch.name}</span>
-                    </span>
+                <li
+                  key={ch.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-border-color/60 bg-bg-base/50 px-3.5 py-2.5 dark:border-white/[0.07] dark:bg-black/25"
+                >
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <BrandLogo id={ch.id as 'nuvemshop' | 'mercadolivre'} name={ch.name} size={22} />
+                    <span className="truncate text-sm font-medium text-text-primary">{ch.name}</span>
                     <span
-                      className={`mt-0.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
                         ch.connected
-                          ? 'border-emerald-600/30 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
-                          : 'border-border-color bg-bg-base text-text-muted'
+                          ? 'border-emerald-600/30 bg-emerald-500/15 text-emerald-800 dark:border-[#3ecf74]/35 dark:bg-[#3ecf74]/12 dark:text-[#66e094]'
+                          : 'border-border-color bg-bg-base text-text-muted dark:border-white/10 dark:bg-white/[0.04]'
                       }`}
                     >
-                      <span className={`h-1.5 w-1.5 rounded-full ${ch.connected ? 'bg-emerald-600' : 'bg-text-muted'}`} aria-hidden="true" />
+                      <span className={`h-1.5 w-1.5 rounded-full ${ch.connected ? 'bg-emerald-600 dark:bg-[#3ecf74]' : 'bg-text-muted'}`} aria-hidden="true" />
                       {ch.statusLabel}
                     </span>
                   </div>
                   <div className="text-right">
-                    <span className="block text-sm font-semibold tabular-nums text-text-primary">
+                    <span className="text-sm font-bold tabular-nums text-text-primary">
                       {formatCount(ch.linkedCount)}
                     </span>
-                    <span className="block text-[11px] text-text-muted">vinculados</span>
+                    <span className="ml-1.5 text-[11px] text-text-muted">vinculados</span>
                   </div>
                 </li>
               ))}
             </ul>
+
             {nuvemshopTokenConnected && nuvemshopPublished === 0 && hasRole('admin') && (
               <button
                 type="button"
                 disabled={reconciling}
                 onClick={() => void startReconcile()}
-                className="mt-3 w-full rounded-lg border border-emerald-700/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-semibold text-emerald-900 hover:bg-emerald-500/20 disabled:opacity-60 dark:text-emerald-100"
+                className="mt-3 w-full rounded-xl bg-emerald-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
               >
                 {reconciling ? 'Buscando vínculos na Nuvemshop...' : 'Vincular anúncios da Nuvemshop'}
               </button>
             )}
           </div>
-        </div>
-        {syncNotice && <p className="mt-3 text-xs text-text-muted" role="status">{syncNotice}</p>}
-      </section>
 
-      <section className="mt-8">
-        <h2 className="text-lg font-bold text-text-primary">Ciclo do catálogo</h2>
-        <div className="mt-4 rounded-xl border border-border-color bg-bg-surface p-5">
-          <CatalogCycle
-            imported={products > 0}
-            enriching={enrichmentLive || enriching}
-            shadow={shadow}
-            canContinue={hasRole('admin')}
-            continuing={enriching}
-            onContinue={() => void startEnrichment()}
-          />
+          <div className="mt-6 border-t border-border-color/60 pt-5 dark:border-white/[0.08]">
+            <CatalogCycle
+              imported={products > 0}
+              enriching={enrichmentLive || enriching}
+              shadow={shadow}
+              canContinue={hasRole('admin')}
+              continuing={enriching}
+              onContinue={() => void startEnrichment()}
+            />
+          </div>
         </div>
       </section>
 
       {state && (
-        <section className="mt-8 rounded-xl border border-border-color bg-bg-surface p-5">
+        <section className="mt-6 rounded-2xl border border-border-color bg-bg-surface p-6">
           <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
-            <h2 className="text-base font-bold text-text-primary">Atividade recente</h2>
-            <Link href="/auditoria" className="text-xs text-text-muted underline">Ver auditoria</Link>
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-text-muted dark:text-[#f29a4b]" aria-hidden="true" />
+              <h2 className="text-base font-bold tracking-tight text-text-primary">Atividade recente</h2>
+            </div>
+            <Link href="/auditoria" className="text-xs text-text-muted underline hover:text-text-primary">Ver auditoria</Link>
           </div>
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="border-b border-border-color text-xs text-text-muted">
+              <thead className="border-b border-border-color/70 text-xs text-text-muted dark:border-white/10">
                 <tr>
-                  <th className="pb-2 pr-4 font-medium">Origem</th>
-                  <th className="pb-2 px-4 font-medium">Evento</th>
-                  <th className="pb-2 px-4 font-medium">Recurso</th>
-                  <th className="pb-2 px-4 font-medium">Resultado</th>
-                  <th className="pb-2 pl-4 text-right font-medium">Quando</th>
+                  <th className="pb-2.5 pr-4 font-medium">Origem</th>
+                  <th className="pb-2.5 px-4 font-medium">Evento</th>
+                  <th className="pb-2.5 px-4 font-medium">Recurso</th>
+                  <th className="pb-2.5 px-4 font-medium">Resultado</th>
+                  <th className="pb-2.5 pl-4 text-right font-medium">Quando</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-border-color/70">
+              <tbody className="divide-y divide-border-color/60 dark:divide-white/[0.06]">
                 {state.recentWebhooks.length === 0 && (
                   <tr>
                     <td colSpan={5} className="py-6 text-sm text-text-muted">
-                      Nenhuma sincronização em andamento. Clique em Sincronizar para iniciar.
+                      Nenhuma sincronização em andamento. Clique em Sincronização para iniciar.
                     </td>
                   </tr>
                 )}
@@ -540,18 +698,18 @@ export default function HomePage() {
                   <tr key={wh.id}>
                     <td className="py-2.5 pr-4 font-semibold uppercase text-text-primary">{wh.source}</td>
                     <td className="py-2.5 px-4 text-text-primary">{formatEvent(wh.event_type)}</td>
-                    <td className="py-2.5 px-4 font-mono text-text-primary">{wh.resource_id}</td>
+                    <td className="py-2.5 px-4 font-mono tabular-nums text-text-primary">{wh.resource_id}</td>
                     <td className="py-2.5 px-4">
                       {(() => {
                         const badge = activityBadge(wh.status, wh.ignore_reason);
                         return (
-                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${badge.className}`}>
+                          <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${badge.className}`}>
                             {badge.label}
                           </span>
                         );
                       })()}
                     </td>
-                    <td className="py-2.5 pl-4 text-right text-text-muted">
+                    <td className="py-2.5 pl-4 text-right tabular-nums text-text-muted">
                       {wh.processed_at ? new Date(wh.processed_at).toLocaleString('pt-BR') : 'Na fila'}
                     </td>
                   </tr>

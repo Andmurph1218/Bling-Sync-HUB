@@ -11,6 +11,8 @@ const config: Config = {
         'border-color': 'rgb(var(--border-color) / <alpha-value>)',
         'text-muted': 'rgb(var(--text-muted) / <alpha-value>)',
         'text-primary': 'rgb(var(--text-primary) / <alpha-value>)',
+        'accent-copper': 'rgb(var(--accent-copper) / <alpha-value>)',
+        'accent-cream': 'rgb(var(--accent-cream) / <alpha-value>)',
       },
     },
   },

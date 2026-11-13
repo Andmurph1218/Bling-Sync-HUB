@@ -35,18 +35,18 @@ export function CatalogCycle({
   ] as const;
 
   const circle = {
-    done: 'border-emerald-600 bg-emerald-600 text-white',
+    done: 'border-emerald-600 bg-emerald-600 text-white dark:border-[#d97324] dark:bg-[#d97324]',
     running: 'border-amber-500 bg-amber-500 text-amber-950',
-    shadow: 'border-border-color bg-bg-base text-text-muted',
+    shadow: 'border-border-color bg-bg-base text-text-muted dark:border-white/15 dark:bg-white/[0.04]',
     idle: 'border-border-color bg-bg-surface text-text-muted',
   };
 
   return (
-    <ol className="grid gap-6 md:grid-cols-3">
+    <ol className="grid gap-5 md:grid-cols-3">
       {steps.map((step, index) => (
         <li key={step.title} className="relative">
           {index > 0 && (
-            <span className="absolute -left-3 top-3 hidden h-px w-6 bg-border-color md:block" aria-hidden="true" />
+            <span className="absolute -left-3 top-3 hidden h-px w-6 bg-border-color/60 dark:bg-white/10 md:block" aria-hidden="true" />
           )}
           <div className="flex items-start gap-3">
             <span className={`mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold ${circle[step.tone]}`}>
@@ -60,7 +60,7 @@ export function CatalogCycle({
                   type="button"
                   onClick={onContinue}
                   disabled={continuing}
-                  className="mt-3 rounded-lg border border-border-color px-3 py-1.5 text-xs font-semibold text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+                  className="craft-pill mt-3 rounded-xl border border-border-color px-3 py-1.5 text-xs font-semibold text-text-primary transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {continuing ? 'Enriquecendo...' : 'Continuar Enriquecimento'}
                 </button>

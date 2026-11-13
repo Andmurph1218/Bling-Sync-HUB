@@ -19,9 +19,13 @@ export function ThemeToggle() {
       type="button"
       aria-label={dark ? 'Ativar tema claro' : 'Ativar tema escuro'}
       onClick={() => setTheme(dark ? 'light' : 'dark')}
-      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border-color bg-bg-surface text-text-primary hover:bg-bg-base focus:outline-none focus-visible:ring-2 focus-visible:ring-text-primary"
+      className="craft-pill inline-flex h-9 w-9 items-center justify-center rounded-full border border-border-color bg-bg-surface text-text-primary transition hover:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:focus-visible:ring-[#d97324]"
     >
-      {mounted && dark ? <Sun className="h-4 w-4" aria-hidden="true" /> : <Moon className="h-4 w-4" aria-hidden="true" />}
+      {mounted && dark ? (
+        <Sun className="h-4 w-4 text-[#f29a4b]" aria-hidden="true" />
+      ) : (
+        <Moon className="h-4 w-4" aria-hidden="true" />
+      )}
     </button>
   );
 }
