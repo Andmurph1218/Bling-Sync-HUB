@@ -263,7 +263,8 @@ export async function runBlingCall<T>(
       lastStatus = res.status;
       lastData = res.data;
       lastError = null;
-      if (res.status !== 429) return res;
+      const shouldRetryStatus = res.status === 429 || (method === 'GET' && res.status >= 500);
+      if (!shouldRetryStatus) return res;
     } catch (error) {
       if (method === 'POST' && isBlingTimeout(error)) throw new BlingPostTimeoutError();
       lastError = error;
@@ -293,7 +294,7 @@ export class LiveBlingCatalogReader implements BlingCatalogReader {
   }
 
   async list(page: number, pageSize: number): Promise<ErpCatalogPage> {
-    const path = `/produtos?pagina=${page}&limite=${pageSize}&tipo=P`;
+    const path = `/produtos?pagina=${page}&limite=${pageSize}&tipo=P&criterio=2`;
     process.stderr.write(`bling-list ${path}\n`);
     const res = await this.get<{
       data?: Array<{ id?: number | string; variacao?: { produtoPai?: { id?: number | string } }; idProdutoPai?: number | string }>;

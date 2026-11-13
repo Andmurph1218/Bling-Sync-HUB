@@ -66,6 +66,8 @@ adminSyncRouter.get('/api/admin/sync-status', reader, async (_req: Request, res:
       total: status.total,
       processed: status.processed,
       page: status.page,
+      lastCompletedPage: status.lastCompletedPage,
+      errorMessage: status.errorMessage,
     });
   } catch (error) {
     next(error);

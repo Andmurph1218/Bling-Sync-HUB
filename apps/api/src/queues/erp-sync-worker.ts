@@ -91,7 +91,7 @@ async function enqueuePage(runToken: string, page: number): Promise<void> {
   await getErpSyncQueue().add(
     'page',
     { page, runToken },
-    { jobId, removeOnComplete: 200, removeOnFail: 50, attempts: 5, backoff: { type: 'fixed', delay: 5_000 } }
+    { jobId, removeOnComplete: 200, removeOnFail: 50, attempts: 5, backoff: { type: 'exponential', delay: 5_000 } }
   );
 }
 
@@ -132,7 +132,7 @@ export async function enqueueErpSync(): Promise<{ accepted: true; status: 'proce
 export async function processErpSyncPage(
   erp: ErpConnector,
   page: number,
-  options: { pageSize?: number; delayMs?: number; runToken?: string; hooks?: FullSyncHooks } = {}
+  options: { pageSize?: number; delayMs?: number; runToken?: string; hooks?: FullSyncHooks; throwOnPageFailure?: boolean } = {}
 ): Promise<void> {
   const current = await readErpSyncStatus();
   if (options.runToken && current.runToken && options.runToken !== current.runToken) return;
@@ -178,14 +178,18 @@ export async function processErpSyncPage(
     totalInformadoPeloErp: report.catalogTotal,
   });
   if (report.status === 'failed') {
+    const failureMsg = report.errors[report.errors.length - 1] ?? 'Falha ao ler o ERP.';
     logger.error('erp-sync paginação interrompida por erro', {
       page,
       stopReason: report.stopReason,
       erros: report.errors,
     });
+    if (options.throwOnPageFailure) {
+      throw new Error(failureMsg);
+    }
     await query(
       `UPDATE sync_status SET status = 'failed', error_message = $1, updated_at = now() WHERE id = 1`,
-      [report.errors[report.errors.length - 1] ?? 'Falha ao ler o ERP.']
+      [failureMsg]
     );
     return;
   }
@@ -234,10 +238,13 @@ export function startErpSyncWorker(): Worker<PageJob> {
     async (job) => {
       await loadConnectors();
       const erp = createErpConnector('bling');
+      const maxAttempts = job.opts.attempts ?? 1;
+      const hasRetriesLeft = job.attemptsMade + 1 < maxAttempts;
       await processErpSyncPage(erp, job.data.page, {
         pageSize: ERP_SYNC_PAGE_SIZE,
         delayMs: ERP_SYNC_DELAY_MS,
         runToken: job.data.runToken,
+        throwOnPageFailure: hasRetriesLeft,
       });
     },
     { connection: redisConnection(), concurrency: 1 }
@@ -245,5 +252,12 @@ export function startErpSyncWorker(): Worker<PageJob> {
   worker.on('failed', (job, error) => {
     logger.error('Página da sync do ERP falhou', { jobId: job?.id, error: error.message });
   });
+  void readErpSyncStatus()
+    .then(async (current) => {
+      if (current.status === 'processing' && current.runToken) {
+        await enqueuePage(current.runToken, Math.max(1, current.lastCompletedPage + 1));
+      }
+    })
+    .catch(() => undefined);
   return worker;
 }

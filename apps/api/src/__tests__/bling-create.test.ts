@@ -64,4 +64,21 @@ describe('criação de produto no Bling', () => {
     }, none)).rejects.toThrow('bling_timeout');
     expect(gets).toBe(4);
   });
+
+  it('filtra explicitamente produtos ativos (criterio=2) e repete GET em 5xx transitório', async () => {
+    const reader = new ScriptedReader(() => ({ status: 200, data: { data: [{ id: 10 }], total: 1 } }));
+    const page = await reader.list(1, 50);
+    expect(reader.calls).toEqual(['GET /produtos?pagina=1&limite=50&tipo=P&criterio=2']);
+    expect(page.externalIds).toEqual(['10']);
+
+    const none = async () => undefined;
+    let attempts = 0;
+    const recovered = await runBlingCall<Record<string, unknown>>('GET', async () => {
+      attempts += 1;
+      if (attempts < 3) return { status: 503, data: { error: 'unavailable' } };
+      return { status: 200, data: { ok: true } };
+    }, none);
+    expect(attempts).toBe(3);
+    expect(recovered.status).toBe(200);
+  });
 });

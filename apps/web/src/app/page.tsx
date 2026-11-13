@@ -24,6 +24,15 @@ interface CatalogHome {
     publicationsToday: { value: number; sent: number; failed: number; queued: number; href: string };
   };
   completenessPct: number;
+  totalVariants?: number;
+  activeChannels?: Array<{
+    id: string;
+    name: string;
+    enabled: boolean;
+    connected: boolean;
+    statusLabel: string;
+    linkedCount: number;
+  }>;
   gaps: { missingSku: number; missingCategory: number; missingCover: number };
   lastSyncOk: string | null;
   lastSyncError: string | null;
@@ -105,7 +114,14 @@ export default function HomePage() {
   const [catalogHomeError, setCatalogHomeError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
-  const [syncStatus, setSyncStatus] = useState<{ status: 'idle' | 'processing' | 'completed' | 'failed'; total: number; processed: number } | null>(null);
+  const [syncStatus, setSyncStatus] = useState<{
+    status: 'idle' | 'processing' | 'completed' | 'failed';
+    total: number;
+    processed: number;
+    page?: number;
+    lastCompletedPage?: number;
+    errorMessage?: string | null;
+  } | null>(null);
   const [reconciling, setReconciling] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -117,9 +133,14 @@ export default function HomePage() {
 
   const pullSyncStatus = async () => {
     try {
-      const next = await apiFetch<{ status: 'idle' | 'processing' | 'completed' | 'failed'; total: number; processed: number }>(
-        '/api/admin/sync-status'
-      );
+      const next = await apiFetch<{
+        status: 'idle' | 'processing' | 'completed' | 'failed';
+        total: number;
+        processed: number;
+        page?: number;
+        lastCompletedPage?: number;
+        errorMessage?: string | null;
+      }>('/api/admin/sync-status');
       setSyncStatus(next);
     } catch {
       // Operador sem a rota de admin continua vendo o card parado.
@@ -238,6 +259,7 @@ export default function HomePage() {
 
   const shadow = catalogHome?.livePublishing !== true;
   const products = catalogHome?.cards.products.value ?? state?.kpis.monitoredProducts.value ?? 0;
+  const totalVariants = catalogHome?.totalVariants ?? 0;
   const readyToPublish = catalogHome?.readiness?.readyToPublish ?? catalogHome?.cards.ready.value ?? 0;
   const averageScore = catalogHome?.readiness?.averageScore ?? catalogHome?.completenessPct ?? 0;
   const tone = healthTone(averageScore);
@@ -249,6 +271,29 @@ export default function HomePage() {
   const pendingActions = fiscalProducts + fiscalConflicts + incomplete + duplicateCount;
   const nuvemshopPublished = catalogHome?.linkedNuvemshop ?? 0;
   const mercadoLivrePublished = catalogHome?.linkedMercadoLivre ?? 0;
+  const nuvemshopTokenConnected = Boolean(
+    catalogHome?.activeChannels?.find((ch) => ch.id === 'nuvemshop')?.connected ??
+      catalogHome?.channels?.some((ch) => ch.provider === 'nuvemshop') ??
+      state?.channels.oauth.some((ch) => ch.provider === 'nuvemshop')
+  );
+  const channelEntries = catalogHome?.activeChannels ?? [
+    {
+      id: 'nuvemshop',
+      name: 'Nuvemshop',
+      enabled: true,
+      connected: nuvemshopTokenConnected,
+      statusLabel: nuvemshopTokenConnected ? 'Conectado' : 'Desconectado',
+      linkedCount: nuvemshopPublished,
+    },
+    {
+      id: 'mercadolivre',
+      name: 'Mercado Livre',
+      enabled: false,
+      connected: false,
+      statusLabel: 'Pausado',
+      linkedCount: mercadoLivrePublished,
+    },
+  ];
   const syncState = syncStatus?.status ?? 'idle';
   const syncRunning = syncState === 'processing' || syncStarting;
   const syncBusy = syncRunning || reconciling || enriching;
@@ -350,13 +395,44 @@ export default function HomePage() {
         </section>
       )}
 
+      {syncState === 'processing' && (
+        <section className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-600/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-950 dark:text-emerald-100" role="status">
+          <span>
+            Sincronizando produtos ativos do Bling — página {formatCount(syncStatus?.page ?? 1)} ({formatCount(syncStatus?.processed ?? 0)} produtos pai verificados).
+          </span>
+        </section>
+      )}
+
+      {syncState === 'failed' && (
+        <section className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-600/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100" role="alert">
+          <span>
+            A sincronização do Bling parou na página {formatCount(syncStatus?.page ?? 1)} ({formatCount(syncStatus?.lastCompletedPage ?? 0)} páginas concluídas).
+            {syncStatus?.errorMessage ? ` Motivo: ${syncStatus.errorMessage}` : ''}
+          </span>
+          {hasRole('admin') && (
+            <button
+              type="button"
+              onClick={() => void startSync()}
+              disabled={syncStarting}
+              className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+            >
+              Retomar sincronização
+            </button>
+          )}
+        </section>
+      )}
+
       <section className="mt-6">
         {catalogHomeError && <p className="mb-3 text-sm text-rose-700 dark:text-rose-200" role="alert">{catalogHomeError}</p>}
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Link href="/catalogo" className="rounded-xl border border-border-color bg-bg-surface p-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
             <p className="text-sm font-semibold text-text-primary">Total no Catálogo</p>
             <p className="mt-3 text-3xl font-bold tracking-tight text-text-primary">{formatCount(products)}</p>
-            <p className="mt-1 text-xs text-text-muted">{formatCount(readyToPublish)} produtos prontos para venda</p>
+            <p className="mt-1 text-xs text-text-muted">
+              {totalVariants > products
+                ? `${formatCount(totalVariants)} SKUs com variações · ${formatCount(readyToPublish)} prontos para venda`
+                : `${formatCount(readyToPublish)} produtos prontos para venda`}
+            </p>
           </Link>
           <div className="rounded-xl border border-border-color bg-bg-surface p-4">
             <p className="text-sm font-semibold text-text-primary">Saúde do Catálogo</p>
@@ -374,23 +450,48 @@ export default function HomePage() {
             </Link>
           </div>
           <div className="rounded-xl border border-border-color bg-bg-surface p-4">
-            <p className="text-sm font-semibold text-text-primary">Canais Ativos</p>
-            <ul className="mt-3 space-y-2">
-              <li className="flex items-center justify-between gap-2">
-                <span className="flex items-center gap-2 text-sm text-text-primary">
-                  <BrandLogo id="nuvemshop" name="Nuvemshop" size={22} />
-                  Nuvemshop
-                </span>
-                <span className="text-sm font-semibold tabular-nums text-text-primary">{formatCount(nuvemshopPublished)}</span>
-              </li>
-              <li className="flex items-center justify-between gap-2">
-                <span className="flex items-center gap-2 text-sm text-text-primary">
-                  <BrandLogo id="mercadolivre" name="Mercado Livre" size={22} />
-                  Mercado Livre
-                </span>
-                <span className="text-sm font-semibold tabular-nums text-text-primary">{formatCount(mercadoLivrePublished)}</span>
-              </li>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-semibold text-text-primary">Canais Ativos</p>
+              <Link href="/canais" className="text-xs font-medium text-text-muted underline">Gerenciar</Link>
+            </div>
+            <ul className="mt-3 space-y-2.5">
+              {channelEntries.map((ch) => (
+                <li key={ch.id} className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                      <BrandLogo id={ch.id as 'nuvemshop' | 'mercadolivre'} name={ch.name} size={20} />
+                      <span className="truncate">{ch.name}</span>
+                    </span>
+                    <span
+                      className={`mt-0.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                        ch.connected
+                          ? 'border-emerald-600/30 bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
+                          : 'border-border-color bg-bg-base text-text-muted'
+                      }`}
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${ch.connected ? 'bg-emerald-600' : 'bg-text-muted'}`} aria-hidden="true" />
+                      {ch.statusLabel}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="block text-sm font-semibold tabular-nums text-text-primary">
+                      {formatCount(ch.linkedCount)}
+                    </span>
+                    <span className="block text-[11px] text-text-muted">vinculados</span>
+                  </div>
+                </li>
+              ))}
             </ul>
+            {nuvemshopTokenConnected && nuvemshopPublished === 0 && hasRole('admin') && (
+              <button
+                type="button"
+                disabled={reconciling}
+                onClick={() => void startReconcile()}
+                className="mt-3 w-full rounded-lg border border-emerald-700/40 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-semibold text-emerald-900 hover:bg-emerald-500/20 disabled:opacity-60 dark:text-emerald-100"
+              >
+                {reconciling ? 'Buscando vínculos na Nuvemshop...' : 'Vincular anúncios da Nuvemshop'}
+              </button>
+            )}
           </div>
         </div>
         {syncNotice && <p className="mt-3 text-xs text-text-muted" role="status">{syncNotice}</p>}

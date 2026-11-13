@@ -15,6 +15,7 @@ const bodySchema = z.object({
   redirectUri: z.string().optional(),
   webhookSecret: z.string().optional(),
   accessToken: z.string().optional(),
+  storeId: z.string().optional(),
   isActive: z.boolean().optional(),
 });
 
@@ -89,6 +90,15 @@ async function writeCredentials(req: Request, res: Response, next: NextFunction)
         refreshToken: null,
         expiresAt: new Date(Date.now() + 100 * 365 * 24 * 60 * 60 * 1000),
       });
+    }
+    if (provider === 'nuvemshop') {
+      const explicitStoreId = parsed.data.storeId?.trim() ?? '';
+      const listing = await import('../connectors/strategy/nuvemshop-listing.js');
+      if (/^\d+$/.test(explicitStoreId)) {
+        await listing.rememberNuvemshopStoreId(explicitStoreId);
+      } else {
+        await listing.resolveNuvemshopStoreId().catch(() => null);
+      }
     }
     res.status(200).json(saved);
   } catch (error) {

@@ -1,6 +1,8 @@
 import { refreshMissingCommerce } from '../catalog/full-sync.js';
 import { productsWithSellerWarehouse } from '../catalog/warehouse-stock.js';
+import { ACTIVE_CATALOG_CHANNELS } from '../config/channels.js';
 import { createErpConnector, getMarketplaceConnector } from '../connectors/strategy/factory.js';
+import { fetchNuvemshopCatalogIndex } from '../connectors/strategy/nuvemshop-listing.js';
 import { MarketplaceListing, MasterProduct } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
@@ -35,6 +37,7 @@ export interface ReconcileOptions {
   /** Cursor exclusivo. A próxima página começa depois deste id. */
   afterId?: string;
   sku?: string;
+  channels?: readonly string[];
 }
 
 function money(value: number): string {
@@ -160,6 +163,7 @@ export async function reconcileListings(
   const limit = options.limit ?? READY_LIMIT;
   const afterId = options.afterId?.trim() ?? '';
   const sku = options.sku?.trim() ?? '';
+  const activeChannels = options.channels ?? CHANNELS;
   const page = await query<{ id: string }>(
     `SELECT mp.id
      FROM master_products mp
@@ -217,15 +221,12 @@ export async function reconcileListings(
   let snapshots = 0;
   let alerts = 0;
   let linked = 0;
+  const erp = createErpConnector('bling');
   for (const raw of products.rows) {
     const row: HubRow = { ...raw, image_count: imagesByProduct.get(raw.id) ?? 0 };
-    if (process.env.VITEST !== 'true' && (asNumber(row.price) === null || (asNumber(row.price) ?? 0) <= 0 || asNumber(row.stock) === null)) {
-      const refreshed = await refreshMissingCommerce(createErpConnector('bling'), row.erp_id);
-      if (refreshed.price !== null) row.price = String(refreshed.price);
-      if (refreshed.stock !== null) row.stock = String(refreshed.stock);
-    }
+    let commerceChecked = false;
     const skus = await skusFor(row.id, row.erp_sku);
-    for (const channel of CHANNELS) {
+    for (const channel of activeChannels) {
       let listing: MarketplaceListing | null = null;
       try {
         for (const sku of skus) {
@@ -254,6 +255,16 @@ export async function reconcileListings(
         );
         continue;
       }
+      if (
+        !commerceChecked &&
+        process.env.VITEST !== 'true' &&
+        (asNumber(row.price) === null || (asNumber(row.price) ?? 0) <= 0 || asNumber(row.stock) === null)
+      ) {
+        commerceChecked = true;
+        const refreshed = await refreshMissingCommerce(erp, row.erp_id);
+        if (refreshed.price !== null) row.price = String(refreshed.price);
+        if (refreshed.stock !== null) row.stock = String(refreshed.stock);
+      }
       if (await linkIfMissing(row.id, channel, listing)) linked += 1;
       const found = compare(row, channel, listing, sellerProducts.has(row.id));
       await saveSnapshot(row.id, channel, listing, found.map((item) => ({ kind: item.kind, message: item.message })));
@@ -266,18 +277,46 @@ export async function reconcileListings(
 
 /** Percorre o catálogo em lotes pelo id. A leitura do canal não publica anúncio. */
 export async function reconcileAll(read: ListingReader = defaultReader): Promise<{ snapshots: number; alerts: number; linked: number }> {
+  let effectiveRead = read;
+  let channels: readonly string[] = CHANNELS;
+
+  if (read === defaultReader) {
+    channels = ACTIVE_CATALOG_CHANNELS;
+    let nuvemshopIndex: Map<string, MarketplaceListing> | null = null;
+    try {
+      nuvemshopIndex = await fetchNuvemshopCatalogIndex();
+      logger.info('Índice em lote da Nuvemshop carregado para reconciliação', {
+        skusIndexed: nuvemshopIndex?.size ?? 0,
+      });
+    } catch (error) {
+      logger.warn('Falha ao carregar índice em lote da Nuvemshop; usando leitura individual', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (nuvemshopIndex !== null) {
+      const cached = nuvemshopIndex;
+      effectiveRead = async (channel, product) => {
+        if (channel === 'nuvemshop') {
+          return cached.get(product.sku.trim().toLowerCase()) ?? null;
+        }
+        return defaultReader(channel, product);
+      };
+    }
+  }
+
   let afterId = '';
   let snapshots = 0;
   let alerts = 0;
   let linked = 0;
-  const page = 80;
-  for (let guard = 0; guard < 250; guard += 1) {
-    const result = await reconcileListings(read, { limit: page, afterId });
+  const page = 100;
+  for (let guard = 0; guard < 1000; guard += 1) {
+    const result = await reconcileListings(effectiveRead, { limit: page, afterId, channels });
     snapshots += result.snapshots;
     alerts += result.alerts;
     linked += result.linked;
     if (result.scanned < page || !result.lastId) break;
     afterId = result.lastId;
   }
+  logger.info('Reconciliação concluída', { snapshots, alerts, linked });
   return { snapshots, alerts, linked };
 }

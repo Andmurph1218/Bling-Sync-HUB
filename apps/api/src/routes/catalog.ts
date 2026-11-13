@@ -33,7 +33,8 @@ import { loadConnectors } from '../connectors/load.js';
 import { buildCatalogWorkbook, buildImportTemplateCsv } from '../catalog/spreadsheet.js';
 import { acceptCatalogImport, buildImportErrorCsv } from '../catalog/import-jobs.js';
 import { createBatchJob, readBatchJob } from '../catalog/batch-jobs.js';
-import { createErpConnector } from '../connectors/strategy/factory.js';
+import { createErpConnector, INTEGRATION_APPS, resolveInstallStatus } from '../connectors/strategy/factory.js';
+import { MERCADO_LIVRE_ACTIVE } from '../config/channels.js';
 import { STOCK_LAUNCH_WARNING } from '../connectors/strategy/types.js';
 import { getFullSyncStatus } from '../catalog/full-sync.js';
 import { ErpRejectedError } from '../connectors/strategy/types.js';
@@ -159,7 +160,7 @@ catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: R
     const listed = await listCatalog({ tab: 'todos', sku: '', name: '', brand: '', page: 1, pageSize: 1 });
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
-    const [unlinked, sentToday, failedToday, queued, problems, oauth, lastOk, lastError, linkedNs, linkedMl, lastBling, awaitingNcm, awaitingEan, fiscalConflicts, readiness] = await Promise.all([
+    const [unlinked, sentToday, failedToday, queued, problems, oauth, lastOk, lastError, linkedNs, linkedMl, lastBling, awaitingNcm, awaitingEan, fiscalConflicts, readiness, variantsTotal] = await Promise.all([
       query<{ count: number }>(`SELECT count(*)::int AS count FROM matching_queue WHERE status = 'pending'`),
       query<{ count: number }>(
         `SELECT count(*)::int AS count FROM push_jobs WHERE status = 'completed' AND created_at >= $1`,
@@ -238,6 +239,12 @@ catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: R
                 sum(CASE WHEN publishable_ns THEN 1 ELSE 0 END)::int AS ready
          FROM channel_readiness_scores`
       ),
+      query<{ count: number }>(
+        `SELECT count(*)::int AS count
+         FROM product_variants pv
+         INNER JOIN master_products mp ON mp.id = pv.master_product_id
+         WHERE mp.catalog_status = 'active' AND mp.archived_at IS NULL AND pv.is_active = true`
+      ),
     ]);
     const sync = getFullSyncStatus();
     const publicationsToday =
@@ -246,6 +253,43 @@ catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: R
       (queued.rows[0]?.count ?? 0);
     const active = listed.counts.todos;
     const ready = listed.counts.ready;
+    const linkedNuvemshopCount = linkedNs.rows[0]?.count ?? 0;
+    const linkedMercadoLivreCount = linkedMl.rows[0]?.count ?? 0;
+    const tokenByProvider = new Map(
+      oauth.rows.map((row) => [
+        row.provider,
+        {
+          expiresAt: new Date(row.expires_at).toISOString(),
+          hasRefresh: row.has_refresh === true || String(row.has_refresh) === 't' || String(row.has_refresh) === 'true',
+        },
+      ])
+    );
+    const nsApp = INTEGRATION_APPS.find((app) => app.id === 'nuvemshop')!;
+    const mlApp = INTEGRATION_APPS.find((app) => app.id === 'mercadolivre')!;
+    const nsStatus = resolveInstallStatus(nsApp, tokenByProvider.get('nuvemshop') ?? null);
+    const mlStatus = resolveInstallStatus(mlApp, tokenByProvider.get('mercadolivre') ?? null);
+    const activeChannels = [
+      {
+        id: 'nuvemshop',
+        name: 'Nuvemshop',
+        enabled: true,
+        connected: nsStatus.status === 'installed',
+        statusLabel: nsStatus.status === 'installed' ? 'Conectado' : nsStatus.label,
+        linkedCount: linkedNuvemshopCount,
+      },
+      {
+        id: 'mercadolivre',
+        name: 'Mercado Livre',
+        enabled: MERCADO_LIVRE_ACTIVE,
+        connected: MERCADO_LIVRE_ACTIVE && mlStatus.status === 'installed',
+        statusLabel: !MERCADO_LIVRE_ACTIVE
+          ? 'Pausado'
+          : mlStatus.status === 'installed'
+            ? 'Conectado'
+            : mlStatus.label,
+        linkedCount: linkedMercadoLivreCount,
+      },
+    ];
     res.status(200).json({
       cards: {
         products: { value: listed.counts.todos, href: '/catalogo' },
@@ -261,14 +305,16 @@ catalogRouter.get('/api/catalog/home', requireAuth, async (_req: Request, res: R
           href: '/publicacoes',
         },
       },
+      totalVariants: variantsTotal.rows[0]?.count ?? 0,
+      activeChannels,
       completenessPct: active === 0 ? 0 : Math.round((ready / active) * 100),
       gaps: listed.gaps,
       channels: oauth.rows,
       lastSyncOk: lastOk.rows[0]?.last_ok ?? null,
       lastSyncError: lastError.rows[0]?.last_error ?? null,
       lastBlingSync: lastBling.rows[0]?.last_sync ?? null,
-      linkedNuvemshop: linkedNs.rows[0]?.count ?? 0,
-      linkedMercadoLivre: linkedMl.rows[0]?.count ?? 0,
+      linkedNuvemshop: linkedNuvemshopCount,
+      linkedMercadoLivre: linkedMercadoLivreCount,
       fiscal: {
         awaitingNcm: awaitingNcm.rows[0]?.count ?? 0,
         awaitingEan: awaitingEan.rows[0]?.count ?? 0,

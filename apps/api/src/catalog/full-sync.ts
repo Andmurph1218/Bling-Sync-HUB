@@ -8,7 +8,7 @@ import { evaluateCatalogChecklist } from './completeness.js';
 
 const DEFAULT_PAGE_SIZE = 20;
 const STOCK_CHUNK = 20;
-const MAX_PAGES = 2000;
+const MAX_PAGES = 5000;
 const MAX_ERRORS = 30;
 
 export interface FullSyncReport {

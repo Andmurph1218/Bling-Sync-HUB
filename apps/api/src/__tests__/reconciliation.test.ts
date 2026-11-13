@@ -212,4 +212,24 @@ describe('reconciliação do anúncio', () => {
     );
     expect(owners.rows[0]?.count).toBe(1);
   });
+
+  it('mostra Nuvemshop como Conectado em activeChannels mesmo quando há 0 vínculos iniciais', async () => {
+    await query(`DELETE FROM channel_listing_links WHERE channel = 'nuvemshop'`);
+    await query(
+      `INSERT INTO oauth_tokens (provider, access_token_enc, refresh_token_enc, expires_at)
+       VALUES ('nuvemshop', 'enc_tok', NULL, $1)
+       ON CONFLICT (provider) DO UPDATE SET expires_at = EXCLUDED.expires_at`,
+      [new Date(Date.now() + 86_400_000).toISOString()]
+    );
+    const home = await request(app).get('/api/catalog/home').set('Cookie', cookie);
+    expect(home.status).toBe(200);
+    const ns = (home.body.activeChannels as Array<{ id: string; connected: boolean; statusLabel: string; linkedCount: number }>)
+      .find((ch) => ch.id === 'nuvemshop');
+    expect(ns).toMatchObject({
+      id: 'nuvemshop',
+      connected: true,
+      statusLabel: 'Conectado',
+      linkedCount: 0,
+    });
+  });
 });

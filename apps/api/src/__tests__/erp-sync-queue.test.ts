@@ -109,7 +109,38 @@ describe('fila de sync do ERP', () => {
 
     await processErpSyncPage(erp(), 2, { pageSize: 2, delayMs: 0, hooks });
     const done = await request(app).get('/api/admin/sync-status').set('Cookie', cookie);
-    expect(done.body).toMatchObject({ status: 'completed', processed: 3, total: 3 });
+    expect(done.body).toMatchObject({ status: 'completed', processed: 3, total: 3, lastCompletedPage: 2 });
     expect(saved).toEqual(['SKU-1', 'SKU-2', 'SKU-3']);
+  });
+
+  it('lança erro quando throwOnPageFailure está ativo para permitir retry automático do BullMQ', async () => {
+    await request(app).post('/api/admin/sync-full').set('Cookie', cookie);
+    let failListing = true;
+    const flakyErp: ErpConnector = {
+      ...erp(),
+      listCatalogPage: async (page: number, pageSize: number) => {
+        if (failListing) throw new Error('falha_transitoria_bling');
+        return { page, pageSize, externalIds: ['1'], done: true, total: 1 };
+      },
+    };
+    const hooks = {
+      upsertProduct: async (payload: { codigo: string }) => ({
+        masterProductId: payload.codigo,
+        variantIdsBySku: { [payload.codigo]: 'v' },
+      }),
+      scoreProduct: async () => false,
+    };
+
+    await expect(
+      processErpSyncPage(flakyErp, 1, { pageSize: 2, delayMs: 0, hooks, throwOnPageFailure: true })
+    ).rejects.toThrow('falha_transitoria_bling');
+
+    const statusAfterRetryableError = await readErpSyncStatus();
+    expect(statusAfterRetryableError.status).toBe('processing');
+
+    failListing = false;
+    await processErpSyncPage(flakyErp, 1, { pageSize: 2, delayMs: 0, hooks, throwOnPageFailure: true });
+    const finalStatus = await readErpSyncStatus();
+    expect(finalStatus).toMatchObject({ status: 'completed', lastCompletedPage: 1 });
   });
 });
