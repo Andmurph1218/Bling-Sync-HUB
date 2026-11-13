@@ -4,7 +4,7 @@ import { getFullSyncStatus } from '../catalog/full-sync.js';
 import { logger } from '../lib/logger.js';
 import { enqueueEnrichment } from '../queues/enrichment-worker.js';
 import { enqueueErpSync, readErpSyncStatus } from '../queues/erp-sync-worker.js';
-import { reconcileAll } from '../services/reconciliation.service.js';
+import { reconcileAll, reconcileListings } from '../services/reconciliation.service.js';
 
 export const adminSyncRouter = Router();
 const admin = requireRole('admin');
@@ -34,16 +34,18 @@ adminSyncRouter.post('/api/admin/enrich-catalog', admin, async (_req: Request, r
 
 let reconciling = false;
 
-adminSyncRouter.post('/api/admin/reconcile-now', admin, async (_req: Request, res: Response, next: NextFunction) => {
+adminSyncRouter.post('/api/admin/reconcile-now', admin, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (reconciling) {
       res.status(202).json({ accepted: true, status: 'processing' });
       return;
     }
+    const sku = typeof req.body?.sku === 'string' ? req.body.sku.trim() : '';
     reconciling = true;
-    const run = reconcileAll()
+    const run = (sku ? reconcileListings(undefined, { sku, limit: 20 }) : reconcileAll())
       .catch((error: unknown) => {
         logger.error('Reconciliação manual falhou', {
+          sku: sku || undefined,
           error: error instanceof Error ? error.message : String(error),
         });
       })
@@ -51,7 +53,7 @@ adminSyncRouter.post('/api/admin/reconcile-now', admin, async (_req: Request, re
         reconciling = false;
       });
     if (process.env.VITEST === 'true') await run;
-    res.status(202).json({ accepted: true, status: 'processing' });
+    res.status(202).json({ accepted: true, status: 'processing', sku: sku || undefined });
   } catch (error) {
     reconciling = false;
     next(error);

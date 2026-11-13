@@ -6,6 +6,7 @@ import { query } from '../db/pool.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
 import { loadConnectors } from '../connectors/load.js';
 import { acquireBlingRequestSlot } from '../connectors/bling/bling-http-limit.js';
+import { nuvemshopFetch } from '../connectors/strategy/nuvemshop-http.js';
 import { getPublicBaseUrl as readPublicBaseUrl } from '../config/public-url.js';
 import { loadAppCredentials } from '../connectors/app-credentials.js';
 
@@ -100,7 +101,7 @@ export async function ensureNuvemshopProductWebhooks(
   const events = ['product/created', 'product/updated', 'product/deleted'];
   const results: Array<{ event: string; webhookId: string | number | null; status: number }> = [];
 
-  const listRes = await fetch(`https://api.nuvemshop.com.br/2025-03/${storeId}/webhooks`, {
+  const listRes = await nuvemshopFetch(`https://api.nuvemshop.com.br/2025-03/${storeId}/webhooks`, {
     headers: {
       Authentication: `bearer ${accessToken}`,
       'User-Agent': 'JH Sync Hub (catalog sync)',
@@ -117,7 +118,7 @@ export async function ensureNuvemshopProductWebhooks(
       results.push({ event, webhookId: already.id, status: 200 });
       continue;
     }
-    const res = await fetch(`https://api.nuvemshop.com.br/2025-03/${storeId}/webhooks`, {
+    const res = await nuvemshopFetch(`https://api.nuvemshop.com.br/2025-03/${storeId}/webhooks`, {
       method: 'POST',
       headers: {
         Authentication: `bearer ${accessToken}`,
@@ -159,7 +160,7 @@ export async function refreshBlingTokenViaHttp(
     refresh_token: currentRefreshToken,
   });
 
-  await acquireBlingRequestSlot();
+  await acquireBlingRequestSlot('critical');
   const response = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
     method: 'POST',
     headers: {
@@ -363,7 +364,7 @@ oauthRouter.get(
         code,
       });
 
-      await acquireBlingRequestSlot();
+      await acquireBlingRequestSlot('critical');
       const tokenRes = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
         method: 'POST',
         headers: {

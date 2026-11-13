@@ -1,6 +1,12 @@
 import { CatalogChannel, ChecklistResult } from './completeness.js';
 
-export type IntegrationVisual = 'connected' | 'pending' | 'blocked' | 'absent';
+export type IntegrationVisual = 'connected' | 'pending' | 'blocked' | 'absent' | 'attention';
+
+/** Vínculo do HUB, sugestão de reconciliação ou status legado de platform_links. */
+export function isChannelLinked(status: string | null | undefined): boolean {
+  const value = (status ?? '').trim().toLowerCase();
+  return value === 'linked' || value === 'vinculado' || value === 'sugerido';
+}
 
 export interface ChannelBlocker {
   code: string;
@@ -24,6 +30,7 @@ const LABEL: Record<IntegrationVisual, string> = {
   pending: 'Pendente',
   blocked: 'Bloqueado',
   absent: 'Não integrado',
+  attention: 'Vinculado com Pendência',
 };
 
 function bottleneckTitle(code: string, fallback: string, percent: number): string {
@@ -57,16 +64,23 @@ export function describeChannelIntegration(input: {
     where: fixPlace(item.code),
   }));
   const critical = blockers.filter((item) => item.code === 'sku' || item.code === 'ncm');
-  const linked = input.linkStatus === 'linked' || input.linkStatus === 'vinculado';
+  const linked = isChannelLinked(input.linkStatus);
+  const ncmBlocked = failing.some((item) => item.code === 'ncm' || item.code === 'ncm_approval');
+  const incomplete = failing.length > 0;
 
   let visual: IntegrationVisual;
-  if (linked) visual = 'connected';
+  if (linked && incomplete) visual = 'attention';
+  else if (linked) visual = 'connected';
   else if (critical.length > 0) visual = 'blocked';
   else if (failing.length > 0) visual = 'pending';
   else if (!input.sendRequested) visual = 'absent';
   else visual = 'pending';
 
-  const tooltip = linked
+  const tooltip = visual === 'attention'
+    ? ncmBlocked
+      ? 'Integrado ao canal, com pendência fiscal de NCM.'
+      : `Integrado ao canal, com completude em ${input.checklist.percent}%.`
+    : linked
     ? input.checklist.ready
       ? 'Vinculado e apto para o canal'
       : 'Vinculado ao canal'

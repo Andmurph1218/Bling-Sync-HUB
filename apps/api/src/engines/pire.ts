@@ -869,6 +869,11 @@ export async function resolveMatchingDecision(input: {
          ON CONFLICT (platform_item_id, master_product_id) DO NOTHING`,
         [pItem.id, input.masterProductId, input.userId, input.reason ?? null]
       );
+      await client.query(
+        `DELETE FROM channel_listing_links
+         WHERE product_id = $1 AND channel = $2 AND listing_id = $3 AND link_status = 'sugerido'`,
+        [input.masterProductId, input.platform, input.platformProductId]
+      );
 
       // Remove o candidato rejeitado das sugestões abertas na matching_queue, mantendo o anúncio aberto
       const qRes = await client.query<{ id: string; suggested_matches: CandidateEvaluation[] }>(
@@ -951,6 +956,12 @@ export async function resolveMatchingDecision(input: {
          WHERE platform_item_id = $1 AND status = 'pending'`,
         [pItem.id, input.userId, expiresAt60d]
       );
+      await client.query(
+        `UPDATE channel_listing_links
+         SET link_status = 'vinculado'
+         WHERE product_id = $1 AND channel = $2 AND listing_id = $3 AND link_status = 'sugerido'`,
+        [input.masterProductId, input.platform, input.platformProductId]
+      );
 
       return {
         itemStatus: 'linked',
@@ -970,6 +981,11 @@ export async function resolveMatchingDecision(input: {
       [pItem.id, terminalStatus, input.userId]
     );
 
+    await client.query(
+      `DELETE FROM channel_listing_links
+       WHERE channel = $1 AND listing_id = $2 AND link_status = 'sugerido'`,
+      [input.platform, input.platformProductId]
+    );
     await client.query(
       `UPDATE matching_queue
        SET status = $2,

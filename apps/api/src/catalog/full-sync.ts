@@ -2,9 +2,9 @@ import { InboundProduct, InboundStockBalance, InboundVariant } from '../connecto
 import { ErpConnector } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { isAllowedImageHost, EnqueueImageCandidate } from '../engines/iqre.js';
-import { applyVariantStockBalancesFromBling, blingChangedAt, isNewerHubSync, runFullProductCatalogPipeline } from '../orchestrator/pipeline.js';
+import { checklistForChannels } from './publish-preview.js';
+import { applyVariantStockBalancesFromBling, isNewerHubSync, runFullProductCatalogPipeline } from '../orchestrator/pipeline.js';
 import { StockBalanceItem } from '../contracts/mappers.js';
-import { evaluateCatalogChecklist } from './completeness.js';
 
 const DEFAULT_PAGE_SIZE = 20;
 const STOCK_CHUNK = 20;
@@ -167,54 +167,6 @@ async function defaultUpsert(
   return { masterProductId: report.masterProductId, variantIdsBySku: report.variantIdsBySku };
 }
 
-async function defaultScore(masterProductId: string): Promise<boolean> {
-  const found = await query<{
-    erp_id: string;
-    erp_sku: string | null;
-    ncm_status: string;
-    ncm_fiscal_risk: boolean;
-    hub_category_id: string | null;
-    price: string | null;
-    ean_status: string | null;
-    has_cover: boolean;
-  }>(
-    `SELECT mp.erp_id, mp.erp_sku, mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id,
-            pv.price::text AS price, pv.ean_status,
-            EXISTS (
-              SELECT 1 FROM product_images pi
-              WHERE pi.master_product_id = mp.id AND pi.is_cover_eligible = true
-            ) AS has_cover
-     FROM master_products mp
-     LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
-     WHERE mp.id = $1`,
-    [masterProductId]
-  );
-  const row = found.rows[0];
-  if (!row) return false;
-  const checklist = evaluateCatalogChecklist({
-    erpId: row.erp_id,
-    sku: row.erp_sku,
-    hasCoverImage: row.has_cover,
-    hubCategoryId: row.hub_category_id,
-    mappedPlatforms: [],
-    greenPlatforms: [],
-    eanStatus: row.ean_status,
-    eanRequired: false,
-    ncmStatus: row.ncm_status,
-    ncmFiscalRisk: row.ncm_fiscal_risk,
-    price: row.price === null ? null : Number(row.price),
-    hasDuplicateCandidate: false,
-    channels: ['nuvemshop'],
-  });
-  await query(
-    `UPDATE master_products
-     SET worst_score = $2, has_fiscal_risk = $3, updated_at = now()
-     WHERE id = $1`,
-    [masterProductId, checklist.percent, row.ncm_fiscal_risk || row.ncm_status !== 'valid']
-  ).catch(() => undefined);
-  return checklist.ready;
-}
-
 async function recordSyncFailure(externalId: string, error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
   try {
@@ -290,17 +242,6 @@ async function archiveVariationProduct(externalId: string): Promise<number> {
   }
 }
 
-function inboundPrice(value: unknown): number {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
-    const text = value.trim();
-    const normalized = text.includes(',') ? text.replace(/\./g, '').replace(',', '.') : text;
-    const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
-  return 0;
-}
-
 /** Atualiza preço e estoque de um produto que já está no HUB, pelo SKU da variante. */
 export async function refreshMissingCommerce(
   erp: ErpConnector,
@@ -322,50 +263,36 @@ export async function refreshMissingCommerce(
       stock: priced?.stock == null ? null : Number(priced.stock),
     };
   }
-  let raw: unknown;
+  if (!erp.readCommerce) return { price: null, stock: null };
+  let snapshot: Awaited<ReturnType<NonNullable<ErpConnector['readCommerce']>>>;
   try {
-    raw = await erp.pullCatalogProduct(externalId);
+    snapshot = await erp.readCommerce(externalId);
   } catch {
     return { price: null, stock: null };
   }
-  const payload = asProduct(raw);
-  if (!payload) return { price: null, stock: null };
-  const changedAt = blingChangedAt(payload);
+  if (!snapshot) return { price: null, stock: null };
   const stamp = await query<{ last_bling_sync: Date | null }>(
     `SELECT last_bling_sync FROM master_products WHERE erp_id = $1`,
     [externalId]
   );
-  const stale = isNewerHubSync(changedAt, stamp.rows[0]?.last_bling_sync ?? null);
-  if (payload.formato === 'V') await hydrateVariations(erp, payload);
-  const variants = payload.formato === 'V' && (payload.variacoes ?? []).length > 0
-    ? payload.variacoes ?? []
-    : [{ id: payload.id, codigo: payload.codigo, preco: payload.preco }];
+  const stale = isNewerHubSync(snapshot.changedAt, stamp.rows[0]?.last_bling_sync ?? null);
   let price: number | null = null;
-  for (const variant of variants) {
+  for (const line of snapshot.lines) {
     if (stale) break;
-    const nextPrice = inboundPrice(variant.preco);
-    if (variant.preco === undefined || variant.preco === null || nextPrice <= 0) continue;
-    const sku = String(variant.codigo ?? '').trim();
-    const target = current.rows.find((row) => (row.erp_sku ?? '').trim() === sku)
+    if (line.price === null || line.price <= 0) continue;
+    const target = current.rows.find((row) => (row.erp_sku ?? '').trim() === line.sku)
       ?? current.rows.find((row) => row.is_default)
       ?? current.rows[0];
     if (!target) continue;
     await query(
       `UPDATE product_variants SET price = $2, updated_at = now() WHERE id = $1`,
-      [target.id, nextPrice]
+      [target.id, line.price]
     );
-    if (sku === String(payload.codigo ?? '').trim() || target.is_default) price = nextPrice;
+    if (line.sku === snapshot.sku || target.is_default) price = line.price;
   }
-  const balances = await stockForBatch(erp, [payload]);
-  const attached = (payload as { estoqueSaldos?: unknown[] }).estoqueSaldos;
-  if (Array.isArray(attached)) {
-    for (const item of attached) {
-      const balance = item as StockBalanceItem;
-      const id = balance.produto?.id;
-      if (id !== undefined && id !== null) balances.set(String(id), item as InboundStockBalance);
-    }
-  }
-  await refreshStoredStock(balances, String(payload.codigo ?? ''), changedAt);
+  const balances = new Map<string, InboundStockBalance>();
+  for (const balance of snapshot.balances) balances.set(balance.externalId, balance.raw as InboundStockBalance);
+  await refreshStoredStock(balances, snapshot.sku, snapshot.changedAt);
   const stockRow = await query<{ stock: string | null }>(
     `SELECT pv.stock::text AS stock
      FROM product_variants pv
@@ -423,7 +350,6 @@ export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks
     ? Math.min(MAX_PAGES, startPage + Math.floor(hooks.maxPages) - 1)
     : MAX_PAGES;
   const upsertProduct = hooks.upsertProduct ?? defaultUpsert;
-  const scoreProduct = hooks.scoreProduct ?? defaultScore;
   const alreadyImported = hooks.alreadyImported ?? defaultAlreadyImported;
   const report: FullSyncReport = { ...emptyReport(), status: 'running', startedAt: new Date().toISOString(), errors: [] };
   let previousFirst = '';
@@ -510,18 +436,41 @@ export async function runFullCatalogSync(erp: ErpConnector, hooks: FullSyncHooks
         note(report, `saldos: ${error instanceof Error ? error.message : String(error)}`, false);
       }
 
+      const savedIds: string[] = [];
       for (const payload of batch) {
         try {
           const saved = await upsertProduct(payload, stockBySku(payload, balances));
           report.upserted += 1;
           report.variants += Object.keys(saved.variantIdsBySku).length;
-          const ready = await scoreProduct(saved.masterProductId);
-          if (ready) report.ready += 1;
-          else report.incomplete += 1;
+          if (hooks.scoreProduct) {
+            const ready = await hooks.scoreProduct(saved.masterProductId);
+            if (ready) report.ready += 1;
+            else report.incomplete += 1;
+          } else {
+            savedIds.push(saved.masterProductId);
+          }
         } catch (error) {
           note(report, `${payload.codigo}: ${error instanceof Error ? error.message : String(error)}`, true);
         }
         publish();
+      }
+      if (savedIds.length > 0) {
+        const checks = await checklistForChannels(savedIds);
+        for (const id of savedIds) {
+          const scores = checks.get(id) ?? [];
+          const ready = scores.length > 0 && scores.every((score) => score.percent === 100);
+          const percent = scores.length === 0 ? 0 : Math.min(...scores.map((score) => score.percent));
+          await query(
+            `UPDATE master_products
+             SET worst_score = $2,
+                 has_fiscal_risk = (ncm_fiscal_risk OR ncm_status <> 'valid'),
+                 updated_at = now()
+             WHERE id = $1`,
+            [id, percent]
+          ).catch(() => undefined);
+          if (ready) report.ready += 1;
+          else report.incomplete += 1;
+        }
       }
 
       publish();

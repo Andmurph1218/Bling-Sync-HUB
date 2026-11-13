@@ -33,7 +33,7 @@ import { loadConnectors } from '../connectors/load.js';
 import { buildCatalogWorkbook, buildImportTemplateCsv } from '../catalog/spreadsheet.js';
 import { acceptCatalogImport, buildImportErrorCsv } from '../catalog/import-jobs.js';
 import { createBatchJob, readBatchJob } from '../catalog/batch-jobs.js';
-import { createErpConnector, INTEGRATION_APPS, resolveInstallStatus } from '../connectors/strategy/factory.js';
+import { activeErpConnector, INTEGRATION_APPS, resolveInstallStatus } from '../connectors/strategy/factory.js';
 import { MERCADO_LIVRE_ACTIVE } from '../config/channels.js';
 import { STOCK_LAUNCH_WARNING } from '../connectors/strategy/types.js';
 import { getFullSyncStatus } from '../catalog/full-sync.js';
@@ -630,6 +630,44 @@ catalogRouter.post(
   }
 );
 
+catalogRouter.get('/api/ops/queues', requireRole('operator', 'admin'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { collectQueueObservability } = await import('../queues/metrics.js');
+    res.status(200).json(await collectQueueObservability());
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.get('/api/dead-letters', requireRole('operator', 'admin'), async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { listOpenDeadLetters } = await import('../queues/dead-letters.js');
+    res.status(200).json({ items: await listOpenDeadLetters() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+catalogRouter.post('/api/dead-letters/:id/replay', requireRole('operator', 'admin'), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { replayDeadLetter } = await import('../queues/dead-letters.js');
+    const result = await replayDeadLetter(req.params.id);
+    res.status(200).json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Não foi possível reprocessar.';
+    if (
+      message.includes('não encontrada')
+      || message.includes('já foi reprocessada')
+      || message.includes('não tem')
+      || message.includes('ainda não tem')
+    ) {
+      res.status(400).json({ error: 'dead_letter_rejected', message });
+      return;
+    }
+    next(error);
+  }
+});
+
 catalogRouter.get(
   '/api/catalog/publish-queue',
   requireRole('operator', 'admin'),
@@ -705,6 +743,54 @@ catalogRouter.get('/api/catalog/check-exists', requireAuth, async (req: Request,
   }
 });
 
+async function saveQuickProduct(input: {
+  erpId: string;
+  sku: string;
+  name: string;
+  price: number;
+  stock: number;
+  imageUrl?: string;
+  stockWarning: string | null;
+}): Promise<{ id: string; erpId: string; sku: string; price: number; stock: number; stockWarning: string | null }> {
+  return withTransaction(async (client) => {
+    const created = await client.query<{ id: string; erp_id: string }>(
+      `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
+       VALUES ($1, $2, $3, 'P', 'S')
+       RETURNING id, erp_id`,
+      [input.erpId, input.sku, input.name]
+    );
+    const product = created.rows[0]!;
+    await client.query(
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, catalog_stock)
+       VALUES ($1, $2, true, 'S', $3, $4)`,
+      [product.id, input.sku, input.price, input.stock]
+    );
+    if (input.imageUrl && /^https?:\/\//i.test(input.imageUrl)) {
+      await client.query(
+        `INSERT INTO product_images (
+           master_product_id, source_url, url_normalized, source_platform, is_cover_eligible, rights_status
+         ) VALUES ($1, $2, $2, 'bling', true, 'owned')`,
+        [product.id, input.imageUrl]
+      );
+    }
+    if (input.stockWarning) {
+      await client.query(
+        `INSERT INTO sync_logs (product_id, platform, direction, status, error_detail, idempotency_key)
+         VALUES ($1, 'bling', 'outbound', 'failed', $2, $3)`,
+        [product.id, STOCK_LAUNCH_WARNING, `bling-stock:${input.erpId}`]
+      );
+    }
+    return {
+      id: product.id,
+      erpId: product.erp_id,
+      sku: input.sku,
+      price: input.price,
+      stock: input.stock,
+      stockWarning: input.stockWarning,
+    };
+  });
+}
+
 catalogRouter.post(
   '/api/catalog/products',
   requireRole('operator', 'admin'),
@@ -743,7 +829,7 @@ catalogRouter.post(
       let stockWarning: string | null = null;
       try {
         await loadConnectors();
-        const createdErp = await createErpConnector('bling').createProduct({
+        const createdErp = await activeErpConnector().createProduct({
           name: parsed.data.name,
           sku: parsed.data.sku,
           price: parsed.data.price,
@@ -753,6 +839,19 @@ catalogRouter.post(
         stockWarning = createdErp.stockWarning;
       } catch (error) {
         if (error instanceof SkuAlreadyInBlingError) {
+          if (error.erpId) {
+            const recovered = await saveQuickProduct({
+              erpId: error.erpId,
+              sku: parsed.data.sku,
+              name: parsed.data.name,
+              price: parsed.data.price,
+              stock: parsed.data.stock,
+              imageUrl: parsed.data.imageUrl,
+              stockWarning: null,
+            });
+            res.status(201).json({ ...recovered, recovered: true });
+            return;
+          }
           res.status(409).json({ error: 'sku_exists_in_bling', message: error.message });
           return;
         }
@@ -770,41 +869,16 @@ catalogRouter.post(
         res.status(422).json({ error: 'bling_rejected', message: 'Erro no Bling: o ERP não devolveu um ID oficial.' });
         return;
       }
-      const created = await query<{ id: string; erp_id: string }>(
-        `INSERT INTO master_products (erp_id, erp_sku, name, bling_tipo, product_format)
-         VALUES ($1, $2, $3, 'P', 'S')
-         RETURNING id, erp_id`,
-        [erpId, parsed.data.sku, parsed.data.name]
-      );
-      const product = created.rows[0]!;
-      await query(
-        `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, catalog_stock)
-         VALUES ($1, $2, true, 'S', $3, $4)`,
-        [product.id, parsed.data.sku, parsed.data.price, parsed.data.stock]
-      );
-      if (parsed.data.imageUrl && /^https?:\/\//i.test(parsed.data.imageUrl)) {
-        await query(
-          `INSERT INTO product_images (
-             master_product_id, source_url, url_normalized, source_platform, is_cover_eligible, rights_status
-           ) VALUES ($1, $2, $2, 'bling', true, 'owned')`,
-          [product.id, parsed.data.imageUrl]
-        );
-      }
-      if (stockWarning) {
-        await query(
-          `INSERT INTO sync_logs (product_id, platform, direction, status, error_detail, idempotency_key)
-           VALUES ($1, 'bling', 'outbound', 'failed', $2, $3)`,
-          [product.id, STOCK_LAUNCH_WARNING, `bling-stock:${erpId}`]
-        );
-      }
-      res.status(201).json({
-        id: product.id,
-        erpId: product.erp_id,
+      const product = await saveQuickProduct({
+        erpId,
         sku: parsed.data.sku,
+        name: parsed.data.name,
         price: parsed.data.price,
         stock: parsed.data.stock,
+        imageUrl: parsed.data.imageUrl,
         stockWarning,
       });
+      res.status(201).json(product);
     } catch (error) {
       next(error);
     }

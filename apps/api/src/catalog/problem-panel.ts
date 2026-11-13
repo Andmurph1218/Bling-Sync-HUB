@@ -3,6 +3,7 @@ import { MERCADO_LIVRE_ACTIVE } from '../config/channels.js';
 import { QUALITY_GAP_SQL, QUALITY_SCOPE_SQL } from './list.js';
 import { ProblemType, translateProblemMessage } from './problems.js';
 import { erpRecordUrl } from '../connectors/strategy/factory.js';
+import { releaseStuckPublishJobs } from '../queues/stuck-publish.js';
 
 export type ProblemSeverity = 'critico' | 'aviso' | 'erro';
 export type ProblemSource = 'completude' | 'publish_queue' | 'webhook_events';
@@ -192,6 +193,7 @@ function formatCount(value: number): string {
 }
 
 export async function listProblemGroups(): Promise<ProblemGroupRow[]> {
+  await releaseStuckPublishJobs();
   const [gapRows, publishRows, webhookRows] = await Promise.all([
     Promise.all(
       Object.keys(GAP_META).map(async (code) => {

@@ -8,6 +8,7 @@ import { hasPermission, isPermission, mfaRequiredFor, PERMISSION_LABELS, PERMISS
 import { generateTotpSecret, verifyTotp } from '../auth/totp.js';
 import { ROLES, UserRole } from '../auth/types.js';
 import { query } from '../db/pool.js';
+import { isPublishingPaused, setPublishingPaused } from '../queues/publish-queue.js';
 
 export const usersAdminRouter = Router();
 
@@ -375,6 +376,36 @@ usersAdminRouter.post('/api/account/mfa/confirm', requireAuth, async (req, res, 
     await query(`UPDATE users SET mfa_enabled = true WHERE id = $1`, [req.user!.id]);
     await recordChange(req.user!.id, 'user_role', req.user!.id, 'mfa_enabled', 'false', 'true');
     res.status(200).json({ mfaEnabled: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+usersAdminRouter.get('/api/admin/publish-pause', requirePermission('settings:manage_general'), async (_req, res, next) => {
+  try {
+    res.status(200).json({ paused: await isPublishingPaused() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+usersAdminRouter.put('/api/admin/publish-pause', requirePermission('settings:manage_general'), async (req, res, next) => {
+  try {
+    const parsed = z.object({ paused: z.boolean() }).safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'invalid_payload' });
+      return;
+    }
+    await setPublishingPaused(parsed.data.paused);
+    await recordChange(
+      req.user!.id,
+      'tenant_settings',
+      'publish',
+      'PAUSE_PUBLISHING',
+      parsed.data.paused ? 'false' : 'true',
+      parsed.data.paused ? 'true' : 'false'
+    );
+    res.status(200).json({ paused: parsed.data.paused });
   } catch (error) {
     next(error);
   }

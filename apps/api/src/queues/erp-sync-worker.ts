@@ -4,10 +4,13 @@ import { Redis } from 'ioredis';
 import { FullSyncHooks, runFullCatalogSync } from '../catalog/full-sync.js';
 import { env } from '../config/env.js';
 import { loadConnectors } from '../connectors/load.js';
-import { createErpConnector } from '../connectors/strategy/factory.js';
+import { activeErpConnector } from '../connectors/strategy/factory.js';
 import { ErpConnector } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
+import { isFinalQueueAttempt, JITTERED_BACKOFF, jitteredBackoffStrategy } from './backoff.js';
+import { holdQueueForBlingQuota } from './quota-pause.js';
+import { recordDeadLetter } from './dead-letters.js';
 import { detectDuplicates } from '../services/duplicate-detector.service.js';
 
 export const ERP_SYNC_QUEUE_NAME = 'erp-sync-queue';
@@ -91,7 +94,7 @@ async function enqueuePage(runToken: string, page: number): Promise<void> {
   await getErpSyncQueue().add(
     'page',
     { page, runToken },
-    { jobId, removeOnComplete: 200, removeOnFail: 50, attempts: 5, backoff: { type: 'exponential', delay: 5_000 } }
+    { jobId, removeOnComplete: 200, removeOnFail: 50, attempts: 5, backoff: JITTERED_BACKOFF }
   );
 }
 
@@ -178,20 +181,19 @@ export async function processErpSyncPage(
     totalInformadoPeloErp: report.catalogTotal,
   });
   if (report.status === 'failed') {
-    const failureMsg = report.errors[report.errors.length - 1] ?? 'Falha ao ler o ERP.';
+    const message = report.errors[report.errors.length - 1] ?? 'Falha ao ler o ERP.';
     logger.error('erp-sync paginação interrompida por erro', {
       page,
       stopReason: report.stopReason,
       erros: report.errors,
     });
-    if (options.throwOnPageFailure) {
-      throw new Error(failureMsg);
+    if (!options.throwOnPageFailure) {
+      await query(
+        `UPDATE sync_status SET status = 'failed', error_message = $1, updated_at = now() WHERE id = 1`,
+        [message]
+      );
     }
-    await query(
-      `UPDATE sync_status SET status = 'failed', error_message = $1, updated_at = now() WHERE id = 1`,
-      [failureMsg]
-    );
-    return;
+    throw new Error(message);
   }
   const latest = await readErpSyncStatus();
   if (latest.lastCompletedPage >= page) return;
@@ -235,22 +237,31 @@ export function startErpSyncWorker(): Worker<PageJob> {
   if (worker) return worker;
   worker = new Worker<PageJob>(
     ERP_SYNC_QUEUE_NAME,
-    async (job) => {
-      await loadConnectors();
-      const erp = createErpConnector('bling');
-      const maxAttempts = job.opts.attempts ?? 1;
-      const hasRetriesLeft = job.attemptsMade + 1 < maxAttempts;
-      await processErpSyncPage(erp, job.data.page, {
-        pageSize: ERP_SYNC_PAGE_SIZE,
-        delayMs: ERP_SYNC_DELAY_MS,
-        runToken: job.data.runToken,
-        throwOnPageFailure: hasRetriesLeft,
-      });
+    async (job, token) => {
+      try {
+        await loadConnectors();
+        const erp = activeErpConnector();
+        const hasRetriesLeft = !isFinalQueueAttempt(job.attemptsMade + 1, job.opts.attempts);
+        await processErpSyncPage(erp, job.data.page, {
+          pageSize: ERP_SYNC_PAGE_SIZE,
+          delayMs: ERP_SYNC_DELAY_MS,
+          runToken: job.data.runToken,
+          throwOnPageFailure: hasRetriesLeft,
+        });
+      } catch (error) {
+        await holdQueueForBlingQuota(job, token, error);
+      }
     },
-    { connection: redisConnection(), concurrency: 1 }
+    { connection: redisConnection(), concurrency: 1, settings: { backoffStrategy: jitteredBackoffStrategy } }
   );
   worker.on('failed', (job, error) => {
     logger.error('Página da sync do ERP falhou', { jobId: job?.id, error: error.message });
+    if (!isFinalQueueAttempt(job?.attemptsMade, job?.opts.attempts)) return;
+    void recordDeadLetter({ queue: ERP_SYNC_QUEUE_NAME, payload: job?.data ?? {}, error: error.message }).catch((recordError: unknown) => {
+      logger.error('Não foi possível gravar a carta morta da sync', {
+        error: recordError instanceof Error ? recordError.message : String(recordError),
+      });
+    });
   });
   void readErpSyncStatus()
     .then(async (current) => {

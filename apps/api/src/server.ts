@@ -6,6 +6,7 @@ import { startErpSyncWorker } from './queues/erp-sync-worker.js';
 import { startPublishWorker } from './queues/publish-queue.js';
 import { startBatchWorker } from './catalog/batch-jobs.js';
 import { startImportWorker } from './catalog/import-jobs.js';
+import { startStuckPublishDetector } from './queues/stuck-publish.js';
 import { startDuplicateDetector } from './services/duplicate-detector.service.js';
 
 const app = createApp();
@@ -15,6 +16,7 @@ if (process.env.VITEST !== 'true') {
   startErpSyncWorker();
   startEnrichmentWorker();
   startDuplicateDetector();
+  startStuckPublishDetector();
   startBatchWorker();
   startImportWorker();
 }

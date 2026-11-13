@@ -8,6 +8,7 @@ import { MERCADO_LIVRE_ACTIVE } from '../config/channels.js';
 import { ReprocessContext, reprocessProblemItem } from './problem-panel.js';
 import { processWebhookEventById } from '../engines/wig.js';
 import { enqueueErpSync } from '../queues/erp-sync-worker.js';
+import { JITTERED_BACKOFF, jitteredBackoffStrategy } from '../queues/backoff.js';
 
 export type BatchAction = 'arquivar' | 'completude' | 'envio' | 'problemas';
 
@@ -43,7 +44,7 @@ export async function createBatchJob(
     });
     return id;
   }
-  await getQueue().add('run', payload, { jobId: id });
+  await getQueue().add('run', payload, { jobId: id, attempts: 5, backoff: JITTERED_BACKOFF });
   return id;
 }
 
@@ -52,6 +53,7 @@ export function startBatchWorker(): void {
   workerStarted = true;
   const worker = new Worker<BatchPayload>('catalog-batch', async (job) => runBatch(job.data), {
     connection: connection(),
+    settings: { backoffStrategy: jitteredBackoffStrategy },
   });
   worker.on('failed', () => undefined);
 }

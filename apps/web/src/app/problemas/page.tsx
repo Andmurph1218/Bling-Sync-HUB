@@ -43,6 +43,43 @@ interface BatchStatus {
   rows_error: number;
 }
 
+interface DeadLetter {
+  id: string;
+  queue: string;
+  label: string;
+  error: string;
+  attempts: number;
+}
+
+interface QueueMetric {
+  queue: string;
+  label: string;
+  waiting: number;
+  active: number;
+  failed: number;
+  latencyMs: number | null;
+  available: boolean;
+}
+
+interface QueueObservability {
+  queues: QueueMetric[];
+  syncAlert: { failedForMs: number; message: string; error: string | null } | null;
+  stuckPublishes: Array<{ id: string; sku: string; channel: string; stuckForMs: number }>;
+}
+
+function stuckPublishMessage(count: number): string {
+  if (count === 1) {
+    return '1 envio estava travado em processamento por mais de 15 minutos e foi marcado como falha para reprocessar.';
+  }
+  return `${count.toLocaleString('pt-BR')} envios estavam travados em processamento por mais de 15 minutos e foram marcados como falha para reprocessar.`;
+}
+
+function latencyLabel(ms: number | null): string {
+  if (ms === null) return '—';
+  if (ms < 1000) return `${ms.toLocaleString('pt-BR')} ms`;
+  return `${(ms / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} s`;
+}
+
 const FILTERS: Array<{ type: Filter; label: string }> = [
   { type: 'todos', label: 'Todos' },
   { type: 'estoque', label: 'Problemas de Estoque' },
@@ -79,6 +116,9 @@ export default function ProblemasPage() {
   const [batch, setBatch] = useState<BatchStatus | null>(null);
   const [duplicates, setDuplicates] = useState<DuplicateItem[]>([]);
   const [divergences, setDivergences] = useState<DivergenceItem[]>([]);
+  const [deadLetters, setDeadLetters] = useState<DeadLetter[]>([]);
+  const [queues, setQueues] = useState<QueueObservability | null>(null);
+  const [replayingId, setReplayingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,6 +139,16 @@ export default function ProblemasPage() {
       setDivergences((await apiFetch<{ items: DivergenceItem[] }>('/api/divergences')).items);
     } catch {
       divergencesFailed = true;
+    }
+    try {
+      setDeadLetters((await apiFetch<{ items: DeadLetter[] }>('/api/dead-letters')).items);
+    } catch {
+      setDeadLetters([]);
+    }
+    try {
+      setQueues(await apiFetch<QueueObservability>('/api/ops/queues'));
+    } catch {
+      setQueues(null);
     }
     setError(panelFailed || duplicatesFailed || divergencesFailed ? 'Não foi possível ler as exceções do HUB.' : null);
     setLoading(false);
@@ -219,6 +269,20 @@ export default function ProblemasPage() {
     }
   };
 
+  const replayLetter = async (id: string) => {
+    setReplayingId(id);
+    setNotice(null);
+    try {
+      await apiFetch(`/api/dead-letters/${id}/replay`, { method: 'POST' });
+      setNotice('Item reprocessado. Se a falha continuar, ele volta para esta lista.');
+      await load();
+    } catch {
+      setNotice('Não foi possível reprocessar este item da fila morta.');
+    } finally {
+      setReplayingId(null);
+    }
+  };
+
   const resolveDuplicate = async (item: DuplicateItem) => {
     const marketplace = item.conflictType === 'marketplace';
     const question = marketplace
@@ -263,6 +327,71 @@ export default function ProblemasPage() {
           Filtro da importação{importFilter.file ? ` ${importFilter.file}` : ''}
           {importFilter.sku ? `: SKU ${importFilter.sku}` : ''}. Os grupos abaixo reúnem o mesmo tipo de falha. Abra o grupo e procure esse SKU.
         </p>
+      )}
+      {queues && (queues.stuckPublishes?.length ?? 0) > 0 && (
+        <p className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-text-primary" role="alert">
+          <span className="font-semibold">{stuckPublishMessage(queues.stuckPublishes.length)}</span>
+          <span className="mt-1 block text-text-muted">
+            {queues.stuckPublishes.map((job) => job.sku || job.id).join(', ')}
+          </span>
+        </p>
+      )}
+      {queues?.syncAlert && (
+        <p className="mt-4 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-text-primary" role="alert">
+          <span className="font-semibold">{queues.syncAlert.message}</span>
+          {queues.syncAlert.error ? <span className="mt-1 block text-text-muted">{queues.syncAlert.error}</span> : null}
+        </p>
+      )}
+      {queues && queues.queues.length > 0 && (
+        <section className="mt-4 overflow-hidden rounded-xl border border-border-color bg-bg-surface" aria-label="Filas">
+          <table className="w-full text-left text-sm">
+            <caption className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-text-muted">Filas</caption>
+            <thead>
+              <tr className="border-t border-border-color text-[11px] uppercase tracking-wide text-text-muted">
+                <th className="px-4 py-2 font-semibold">Fila</th>
+                <th className="px-4 py-2 font-semibold">Aguardando</th>
+                <th className="px-4 py-2 font-semibold">Ativos</th>
+                <th className="px-4 py-2 font-semibold">Falhos</th>
+                <th className="px-4 py-2 font-semibold">Latência</th>
+              </tr>
+            </thead>
+            <tbody>
+              {queues.queues.map((item) => (
+                <tr key={item.queue} className="border-t border-border-color text-text-primary">
+                  <th className="px-4 py-2 text-left text-sm font-medium">{item.label}</th>
+                  <td className="px-4 py-2">{item.available ? item.waiting.toLocaleString('pt-BR') : '—'}</td>
+                  <td className="px-4 py-2">{item.available ? item.active.toLocaleString('pt-BR') : '—'}</td>
+                  <td className="px-4 py-2">{item.available ? item.failed.toLocaleString('pt-BR') : '—'}</td>
+                  <td className="px-4 py-2">{item.available ? latencyLabel(item.latencyMs) : 'sem leitura'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+      {deadLetters.length > 0 && (
+        <section className="mt-4 space-y-2" aria-label="Fila morta">
+          {deadLetters.map((letter) => (
+            <article key={letter.id} className="flex flex-col gap-3 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-text-primary">{letter.label}</p>
+                <p className="mt-1 text-sm text-text-muted">{letter.error}</p>
+                <p className="mt-1 text-[11px] text-text-muted">{letter.attempts.toLocaleString('pt-BR')} {letter.attempts === 1 ? 'tentativa' : 'tentativas'}</p>
+              </div>
+              {canWrite && (
+                <button
+                  type="button"
+                  onClick={() => void replayLetter(letter.id)}
+                  disabled={replayingId === letter.id}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                >
+                  <RotateCw className={`h-3.5 w-3.5 ${replayingId === letter.id ? 'animate-spin' : ''}`} />
+                  Reprocessar
+                </button>
+              )}
+            </article>
+          ))}
+        </section>
       )}
       {error && <p className="mt-4 text-sm text-rose-600 dark:text-rose-200" role="alert">{error}</p>}
       {notice && <p className="mt-4 text-sm text-text-muted" role="status">{notice}</p>}

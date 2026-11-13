@@ -58,14 +58,39 @@ describe('status de integração por canal', () => {
     expect(view.blockers.map((item) => item.code)).toEqual(expect.arrayContaining(['sku', 'ncm']));
   });
 
-  it('mostra o canal como vinculado mesmo quando a completude ainda tem pendência', () => {
+  it('mostra âmbar quando o produto vinculado tem NCM bloqueado', () => {
+    const view = describeChannelIntegration({
+      platform: 'nuvemshop',
+      linkStatus: 'vinculado',
+      sendRequested: false,
+      checklist: checklist({ ncmStatus: 'pending_approval' }),
+    });
+    expect(view.visual).toBe('attention');
+    expect(view.label).toBe('Vinculado com Pendência');
+    expect(view.ready).toBe(false);
+  });
+
+  it('mostra integrado com pendência quando a completude falta, não bloqueado', () => {
     const view = describeChannelIntegration({
       platform: 'nuvemshop',
       linkStatus: 'vinculado',
       sendRequested: false,
       checklist: checklist({ price: null, hubCategoryId: null, mappedPlatforms: [], greenPlatforms: [], hasCoverImage: false }),
     });
-    expect(view.visual).toBe('connected');
+    expect(view.visual).toBe('attention');
+    expect(view.label).toBe('Vinculado com Pendência');
+    expect(view.ready).toBe(false);
+    expect(view.tooltip).toMatch(/completude/i);
+  });
+
+  it('trata sugestão de reconciliação como integrado, não como bloqueio', () => {
+    const view = describeChannelIntegration({
+      platform: 'nuvemshop',
+      linkStatus: 'sugerido',
+      sendRequested: false,
+      checklist: checklist({ ncmStatus: 'unknown', hasCoverImage: false }),
+    });
+    expect(view.visual).toBe('attention');
     expect(view.ready).toBe(false);
   });
 

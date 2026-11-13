@@ -237,6 +237,22 @@ describe('catálogo — anti-duplicação e planilha', () => {
 
     setBlingProductWriterForTests({
       create: async () => {
+        throw new SkuAlreadyInBlingError('ORFAO-1', '555001');
+      },
+    });
+    const recovered = await request(app)
+      .post('/api/catalog/products')
+      .set('Cookie', cookie)
+      .send({ sku: 'ORFAO-1', name: 'Órfão recuperado', price: 6, stock: 1 });
+    expect(recovered.status).toBe(201);
+    expect(recovered.body).toMatchObject({ erpId: '555001', recovered: true });
+    const adopted = await query<{ erp_id: string }>(
+      `SELECT erp_id FROM master_products WHERE erp_sku = 'ORFAO-1'`
+    );
+    expect(adopted.rows[0]?.erp_id).toBe('555001');
+
+    setBlingProductWriterForTests({
+      create: async () => {
         throw new BlingPostTimeoutError();
       },
     });

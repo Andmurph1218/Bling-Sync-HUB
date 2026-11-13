@@ -30,6 +30,8 @@ import * as m028 from './migrations/1729080000028_duplicate-alerts.js';
 import * as m029 from './migrations/1729080000029_marketplace-reconciliation.js';
 import * as m030 from './migrations/1729080000030_stock-split.js';
 import * as m031 from './migrations/1729080000031_pending-review.js';
+import * as m032 from './migrations/1729080000032_dead-letters.js';
+import * as m033 from './migrations/1729080000033_snapshot-upsert.js';
 
 export interface MigrationStep {
   id: number;
@@ -70,6 +72,8 @@ export const ALL_MIGRATIONS: MigrationStep[] = [
   { id: 29, name: '1729080000029_marketplace-reconciliation', upSql: m029.UP_SQL, downSql: m029.DOWN_SQL },
   { id: 30, name: '1729080000030_stock-split', upSql: m030.UP_SQL, downSql: m030.DOWN_SQL },
   { id: 31, name: '1729080000031_pending-review', upSql: m031.UP_SQL, downSql: m031.DOWN_SQL },
+  { id: 32, name: '1729080000032_dead-letters', upSql: m032.UP_SQL, downSql: m032.DOWN_SQL },
+  { id: 33, name: '1729080000033_snapshot-upsert', upSql: m033.UP_SQL, downSql: m033.DOWN_SQL },
 ];
 
 /**
@@ -116,6 +120,7 @@ export async function runAllMigrationsUp(options?: {
             /CHECK\s*\(\s*kit_variant_id\s+IS\s+DISTINCT\s+FROM\s+component_variant_id\s*\)/gi,
             'CHECK (component_variant_id IS NULL OR kit_variant_id <> component_variant_id)'
           )
+          .replace(/-- mem-skip-start[\s\S]*?-- mem-skip-end/g, '')
       : mig.upSql;
 
     await query(sqlToRun);

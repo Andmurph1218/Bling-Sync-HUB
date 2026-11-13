@@ -77,7 +77,7 @@ function incomingPrice(payload: InboundProduct, sku: string, isDefault: boolean)
  * Faz o upsert completo de um produto do Bling (simples S, variação V ou kit E) no banco local,
  * respeitando a regra de que product_variants.stock nasce NULL até a leitura de GET /estoques/saldos.
  */
-export async function upsertCatalogProductFromBlingPayload(
+export async function upsertCatalogProduct(
   payload: InboundProduct
 ): Promise<UpsertCatalogFromBlingResult> {
   await loadConnectors();
@@ -257,6 +257,9 @@ export async function upsertCatalogProductFromBlingPayload(
   });
 }
 
+/** Nome antigo. O cadastro novo entra por upsertCatalogProduct. */
+export const upsertCatalogProductFromBlingPayload = upsertCatalogProduct;
+
 /**
  * Estoque de exibição do catálogo: soma virtual dos depósitos que não são Full nem avaria.
  * Nunca é enviado aos canais; o envio usa product_variants.stock.
@@ -406,7 +409,7 @@ export interface FullProductEnrichmentPipelineReport {
 export async function runFullProductCatalogPipeline(
   input: FullProductEnrichmentPipelineInput
 ): Promise<FullProductEnrichmentPipelineReport> {
-  const upserted = await upsertCatalogProductFromBlingPayload(input.inboundPayload);
+  const upserted = await upsertCatalogProduct(input.inboundPayload);
   if (upserted.ignoredService || !upserted.masterProductId) {
     throw new Error('Serviço ignorado não entra no pipeline de catálogo');
   }

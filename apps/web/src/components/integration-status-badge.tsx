@@ -1,7 +1,7 @@
 import React from 'react';
 import { BrandLogo } from './brand-logo';
 
-export type IntegrationBadgeKind = 'blocked' | 'ready' | 'synced' | 'unlinked';
+export type IntegrationBadgeKind = 'blocked' | 'ready' | 'synced' | 'unlinked' | 'attention';
 
 const COPY: Record<IntegrationBadgeKind, { label: string; tooltip: string; className: string }> = {
   blocked: {
@@ -24,10 +24,16 @@ const COPY: Record<IntegrationBadgeKind, { label: string; tooltip: string; class
     tooltip: 'Produto não existe neste canal',
     className: 'border-border-color bg-bg-base text-text-muted',
   },
+  attention: {
+    label: 'Vinculado com Pendência',
+    tooltip: 'Integrado ao canal, com completude pendente.',
+    className: 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/15 dark:text-amber-100',
+  },
 };
 
 export function integrationBadgeKind(input: { visual: string; ready: boolean }): IntegrationBadgeKind {
   if (input.visual === 'blocked') return 'blocked';
+  if (input.visual === 'attention') return 'attention';
   if (input.visual === 'connected') return 'synced';
   if (input.ready) return 'ready';
   return 'unlinked';
@@ -36,18 +42,21 @@ export function integrationBadgeKind(input: { visual: string; ready: boolean }):
 export function IntegrationStatusBadge({
   platform,
   kind,
+  tooltip,
   onClick,
 }: {
   platform: string;
   kind: IntegrationBadgeKind;
+  tooltip?: string;
   onClick?: () => void;
 }) {
   const copy = COPY[kind];
+  const hint = tooltip || copy.tooltip;
   return (
     <button
       type="button"
-      title={copy.tooltip}
-      aria-label={`${copy.label}. ${copy.tooltip}`}
+      title={hint}
+      aria-label={`${copy.label}. ${hint}`}
       onClick={onClick}
       className={`inline-flex max-w-full items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold leading-none ${copy.className}`}
     >

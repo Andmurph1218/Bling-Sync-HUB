@@ -1,9 +1,12 @@
 import { query } from '../../db/pool.js';
 import { OAuthTokenManager } from '../oauth-token-manager.js';
+import { nuvemshopFetch } from './nuvemshop-http.js';
+import { collectListingSignals, ListingSignal } from './listing-signals.js';
 import { MarketplaceListing, MasterProduct } from './types.js';
 
 interface NuvemshopVariant {
   sku?: string | null;
+  barcode?: string | null;
   price?: string | number | null;
   stock?: number | null;
 }
@@ -16,7 +19,7 @@ interface NuvemshopProduct {
   variants?: NuvemshopVariant[];
 }
 
-const HTTP_TIMEOUT_MS = 15_000;
+export const NUVEMSHOP_FETCH_TIMEOUT_MS = 15_000;
 const PAGE_SIZE = 200;
 const MAX_CATALOG_PAGES = 250;
 const FALLBACK_KNOWN_STORE_IDS = ['6667412'];
@@ -30,10 +33,6 @@ function asMoney(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const STORE_CURSOR = 'nuvemshop-store-id';
@@ -59,17 +58,20 @@ function nuvemshopHeaders(accessToken: string): Record<string, string> {
 async function verifyStoreIdWithToken(storeId: string, accessToken: string): Promise<boolean> {
   if (!/^\d+$/.test(storeId) || process.env.VITEST === 'true') return false;
   try {
-    const res = await fetch(`https://api.nuvemshop.com.br/2025-03/${encodeURIComponent(storeId)}/store`, {
-      headers: nuvemshopHeaders(accessToken),
-      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-    });
-    return res.ok;
+    const res = await nuvemshopFetch(
+      `https://api.nuvemshop.com.br/2025-03/${encodeURIComponent(storeId)}/store`,
+      {
+        headers: nuvemshopHeaders(accessToken),
+        signal: AbortSignal.timeout(NUVEMSHOP_FETCH_TIMEOUT_MS),
+      }
+    );
+    return res.status >= 200 && res.status < 300;
   } catch {
     return false;
   }
 }
 
-/** A loja vem do ambiente, do último OAuth, de webhook/fila já recebidos ou da validação do token em /store. */
+/** A loja vem do ambiente, do último OAuth, de webhook já recebido ou da validação do token em /store. */
 export async function resolveNuvemshopStoreId(): Promise<string | null> {
   const fromEnv = (process.env.NUVEMSHOP_STORE_ID ?? '').trim();
   if (fromEnv) return fromEnv;
@@ -89,10 +91,10 @@ export async function resolveNuvemshopStoreId(): Promise<string | null> {
        ORDER BY created_at DESC
        LIMIT 1`
     );
-    const foundHook = hook.rows[0]?.store_id?.trim();
-    if (foundHook) {
-      await rememberNuvemshopStoreId(foundHook);
-      return foundHook;
+    const found = hook.rows[0]?.store_id?.trim();
+    if (found) {
+      await rememberNuvemshopStoreId(found);
+      return found;
     }
 
     const tokens = new OAuthTokenManager();
@@ -135,54 +137,56 @@ function sameSku(left: string | null | undefined, right: string): boolean {
   return a.length > 0 && a === b;
 }
 
-function listingFromVariant(product: NuvemshopProduct, variant: NuvemshopVariant | undefined): MarketplaceListing | null {
+export class NuvemshopListingError extends Error {
+  constructor(readonly status: number) {
+    super(`Nuvemshop respondeu ${status}. O anúncio não foi tratado como inexistente.`);
+    this.name = 'NuvemshopListingError';
+  }
+}
+
+/** 404 é ausência. Qualquer outra falha, inclusive 401, 429 e 5xx, interrompe a leitura. */
+export function assertNuvemshopReadable(status: number): 'ok' | 'missing' {
+  if (status >= 200 && status < 300) return 'ok';
+  if (status === 404) return 'missing';
+  throw new NuvemshopListingError(status);
+}
+
+export function listingFromProduct(
+  product: NuvemshopProduct,
+  sku: string,
+  hub: { ean?: string | null; name?: string | null } = {}
+): MarketplaceListing | null {
   if (product.id === undefined || product.id === null) return null;
+  const variant = (product.variants ?? []).find((item) => sameSku(item.sku, sku));
+  if (!variant) return null;
+  const title = productName(product);
+  const signals: ListingSignal[] = collectListingSignals({
+    hubSku: sku,
+    hubEan: hub.ean,
+    hubName: hub.name,
+    channelSku: variant.sku,
+    channelEan: variant.barcode,
+    channelTitle: title,
+    matchedBy: ['sku'],
+  });
   return {
     externalId: String(product.id),
-    title: productName(product),
-    price: asMoney(variant?.price),
-    stock: typeof variant?.stock === 'number' ? variant.stock : null,
+    title,
+    sku: variant.sku ?? sku,
+    ean: variant.barcode ?? null,
+    price: asMoney(variant.price),
+    stock: typeof variant.stock === 'number' ? variant.stock : null,
     images: (product.images ?? []).map((image) => image.src ?? '').filter((url) => url.startsWith('http')),
     status: product.published === false ? 'Rascunho' : 'Ativo',
+    signals,
   };
 }
 
-function listingFromProduct(product: NuvemshopProduct, sku: string, allowSingleUnnamedFallback = false): MarketplaceListing | null {
-  if (product.id === undefined || product.id === null) return null;
-  const variants = product.variants ?? [];
-  const exact = variants.find((item) => sameSku(item.sku, sku));
-  if (exact) return listingFromVariant(product, exact);
-  if (allowSingleUnnamedFallback && variants.length === 1 && normalizeSku(variants[0]?.sku) === '') {
-    return listingFromVariant(product, variants[0]);
-  }
-  return null;
-}
-
-async function nuvemshopGet(url: string, headers: Record<string, string>): Promise<Response> {
-  let lastRes: Response | null = null;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const res = await fetch(url, {
-      headers,
-      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-    });
-    lastRes = res;
-    const remaining = Number(res.headers.get('x-rate-limit-remaining') ?? '');
-    if (Number.isFinite(remaining) && remaining >= 0 && remaining <= 2) {
-      await sleep(600);
-    }
-    if (res.status !== 429 && res.status < 500) return res;
-    const resetMs = Number(res.headers.get('x-rate-limit-reset') ?? '');
-    const waitMs = Number.isFinite(resetMs) && resetMs > 0 ? Math.min(10_000, resetMs) : 1000 * (attempt + 1);
-    await sleep(waitMs);
-  }
-  return lastRes!;
-}
-
 /**
- * Baixa o catálogo da Nuvemshop em páginas de 200 produtos e indexa por SKU normalizado.
- * Retorna null se a Nuvemshop não estiver conectada ou sem store_id resolvido.
+ * Baixa o catálogo da Nuvemshop em páginas de 200 produtos e devolve um leitor por SKU
+ * que calcula os sinais completos (SKU + EAN + título) sobre cada produto do HUB.
  */
-export async function fetchNuvemshopCatalogIndex(): Promise<Map<string, MarketplaceListing> | null> {
+export async function createNuvemshopBatchReader(): Promise<((product: MasterProduct) => MarketplaceListing | null) | null> {
   const storeId = await resolveNuvemshopStoreId();
   if (!storeId) return null;
   const tokens = new OAuthTokenManager();
@@ -191,30 +195,33 @@ export async function fetchNuvemshopCatalogIndex(): Promise<Map<string, Marketpl
 
   const headers = nuvemshopHeaders(stored.accessToken);
   const base = `https://api.nuvemshop.com.br/2025-03/${encodeURIComponent(storeId)}`;
-  const bySku = new Map<string, MarketplaceListing>();
+  const bySku = new Map<string, NuvemshopProduct>();
 
   for (let page = 1; page <= MAX_CATALOG_PAGES; page += 1) {
-    const res = await nuvemshopGet(`${base}/products?page=${page}&per_page=${PAGE_SIZE}`, headers);
-    if (res.status === 404) break;
-    if (!res.ok) {
-      throw new Error(`nuvemshop_list_failed:${res.status}`);
-    }
+    const res = await nuvemshopFetch(`${base}/products?page=${page}&per_page=${PAGE_SIZE}`, {
+      headers,
+      signal: AbortSignal.timeout(NUVEMSHOP_FETCH_TIMEOUT_MS),
+    });
+    if (assertNuvemshopReadable(res.status) === 'missing') break;
     const items = (await res.json()) as NuvemshopProduct[];
     if (!Array.isArray(items) || items.length === 0) break;
 
-    for (const product of items) {
-      for (const variant of product.variants ?? []) {
+    for (const item of items) {
+      for (const variant of item.variants ?? []) {
         const key = normalizeSku(variant.sku);
         if (!key || bySku.has(key)) continue;
-        const listing = listingFromVariant(product, variant);
-        if (listing) bySku.set(key, listing);
+        bySku.set(key, item);
       }
     }
 
     if (items.length < PAGE_SIZE) break;
   }
 
-  return bySku;
+  return (product: MasterProduct) => {
+    const found = bySku.get(normalizeSku(product.sku));
+    if (!found) return null;
+    return listingFromProduct(found, product.sku, { ean: product.ean, name: product.name });
+  };
 }
 
 /** Busca o anúncio da loja pelo SKU. Sem loja ou token, devolve null e não publica nada. */
@@ -227,41 +234,50 @@ export async function fetchNuvemshopListing(product: MasterProduct): Promise<Mar
   if (!stored) return null;
   const headers = nuvemshopHeaders(stored.accessToken);
   const base = `https://api.nuvemshop.com.br/2025-03/${encodeURIComponent(storeId)}`;
-  const bySku = await nuvemshopGet(`${base}/products/sku/${encodeURIComponent(sku)}`, headers);
-  if (bySku.ok) {
+  const signal = AbortSignal.timeout(NUVEMSHOP_FETCH_TIMEOUT_MS);
+  const bySku = await nuvemshopFetch(`${base}/products/sku/${encodeURIComponent(sku)}`, { headers, signal });
+  if (assertNuvemshopReadable(bySku.status) === 'ok') {
     const body = (await bySku.json()) as NuvemshopProduct & {
       product_id?: number | string;
       sku?: string | null;
       price?: string | number | null;
       stock?: number | null;
     };
-    if (body.product_id !== undefined && body.product_id !== null && sameSku(body.sku ?? sku, sku)) {
+    if (body.product_id !== undefined && body.product_id !== null && sameSku(body.sku, sku)) {
       const price = asMoney(body.price);
       const stock = typeof body.stock === 'number' ? body.stock : null;
+      const title = productName(body);
+      const barcode = (body as { barcode?: string | null }).barcode ?? null;
       return {
         externalId: String(body.product_id),
-        title: productName(body),
+        title,
+        sku: body.sku ?? sku,
+        ean: barcode,
         price,
         stock,
         images: [],
         status: 'Ativo',
+        signals: collectListingSignals({
+          hubSku: sku,
+          hubEan: product.ean,
+          hubName: product.name,
+          channelSku: body.sku,
+          channelEan: barcode,
+          channelTitle: title,
+          matchedBy: ['sku'],
+        }),
       };
     }
-    const listing = listingFromProduct(body, sku, true);
+    const listing = listingFromProduct(body, sku, { ean: product.ean, name: product.name });
     if (listing) return listing;
-  } else if (bySku.status !== 404 && bySku.status !== 422) {
-    throw new Error(`nuvemshop_sku_lookup_failed:${bySku.status}`);
   }
 
-  const response = await nuvemshopGet(`${base}/products?q=${encodeURIComponent(sku)}`, headers);
-  if (response.status === 404) return null;
-  if (!response.ok) {
-    throw new Error(`nuvemshop_search_failed:${response.status}`);
-  }
+  const response = await nuvemshopFetch(`${base}/products?q=${encodeURIComponent(sku)}`, { headers, signal });
+  if (assertNuvemshopReadable(response.status) === 'missing') return null;
   const payload = (await response.json()) as NuvemshopProduct[];
   const match = (Array.isArray(payload) ? payload : []).find((item) =>
     (item.variants ?? []).some((variant) => sameSku(variant.sku, sku))
   );
   if (!match) return null;
-  return listingFromProduct(match, sku, false);
+  return listingFromProduct(match, sku, { ean: product.ean, name: product.name });
 }

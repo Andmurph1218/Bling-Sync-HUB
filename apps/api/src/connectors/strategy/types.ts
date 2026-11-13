@@ -54,6 +54,21 @@ export interface ErpStockBalance {
   raw: unknown;
 }
 
+/** Preço e saldos já traduzidos. O core não lê o JSON do ERP. */
+export interface ErpCommerceLine {
+  externalId: string;
+  sku: string;
+  price: number | null;
+}
+
+export interface ErpCommerceSnapshot {
+  externalId: string;
+  sku: string;
+  changedAt: Date | null;
+  lines: ErpCommerceLine[];
+  balances: ErpStockBalance[];
+}
+
 /** Dados mínimos para abrir o cadastro no ERP. Nome, preço e estoque nascem lá. */
 export interface CreateProductDTO {
   name: string;
@@ -79,6 +94,7 @@ export interface ErpConnector {
   getPrice(productId: string): Promise<ErpPriceSnapshot>;
   listCatalogPage(page: number, pageSize: number): Promise<ErpCatalogPage>;
   pullCatalogProduct(externalId: string): Promise<unknown | null>;
+  readCommerce?(externalId: string): Promise<ErpCommerceSnapshot | null>;
   fetchProductEnrichmentData(erpId: string): Promise<{ images: string[]; ncm: string; category: string }>;
   pullStockBalances?(externalIds: string[]): Promise<ErpStockBalance[]>;
   listChildIds?(parentId: string): Promise<string[]>;
@@ -88,6 +104,7 @@ export interface ErpConnector {
 
 export interface ListingDraft {
   sku: string;
+  title?: string | null;
   price: number;
   stock: number;
   attributes: Array<{ id: string; value_name: string }>;
@@ -129,6 +146,7 @@ export interface RemoteListing {
 export interface ListingSearchInput {
   sku: string;
   ean: string | null;
+  name?: string | null;
 }
 
 /** Produto do HUB usado na leitura do anúncio. Preço e estoque vêm do ERP e não são gravados de volta. */
@@ -136,6 +154,7 @@ export interface MasterProduct {
   id: string;
   sku: string;
   ean: string | null;
+  name?: string | null;
   price: number | null;
   stock: number | null;
 }
@@ -147,6 +166,10 @@ export interface MarketplaceListing {
   stock: number | null;
   images: string[];
   status: string;
+  sku?: string | null;
+  ean?: string | null;
+  /** Sinais que acharam este anúncio. Um só não confirma o vínculo. */
+  signals?: Array<'sku' | 'ean' | 'title'>;
 }
 
 /** Contrato do marketplace. A publicação do P2 chama estes métodos, não a classe HTTP do canal. */

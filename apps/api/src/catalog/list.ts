@@ -87,6 +87,36 @@ function whole(value: string | null): number | null {
   return parsed === null ? null : Math.floor(parsed);
 }
 
+function normalizeLinkStatus(status: string): string {
+  const value = status.trim().toLowerCase();
+  if (value === 'vinculado') return 'linked';
+  return value;
+}
+
+function linkRank(status: string): number {
+  const value = normalizeLinkStatus(status);
+  if (value === 'linked') return 3;
+  if (value === 'sugerido') return 2;
+  return 1;
+}
+
+function rememberLink(
+  target: Map<string, Array<{ platform: CatalogChannel; sync_status: string }>>,
+  productId: string,
+  platform: CatalogChannel,
+  status: string
+): void {
+  const syncStatus = normalizeLinkStatus(status);
+  const list = target.get(productId) ?? [];
+  const existing = list.find((item) => item.platform === platform);
+  if (!existing) {
+    list.push({ platform, sync_status: syncStatus });
+    target.set(productId, list);
+    return;
+  }
+  if (linkRank(syncStatus) > linkRank(existing.sync_status)) existing.sync_status = syncStatus;
+}
+
 interface VariantRow {
   master_product_id: string;
   is_default: boolean;
@@ -337,7 +367,22 @@ export async function listCatalog(input: {
     }),
   };
   const empty = { rows: [] as never[] };
-  const [covers, published, rejected, eanRows, requiredEan, maps, links, listings, categoryNames, sends, counts, gapCounts] = await Promise.all([
+  const [
+    covers,
+    published,
+    rejected,
+    eanRows,
+    requiredEan,
+    maps,
+    platformLinks,
+    listingLinks,
+    storeLinks,
+    listings,
+    categoryNames,
+    sends,
+    counts,
+    gapCounts,
+  ] = await Promise.all([
     ids.length
       ? query<{ master_product_id: string; url_normalized: string }>(
           `SELECT master_product_id, url_normalized FROM product_images
@@ -395,11 +440,24 @@ export async function listCatalog(input: {
     ids.length
       ? query<{ master_product_id: string; platform: CatalogChannel; sync_status: string }>(
           `SELECT master_product_id, platform, sync_status FROM platform_links
-           WHERE master_product_id IN (${placeholders})
-           UNION
-           SELECT product_id AS master_product_id, channel AS platform, 'linked' AS sync_status
+           WHERE master_product_id IN (${placeholders})`,
+          ids
+        )
+      : empty,
+    ids.length
+      ? query<{ master_product_id: string; platform: CatalogChannel; sync_status: string }>(
+          `SELECT product_id AS master_product_id, channel AS platform, link_status AS sync_status
            FROM channel_listing_links
-           WHERE link_status = 'vinculado' AND product_id IN (${placeholders})`,
+           WHERE link_status IN ('vinculado', 'sugerido') AND product_id IN (${placeholders})`,
+          ids
+        )
+      : empty,
+    ids.length
+      ? query<{ master_product_id: string; platform: CatalogChannel }>(
+          `SELECT DISTINCT pv.master_product_id, vcp.platform
+           FROM variant_channel_prices vcp
+           INNER JOIN product_variants pv ON pv.id = vcp.variant_id
+           WHERE pv.master_product_id IN (${placeholders})`,
           ids
         )
       : empty,
@@ -407,7 +465,7 @@ export async function listCatalog(input: {
       ? query<{ product_id: string; channel: CatalogChannel; listing_id: string }>(
           `SELECT product_id, channel, listing_id
            FROM channel_listing_links
-           WHERE link_status = 'vinculado' AND listing_id <> '' AND product_id IN (${placeholders})`,
+           WHERE link_status IN ('vinculado', 'sugerido') AND listing_id <> '' AND product_id IN (${placeholders})`,
           ids
         )
       : empty,
@@ -470,10 +528,14 @@ export async function listCatalog(input: {
   }
 
   const linksByProduct = new Map<string, Array<{ platform: CatalogChannel; sync_status: string }>>();
-  for (const link of links.rows) {
-    const list = linksByProduct.get(link.master_product_id) ?? [];
-    list.push({ platform: link.platform, sync_status: link.sync_status });
-    linksByProduct.set(link.master_product_id, list);
+  for (const link of platformLinks.rows) {
+    rememberLink(linksByProduct, link.master_product_id, link.platform, link.sync_status);
+  }
+  for (const link of listingLinks.rows) {
+    rememberLink(linksByProduct, link.master_product_id, link.platform, link.sync_status);
+  }
+  for (const link of storeLinks.rows) {
+    rememberLink(linksByProduct, link.master_product_id, link.platform, 'linked');
   }
   const listingByKey = new Map(listings.rows.map((row) => [`${row.product_id}:${row.channel}`, row.listing_id]));
 
