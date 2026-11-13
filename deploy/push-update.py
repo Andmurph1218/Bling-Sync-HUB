@@ -1,6 +1,10 @@
 import os
+import sys
 import tarfile
 import paramiko
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 host = "201.79.39.118"
 password = os.environ["HUB_SSH_PW"]

@@ -90,7 +90,14 @@ async function enqueuePage(runToken: string, page: number): Promise<void> {
   if (process.env.VITEST === 'true') return;
   const jobId = `erp-sync-${runToken}-page-${page}`;
   const existing = await getErpSyncQueue().getJob(jobId);
-  if (existing) return;
+  if (existing) {
+    const state = await existing.getState().catch(() => 'unknown');
+    if (state === 'failed' || state === 'completed') {
+      await existing.remove().catch(() => undefined);
+    } else {
+      return;
+    }
+  }
   await getErpSyncQueue().add(
     'page',
     { page, runToken },
@@ -252,7 +259,14 @@ export function startErpSyncWorker(): Worker<PageJob> {
         await holdQueueForBlingQuota(job, token, error);
       }
     },
-    { connection: redisConnection(), concurrency: 1, settings: { backoffStrategy: jitteredBackoffStrategy } }
+    {
+      connection: redisConnection(),
+      concurrency: 1,
+      lockDuration: 300_000,
+      stalledInterval: 120_000,
+      maxStalledCount: 3,
+      settings: { backoffStrategy: jitteredBackoffStrategy },
+    }
   );
   worker.on('failed', (job, error) => {
     logger.error('Página da sync do ERP falhou', { jobId: job?.id, error: error.message });
