@@ -18,9 +18,13 @@ CREATE INDEX IF NOT EXISTS hub_categories_parent_id
 CREATE INDEX IF NOT EXISTS channel_attribute_maps_category_map
   ON channel_attribute_maps (channel_category_map_id);
 
+-- mem-skip-start
+-- O planejador do pg-mem usa índice parcial em qualquer igualdade da coluna indexada,
+-- ignorando o predicado, e devolve só a capa. Nos testes a tabela é pequena: sem o índice.
 CREATE INDEX IF NOT EXISTS product_images_cover_lookup
   ON product_images (master_product_id)
   WHERE is_cover_eligible = true;
+-- mem-skip-end
 `;
 
 export const DOWN_SQL = `
