@@ -24,19 +24,65 @@ function publishMessage(status: number, body: unknown): string {
   return `Nuvemshop respondeu ${status} na criação do anúncio.${suffix}`;
 }
 
-function productBody(draft: ListingDraft): Record<string, unknown> {
+export const NUVEMSHOP_MAX_AXES = 3;
+export const NUVEMSHOP_MAX_IMAGES = 50;
+export const NUVEMSHOP_EXISTENCE_TIMEOUT_MS = 5_000;
+
+/**
+ * Traduz o draft para o payload de POST /products da API 2025-03.
+ * `attributes` é a lista de NOMES de eixos; `variants[].values` segue a mesma ordem.
+ * Validação falha com 400 para o job não retentar um payload inválido.
+ */
+export function buildNuvemshopProductBody(draft: ListingDraft): Record<string, unknown> {
   const name = (draft.title ?? '').trim() || draft.sku;
+  const attributes = (draft.attributes ?? [])
+    .map((attribute) => ({ pt: (attribute.name ?? attribute.value_name ?? attribute.id).trim() }))
+    .filter((attribute) => attribute.pt.length > 0);
+
+  if (attributes.length > NUVEMSHOP_MAX_AXES) {
+    throw new NuvemshopPublishError(
+      400,
+      `Nuvemshop aceita até ${NUVEMSHOP_MAX_AXES} atributos de variação. O produto ${draft.sku} tem ${attributes.length}.`
+    );
+  }
+
+  const variants = draft.variants?.length
+    ? draft.variants
+    : [{ sku: draft.sku, price: draft.price, stock: draft.stock, values: [] as string[] }];
+
+  const seen = new Set<string>();
+  const variantBodies = variants.map((variant) => {
+    const sku = variant.sku.trim();
+    if (!sku) throw new NuvemshopPublishError(400, 'Variação sem SKU — não sincroniza.');
+    if (seen.has(sku)) throw new NuvemshopPublishError(400, `SKU duplicado no anúncio: ${sku}`);
+    seen.add(sku);
+    if (!Number.isFinite(variant.price) || variant.price <= 0) {
+      throw new NuvemshopPublishError(400, `Preço inválido para o SKU ${sku}.`);
+    }
+    const values = attributes.length > 0 ? variant.values : [];
+    if (attributes.length > 0 && values.length !== attributes.length) {
+      throw new NuvemshopPublishError(
+        400,
+        `A variação ${sku} não tem valor para todos os ${attributes.length} atributos.`
+      );
+    }
+    return {
+      price: variant.price.toFixed(2),
+      sku,
+      stock_management: true,
+      stock: Math.max(0, Math.floor(variant.stock)),
+      ...(attributes.length > 0 ? { values: values.map((value) => ({ pt: value })) } : {}),
+    };
+  });
+
   return {
     name: { pt: name },
     published: true,
-    variants: [
-      {
-        price: draft.price.toFixed(2),
-        sku: draft.sku,
-        stock_management: true,
-        stock: Math.max(0, Math.floor(draft.stock)),
-      },
-    ],
+    ...(draft.description ? { description: { pt: draft.description } } : {}),
+    ...(draft.categoryIds?.length ? { categories: draft.categoryIds } : {}),
+    ...(draft.brand?.trim() ? { brand: draft.brand.trim() } : {}),
+    ...(attributes.length > 0 ? { attributes } : {}),
+    variants: variantBodies,
   };
 }
 
@@ -69,7 +115,7 @@ export async function createNuvemshopListing(draft: ListingDraft): Promise<Listi
   const response = await nuvemshopFetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify(productBody(draft)),
+    body: JSON.stringify(buildNuvemshopProductBody(draft)),
     signal: AbortSignal.timeout(NUVEMSHOP_FETCH_TIMEOUT_MS),
   });
   let body: unknown = null;

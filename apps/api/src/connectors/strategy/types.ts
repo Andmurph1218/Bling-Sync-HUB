@@ -123,12 +123,36 @@ export interface ErpConnector {
   recordUrl?(erpId: string): string;
 }
 
+export interface ListingDraftAttribute {
+  id: string;
+  value_name: string;
+  /**
+   * Nome do eixo na Nuvemshop. A API 2025-03 recebe `attributes: [{ pt: nome }]`;
+   * `value_name` continua sendo o valor para o Mercado Livre.
+   */
+  name?: string | null;
+}
+
+export interface ListingDraftVariant {
+  sku: string;
+  price: number;
+  stock: number;
+  /** Valores na mesma ordem de `ListingDraft.attributes`. */
+  values: string[];
+}
+
 export interface ListingDraft {
   sku: string;
   title?: string | null;
   price: number;
   stock: number;
-  attributes: Array<{ id: string; value_name: string }>;
+  attributes: ListingDraftAttribute[];
+  description?: string | null;
+  brand?: string | null;
+  categoryIds?: number[];
+  variants?: ListingDraftVariant[];
+  /** URLs públicas na ordem de envio; a capa vem primeiro. */
+  images?: string[];
 }
 
 export interface ListingResult {
