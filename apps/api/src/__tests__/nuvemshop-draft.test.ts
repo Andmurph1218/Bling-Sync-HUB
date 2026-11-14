@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { newDb, DataType } from 'pg-mem';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildNuvemshopDraft } from '../catalog/publish-preview.js';
+import { buildNuvemshopDraft, checklistForChannel } from '../catalog/publish-preview.js';
 import { DbPoolLike, query, setPool } from '../db/pool.js';
 import { runAllMigrationsUp } from '../db/migrator.js';
 import { setRedis } from '../lib/redis.js';
@@ -171,5 +171,27 @@ describe('buildNuvemshopDraft', () => {
       `UPDATE channel_category_maps SET channel_category_id = '123456' WHERE hub_category_id = $1 AND platform = 'nuvemshop'`,
       [categoryId]
     );
+  });
+
+  it('checklist fica verde para produto variável sem is_default', async () => {
+    const productId = await createVariableProduct('NS-VAR-CHECK');
+    await query(
+      `INSERT INTO stock_warehouses (bling_warehouse_id, name, role, include_in_push)
+       VALUES ('DEP-CHECK', 'Loja Check', 'seller', true)`
+    );
+    const variants = await query<{ id: string; stock: string | null }>(
+      `SELECT id, stock::text AS stock FROM product_variants WHERE master_product_id = $1`,
+      [productId]
+    );
+    for (const variant of variants.rows) {
+      await query(
+        `INSERT INTO variant_stock_balances (variant_id, bling_warehouse_id, saldo_fisico, saldo_virtual)
+         VALUES ($1, 'DEP-CHECK', 3, 3)`,
+        [variant.id]
+      );
+    }
+    const checklist = await checklistForChannel(productId, 'nuvemshop');
+    expect(checklist?.ready).toBe(true);
+    expect(checklist?.items.filter((item) => !item.ok)).toEqual([]);
   });
 });

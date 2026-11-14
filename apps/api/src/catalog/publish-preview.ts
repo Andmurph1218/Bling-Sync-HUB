@@ -318,8 +318,13 @@ export async function checklistForChannels(
       `SELECT mp.id, mp.erp_id, mp.erp_sku, mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id,
               pv.price::text AS price, pv.ean, pv.ean_status
        FROM master_products mp
-       LEFT JOIN product_variants pv ON pv.master_product_id = mp.id AND pv.is_default = true
-       WHERE mp.id IN (${idSlots})`,
+       LEFT JOIN product_variants pv
+         ON pv.master_product_id = mp.id AND pv.is_active = true
+       WHERE mp.id IN (${idSlots})
+       ORDER BY mp.id,
+                CASE WHEN pv.is_default = true THEN 0 ELSE 1 END ASC,
+                pv.created_at ASC,
+                pv.erp_sku ASC`,
       ids
     ),
     query<{ master_product_id: string; cover_count: number }>(
