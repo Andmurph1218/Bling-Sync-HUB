@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest';
-import { buildNuvemshopProductBody, NuvemshopPublishError } from '../connectors/strategy/nuvemshop-publish.js';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  buildNuvemshopProductBody,
+  NUVEMSHOP_MAX_IMAGES,
+  NuvemshopPublishError,
+  syncNuvemshopImages,
+} from '../connectors/strategy/nuvemshop-publish.js';
+import {
+  resetNuvemshopRateLimitForTests,
+  setNuvemshopFetchForTests,
+} from '../connectors/strategy/nuvemshop-http.js';
 import { ListingDraft } from '../connectors/strategy/types.js';
 
 function draft(overrides: Partial<ListingDraft> = {}): ListingDraft {
@@ -128,5 +137,78 @@ describe('buildNuvemshopProductBody', () => {
         draft({ variants: [{ sku: 'NS-X', price: 0, stock: 1, values: ['Azul', 'M'] }] })
       )
     ).toThrow(NuvemshopPublishError);
+  });
+});
+
+describe('syncNuvemshopImages', () => {
+  const auth = { storeId: '998877', accessToken: 'token' };
+  let posts: Array<{ url: string; body: { src: string; position: number } }> = [];
+  let existing: string[] = [];
+
+  beforeEach(() => {
+    posts = [];
+    existing = [];
+    resetNuvemshopRateLimitForTests();
+    setNuvemshopFetchForTests(async (url, init) => {
+      const json = (status: number, body: unknown) => new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json', 'x-rate-limit-remaining': '20' },
+      });
+      if (init?.method === 'POST') {
+        posts.push({ url, body: JSON.parse(String(init.body)) });
+        return json(201, { id: posts.length });
+      }
+      return json(200, existing.map((src) => ({ src })));
+    });
+  });
+
+  afterEach(() => {
+    setNuvemshopFetchForTests(null);
+    resetNuvemshopRateLimitForTests();
+  });
+
+  it('envia só o que falta, com position sequencial a partir do tamanho existente', async () => {
+    existing = ['https://cdn.nuvemshop.test/1.jpg'];
+    await syncNuvemshopImages('88421', [
+      'https://cdn.nuvemshop.test/1.jpg',
+      'https://hub.test/api/media/b.jpg',
+      'https://hub.test/api/media/c.jpg',
+    ], auth);
+    expect(posts.map((post) => post.body)).toEqual([
+      { src: 'https://hub.test/api/media/b.jpg', position: 2 },
+      { src: 'https://hub.test/api/media/c.jpg', position: 3 },
+    ]);
+  });
+
+  it('envia a capa na posição 1 quando o anúncio não tem imagem', async () => {
+    await syncNuvemshopImages('88421', ['https://hub.test/api/media/capa.jpg'], auth);
+    expect(posts[0]!.body).toEqual({ src: 'https://hub.test/api/media/capa.jpg', position: 1 });
+  });
+
+  it('não repete imagem em retry quando o src continua igual', async () => {
+    existing = ['https://hub.test/api/media/capa.jpg'];
+    await syncNuvemshopImages('88421', ['https://hub.test/api/media/capa.jpg'], auth);
+    expect(posts).toEqual([]);
+  });
+
+  it('falha com 429 para o job retentar', async () => {
+    setNuvemshopFetchForTests(async (_url, init) => {
+      if (init?.method === 'POST') {
+        return new Response(JSON.stringify({ message: 'limite' }), { status: 429 });
+      }
+      return new Response(JSON.stringify([]), { status: 200 });
+    });
+    await expect(
+      syncNuvemshopImages('88421', ['https://hub.test/api/media/capa.jpg'], auth)
+    ).rejects.toMatchObject({ status: 429 });
+  });
+
+  it('não chama a API quando o draft não tem imagem', async () => {
+    await syncNuvemshopImages('88421', [], auth);
+    expect(posts).toEqual([]);
+  });
+
+  it('respeita o limite de imagens da Nuvemshop', async () => {
+    expect(NUVEMSHOP_MAX_IMAGES).toBe(50);
   });
 });
