@@ -11,3 +11,6 @@ data/
 *.log
 .DS_Store
 Thumbs.db
+
+# Binários de plataforma das skills locais (reinstaláveis, ~20 MB cada)
+**/skills/impeccable/scripts/bin/
