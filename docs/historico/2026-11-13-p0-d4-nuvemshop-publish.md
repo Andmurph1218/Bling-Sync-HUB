@@ -1,5 +1,9 @@
 # P0-D4 — Publicação Nuvemshop completa (imagem, categoria, atributos, variações)
 
+> ## ✅ Concluído / Resolvido
+> **Registro histórico.** Plano executado em 13/11/2026; todas as tarefas estão marcadas como concluídas e o adendo no final registra o risco aceito (N+1 na busca de SKUs). O resultado vive em [01-arquitetura.md](../01-arquitetura.md#19-publicação-na-nuvemshop-contrato-do-escritor).
+
+
 > **Para quem executa:** este plano assume que você conhece TypeScript, Vitest e PostgreSQL, mas nunca viu este repositório. Siga as tarefas na ordem. Cada tarefa termina com teste verde e `typecheck` limpo. Não pule o passo do teste que falha.
 
 **Goal:** publicar na Nuvemshop um produto com checklist verde enviando descrição em HTML sanitizado, categoria, marca, **todas** as variações (sem perder SKU), e as imagens com a capa na posição 1 — e reconciliar imagens quando o produto já existe.

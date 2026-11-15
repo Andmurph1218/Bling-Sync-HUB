@@ -100,7 +100,7 @@ dashboardRouter.get(
 );
 
 /**
- * Camada Consolidada de Estado Operacional (Seções 3, 5, 7 e 9 de docs/bling_sync_hub_evolucao_dashboard.md):
+ * Camada Consolidada de Estado Operacional (Seções 3, 5, 7 e 9 de docs/01-arquitetura.md (Parte III)):
  * Entrega em uma única leitura consistente:
  * - Estado operacional dos 3 canais + responsabilidade nativa vs HUB (channel_sync_owners + enrichment_controls)
  * - 4 Indicadores Principais com definição formal, fonte e timestamp (Produtos monitorados, Prontos para publicar, Pendências de ação, Falhas de sincronização)
@@ -1093,7 +1093,7 @@ dashboardRouter.post(
 );
 
 /**
- * Seção 6 de docs/bling_sync_hub_evolucao_dashboard.md:
+ * Seção 6 de docs/01-arquitetura.md (Parte III):
  * Estrutura consistente dos 10 motores para a interface:
  * - Resultado e estado
  * - Explicação operacional
@@ -1367,7 +1367,7 @@ dashboardRouter.get(
 );
 
 /**
- * Seção 9 de docs/bling_sync_hub_evolucao_dashboard.md:
+ * Seção 9 de docs/01-arquitetura.md (Parte III):
  * Os 10 Indicadores Administrativos com definição formal, fonte, período e fórmula.
  */
 dashboardRouter.get(
@@ -1597,7 +1597,7 @@ dashboardRouter.get(
 );
 
 /**
- * Seção 5.1 de docs/bling_sync_hub_evolucao_dashboard.md:
+ * Seção 5.1 de docs/01-arquitetura.md (Parte III):
  * Central Unificada de Pendências alimentada por dados reais do PostgreSQL 16.
  */
 dashboardRouter.get(
@@ -1840,7 +1840,7 @@ dashboardRouter.get(
 );
 
 /**
- * Seção 5.2 de docs/bling_sync_hub_evolucao_dashboard.md:
+ * Seção 5.2 de docs/01-arquitetura.md (Parte III):
  * Ficha Única do Produto por erp_id ou UUID com dados reais das 7 abas.
  */
 dashboardRouter.get(
@@ -2007,7 +2007,7 @@ dashboardRouter.get(
 );
 
 /**
- * Seção 5.3 de docs/bling_sync_hub_evolucao_dashboard.md:
+ * Seção 5.3 de docs/01-arquitetura.md (Parte III):
  * Simulador de Sincronização (Dry-Run real sobre o banco sem modificar dados externos).
  */
 dashboardRouter.post(
@@ -2110,7 +2110,7 @@ dashboardRouter.post(
 );
 
 /**
- * Seção 5.5 de docs/bling_sync_hub_evolucao_dashboard.md:
+ * Seção 5.5 de docs/01-arquitetura.md (Parte III):
  * Proteção comercial e margem bruta simplificada com dados reais do banco.
  */
 dashboardRouter.get(
@@ -2178,7 +2178,7 @@ dashboardRouter.get(
 );
 
 /**
- * Seção 5.7 de docs/bling_sync_hub_evolucao_dashboard.md:
+ * Seção 5.7 de docs/01-arquitetura.md (Parte III):
  * Trilha de Auditoria respondendo:
  * 1. O que mudou? 2. Valor anterior? 3. Valor novo? 4. Quem originou? 5. Qual foi o resultado?
  */
@@ -2294,7 +2294,7 @@ dashboardRouter.get(
 );
 
 /**
- * Seção 5.6 de docs/bling_sync_hub_evolucao_dashboard.md:
+ * Seção 5.6 de docs/01-arquitetura.md (Parte III):
  * Histórico real de tentativas de publicação (push_jobs + push_job_steps), somente leitura.
  */
 const PUSH_STATE_LABELS: Record<string, string> = {

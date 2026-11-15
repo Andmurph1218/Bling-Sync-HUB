@@ -1,16 +1,173 @@
-# Documentação de Implantação — JH Sync Hub
+# 02 — Status e Roadmap
 
-Data de referência: **12 de novembro de 2026**  
-Estado publicado em `https://hub.jhshopping.com.br` (`0671858`). O estado atual está na **seção 14** e na auditoria de prontidão [auditoria-go-live.md](auditoria-go-live.md). As seções 13 e anteriores preservam o histórico cronológico da implantação.  
-Especificação normativa: [plano-mestre.md](plano-mestre.md)  
-Resumo executivo: [descricao.md](descricao.md)  
-Auditoria pré-go-live: [auditoria-go-live.md](auditoria-go-live.md)  
-Leitura reversa e contrato ERP: [arquitetura-reversa.md](arquitetura-reversa.md) · [contrato-erp.md](contrato-erp.md)  
-Plano de evolução do dashboard: [bling_sync_hub_evolucao_dashboard.md](bling_sync_hub_evolucao_dashboard.md)
+**Documento canônico de estado do JH Sync Hub.**  
+Atualizado em 15/11/2026, commit `c88539c`, produção em `https://hub.jhshopping.com.br`.
+
+Este arquivo tem quatro partes:
+
+1. **Parte I — Estado atual e roadmap.** O que está no ar, o que falta para o piloto e o que vem depois. É a parte que muda a cada entrega.
+2. **Parte II — Resumo executivo.** Visão de produto e arquitetura em uma página.
+3. **Parte III — Brief de intenção da v2.** Direção de produto que guiou o painel.
+4. **Parte IV — Histórico de implantação.** Registro cronológico das fases 0 a 12 e das evoluções v2.
+
+Documentos irmãos: [01-arquitetura.md](01-arquitetura.md) (arquitetura e regras), [auditorias/](auditorias/) (registros históricos) e [historico/](historico/) (planos executados).
 
 ---
 
-## 0. Em que fase estamos (síntese de 05/11/2026)
+## Parte I — Estado atual e roadmap
+
+### 2.1 Situação em 15/11/2026
+
+**V2 concluída. Piloto de publicação em andamento.**
+
+| Indicador | Valor |
+|---|---|
+| Produção | `https://hub.jhshopping.com.br` (DigitalOcean Droplet, Caddy + systemd) |
+| Migrations aplicadas | **35** (última: `0035_publish-queue-open-unique`) |
+| Testes da API | **56 suítes / 232 testes** aprovados; `typecheck` e `build` limpos |
+| Modo de publicação | `ENABLE_LIVE_PUBLISHING=false`, `LIVE_PUBLISH_ALLOWLIST` vazia |
+| Canal ativo | Nuvemshop (loja `6667412`), isolada em `connectors/nuvemshop` |
+| ERP ativo | Bling (`ACTIVE_ERP=bling`) |
+| Chave OAuth | rotacionada em 15/11; a chave padrão de `remote-deploy.sh` não existe mais no servidor |
+
+### 2.2 O que está no ar
+
+- **Catálogo** (`/catalogo`): espelho normalizado com produtos-pai, variações agrupadas, ficha única, planilhas e cadastro rápido (`+ Produto`) integrado ao Bling.
+- **Sync do Bling**: catálogo ativo paginado, retomada automática após reinício, cota global de 3 req/s no Redis com pausa em 80% da cota diária.
+- **Enriquecimento**: imagens no IQRE (dedup, direitos, capa ≥ 500×500) e NCM em aprovação fiscal de duas etapas.
+- **Reconciliação**: vínculo por dois sinais, `sugerido` para revisão em `/vinculos`, retrato em `marketplace_listings_snapshot` e alertas em `/problemas`.
+- **Publicação Nuvemshop**: draft com até 3 eixos, todas as variações, marca, categoria numérica, descrição em HTML sanitizado e imagens com capa na posição 1. Um job aberto por produto e canal (migration 0035).
+- **Resiliência**: `dead_letters` com reprocessamento, detector de job preso em `processing` > 15 min, backoff com jitter e botão de pânico.
+- **Governança**: RBAC (`operator`, `fiscal_approver`, `admin`, `viewer`), sessões opacas, Argon2id, AES-256-GCM para tokens, HMAC em tempo constante nos webhooks.
+
+### 2.3 O que falta para concluir o piloto
+
+1. Preparar os SKUs do piloto: categoria em `hub_categories`, mapa Nuvemshop em `/atributos`, senha inicial dos revisores fiscais trocada, NCM aprovado em duas etapas e capa elegível definida.
+2. Rodar o teste canário com **1 SKU** e conferir na Nuvemshop imagem, HTML, variações e categoria.
+3. Preencher até **10 SKUs** em `LIVE_PUBLISH_ALLOWLIST`, ligar `ENABLE_LIVE_PUBLISHING=true` e acompanhar 48 h em `/problemas`.
+4. Encerrar o piloto sem anúncio duplicado, sem `23505` em `channel_listing_links` e sem produto publicado sem capa.
+
+### 2.4 Roadmap depois do piloto (P1 e P3)
+
+| Item | Por que importa |
+|---|---|
+| `PUT` de anúncio existente | Hoje não há atualização de título, descrição, categoria, imagem ou variação nova em anúncio já publicado. |
+| Busca em lote de SKUs antes do `POST` | O escritor faz até 1 `GET /products/sku/{sku}` por variante (N+1 aceito no go-live). |
+| Validação de eixo vazio no checklist | Variante sem valor em um eixo só é recusada pela Nuvemshop (400), não pelo HUB. |
+| Reconciliação de imagem por `{listing_id, position, sha256}` | O `Set` de `src` não casa se a Nuvemshop reescrever a URL para o CDN dela. |
+| Rotas de OAuth atrás do conector | `routes/oauth.ts`, `routes/app-credentials.ts` e a classe legada `connectors/connectors.ts` ainda importam a Nuvemshop direto (allowlist do `architecture.test.ts`). |
+| Shopee e Amazon | Shopee está na fábrica sem checklist de publicação; Amazon e TikTok Shop seguem em breve. |
+| Mercado Livre | Escritor continua stub (`escrita_ao_vivo_desligada`); depende de OAuth com `offline_access`. |
+| Gestão de estoque (Etapa 4) | Sem leitura de pedidos; alertas de saldo virtual negativo e capital parado ainda não existem. |
+| Deploy por pipeline | Hoje o deploy é `deploy/push-update.py` + `update-hub.sh` na Droplet. |
+
+A lista completa de dívidas, com evidência por arquivo, está na [revisão 3 da auditoria de go-live](auditorias/auditoria-go-live.md).
+
+### 2.5 Registros históricos
+
+- [Auditoria de Go-Live](auditorias/auditoria-go-live.md) — auditorias de 11/11, 12/11 e revisão 3 de 13/11. **Concluída.**
+- [Auditoria Delta de 13/11](auditorias/auditoria-delta-go-live-2026-11-13.md) — os 4 P0 que antecederam o go-live. **Concluída.**
+- [Plano P0-D4](historico/2026-11-13-p0-d4-nuvemshop-publish.md) — plano de execução da publicação completa na Nuvemshop. **Concluído.**
+
+---
+
+## Parte II — Resumo executivo
+
+### O que é
+
+O **JH Sync Hub** é um iPaaS de normalização e governança de catálogo. Atua como camada central entre o **ERP soberano (Bling)** e os **canais de venda** (Nuvemshop ativo; Mercado Livre e Shopee implementados na fábrica de conectores).
+
+### O problema que resolve
+
+O catálogo estava fragmentado e incompleto entre ERP e canais. O cadastro do ERP tinha lacunas de conteúdo e mídia, enquanto os marketplaces exigiam atributos específicos por categoria, gerando retrabalho manual, risco de anúncios duplicados e risco de *overselling* (mistura de depósitos ou venda sem saldo elegível).
+
+### A ideia central
+
+**"O Bling manda. Os marketplaces enriquecem. O HUB orquestra."**
+
+- **O Bling é intocável:** preço, estoque, SKU, custo, NCM, CEST e origem fiscal são de propriedade exclusiva do ERP. O HUB nunca sobrescreve esses dados no Bling a partir de marketplaces. Divergência no canal vira retrato (`marketplace_listings_snapshot`) e alerta para o operador.
+- **O HUB é o maestro (PIM):** lê o cadastro ativo do Bling (`criterio=2`), agrupa variações filhas sob o produto-pai, enriquece mídia e conteúdo por canal sem sujar o cadastro mestre e valida o checklist antes de qualquer envio.
+- **O marketplace é o destino:** recebe apenas produtos com checklist verde, respeitando limites de taxa, idempotência e regras fiscais.
+
+### Como funciona na prática
+
+1. **Ingestão:** `erp-sync-queue` percorre o catálogo ativo do Bling em páginas de 50 itens, respeitando a cota global e retomando por página após reinício; webhooks assinados (HMAC-SHA256) entram em tempo real.
+2. **Enriquecimento:** imagens (IQRE) e NCM (aprovação fiscal em duas etapas) por produto, em transação, com recálculo de completude.
+3. **Reconciliação:** leitura reversa segura do catálogo dos canais, comparação de preço, estoque e imagens, vínculo por dois sinais.
+4. **Publicação:** BullMQ com `publish_queue`, draft reconstruído no envio, `listing_id` gravado na mesma transação, guardas de go-live (`ENABLE_LIVE_PUBLISHING`, `LIVE_PUBLISH_ALLOWLIST`, botão de pânico) e `dead_letters` para falha esgotada.
+
+### Módulos do painel
+
+| Módulo | Rota |
+|---|---|
+| Visão Geral | `/` |
+| Catálogo | `/catalogo` |
+| Completude | `/completude` |
+| Atributos | `/atributos` |
+| Vínculos | `/vinculos` |
+| Problemas | `/problemas` |
+| Lista de Envio | `/publicacoes` |
+| Fiscal | `/fiscal` |
+| Canais e integrações | `/canais`, `/admin/integracoes` |
+| Governança | `/configuracoes` |
+
+### Stack e infraestrutura
+
+- **Infra:** DigitalOcean Droplet (Ubuntu), Caddy (HTTPS + proxy), systemd (`bling-hub-api`, `bling-hub-web`), PostgreSQL 16, Redis 7.
+- **Backend:** Node.js 20, TypeScript estrito, Express, BullMQ, `node-pg-migrate` via `tsx`.
+- **Frontend:** Next.js 14 (App Router), React 18, Tailwind (temas claro e escuro).
+- **Segurança:** Argon2id, sessões opacas SHA-256 em cookie `HttpOnly`, AES-256-GCM para tokens e credenciais, HMAC em tempo constante, RBAC.
+
+### Fora do escopo
+
+Pedidos de venda, financeiro, cotação de frete, expedição e NF-e (permanecem no Bling); escrita de preço, estoque ou dado fiscal de volta no ERP a partir de marketplace; escrita em estoque Full do Mercado Livre (`meli_facility`).
+
+**Em uma frase:** o HUB mantém o Bling como fonte soberana de preço, estoque e fiscal, enquanto organiza atributos, mídia e vínculos para publicar nos canais com segurança e rastreabilidade.
+
+---
+
+## Parte III — Brief de intenção da v2
+
+### Problema
+
+O HUB não pode exigir que quem opera catálogo, fiscal e estoque conheça siglas de motores internos (PIRE, VIR, GVE, NVE, CQS, IQRE, CRE, APE, WIG, DLM) para tomar decisões seguras no dia a dia.
+
+### Direção consolidada
+
+- **Catálogo centralizado (`/catalogo`):** produtos-pai com variações agrupadas, ficha única, busca rápida, planilhas e cadastro rápido integrado ao ERP.
+- **Foco em integrações (`/canais` e `/admin/integracoes`):** saúde clara de cada canal conectado, depósitos classificados e separação explícita entre conexão ativa e anúncios vinculados.
+- **Regularização de atributos (`/atributos` e `/completude`):** mapeamento De/Para de categorias e atributos para atender cada canal sem duplicar produtos no ERP.
+- **Governança e proteção comercial:** soberania absoluta do ERP em preço, estoque e fiscal; vínculo automático somente com dois sinais concordantes; envio ao vivo bloqueado por padrão com allowlist e botão de pânico.
+- **UI/UX operacional:** navegação direta por módulos, temas claro e escuro e Visão Geral (`/`) focada no que pede ação.
+
+### Referências de produto
+
+- Plugg.to — [demo](https://youtu.be/239wfkYZD2Q)
+- Moovin HUB — [demo](https://www.youtube.com/watch?v=Yx0fuxKGQE0)
+
+### Fora do escopo
+
+Pedidos de venda, financeiro, NF-e, cotação de frete, expedição e escrita em estoque Full do Mercado Livre (`meli_facility`).
+
+---
+
+## Parte IV — Histórico de implantação
+
+> Registro cronológico de 28/10 a 13/11/2026, mantido como memória do projeto. O estado vigente está na Parte I.
+
+## Documentação de Implantação — JH Sync Hub
+
+Data de referência: **12 de novembro de 2026**  
+Estado publicado em `https://hub.jhshopping.com.br` (`0671858`). O estado atual está na **seção 14** e na auditoria de prontidão [auditoria-go-live.md](auditorias/auditoria-go-live.md). As seções 13 e anteriores preservam o histórico cronológico da implantação.  
+Especificação normativa: [plano-mestre.md](01-arquitetura.md)  
+Resumo executivo: [descricao.md](02-status-e-roadmap.md)  
+Auditoria pré-go-live: [auditoria-go-live.md](auditorias/auditoria-go-live.md)  
+Leitura reversa e contrato ERP: [arquitetura-reversa.md](01-arquitetura.md#14-soberania-e-leitura-reversa) · [contrato-erp.md](01-arquitetura.md#15-contrato-de-um-segundo-erp)  
+Plano de evolução do dashboard: [bling_sync_hub_evolucao_dashboard.md](01-arquitetura.md)
+
+---
+
+### 0. Em que fase estamos (síntese de 05/11/2026)
 
 | Camada | Estado |
 |---|---|
@@ -36,7 +193,7 @@ Não há fase de código da seção 13 do plano-mestre em aberto. O trabalho res
 
 ---
 
-## 1. O Que Já Foi Estruturado (Arquitetura e Regras Fechadas)
+### 1. O Que Já Foi Estruturado (Arquitetura e Regras Fechadas)
 
 O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20`, sem `any` implícito) dividido em dois workspaces:
 
@@ -44,7 +201,7 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 - **`apps/web` (`@bling-sync/web`)**: Frontend administrativo em Next.js 14 + React 18 + Tailwind CSS.
 - **Infraestrutura Local (`docker-compose.yml`)**: Containers dedicados para `postgres:16-alpine` (timezone `America/Sao_Paulo`) e `redis:7-alpine` (com persistência AOF e healthchecks).
 
-### Decisões Arquiteturais Estruturadas e Travadas
+#### Decisões Arquiteturais Estruturadas e Travadas
 1. **Soberania de Dados**:
    - **Grupo A (Bling intocável)**: preço de cadastro, preço de loja, custo, estoque do vendedor, composição de kit, NCM, CEST, origem fiscal, unidade, SKU.
    - **Grupo A.5 (GVE — EAN)**: EAN válido do Bling é intocável; EAN externo válido quando Bling está vazio vai para fila de validação humana (`ean_pending_validation`), nunca auto-preenche; EAN repetido entre variantes do mesmo produto marca `ean_status = 'duplicate'`.
@@ -62,7 +219,7 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 
 ---
 
-## 2. O Que Já Foi Implantado e Testado (Fases 0, 0.5 e 1 a 12 — Todas as Fases Concluídas)
+### 2. O Que Já Foi Implantado e Testado (Fases 0, 0.5 e 1 a 12 — Todas as Fases Concluídas)
 
 | Fase | Escopo | Status | Critério de Saída Validado |
 |---|---|---|---|
@@ -81,16 +238,16 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 | **Fase 11** | Matching e Fiscal no Dashboard (`apps/web` e rotas `/api/matching/*` e `/api/fiscal/*`) | **Concluída** | Dois usuários `fiscal_approver` distintos confirmam o mesmo NCM com nota de TIPI via API autenticada (bloqueando `operator` com 403 e auto-revisão na 2ª etapa com 409), além de aprovar EAN na fila GVE e resolver fila de matching (`phase11.test.ts` — 1/1 teste ponta a ponta) |
 | **Fase 12** | Ensaio com Recorte Real do Catálogo, Orquestrador (`pipeline.ts`), Replay e Medição de Lag P1 | **Concluída** | Pipeline completo (Mapper $\to$ PIRE/VIR $\to$ NVE/GVE $\to$ CQS $\to$ IQRE $\to$ CRE) validado com simples, variação e kit; lag de estoque P1 ponta a ponta (WIG $\to$ `/estoques/saldos` $\to$ APE) medido abaixo de 2 minutos (`< 120.000 ms`); replay de job `failed` sem repetir passos concluídos (`phase12.test.ts` — 1/1 teste ponta a ponta) |
 
-### Detalhamento dos Módulos Implantados
+#### Detalhamento dos Módulos Implantados
 
-#### 2.1 Autenticação, Segurança e Controles (`apps/api/src/auth/*` e `apps/api/src/routes/*`)
+##### 2.1 Autenticação, Segurança e Controles (`apps/api/src/auth/*` e `apps/api/src/routes/*`)
 - **Hash de Senha**: `Argon2id` (`m=19456, t=2, p=1`) via `hash-wasm`.
 - **Sessão Opaca**: Cookie `HttpOnly` contendo token aleatório de 32 bytes (`base64url`), gravando apenas o hash `SHA-256` em `sessions.token_hash`.
 - **Criptografia de Credenciais OAuth**: `AES-256-GCM` (`encryptOAuthToken` / `decryptOAuthToken`) para armazenamento binário (`bytea`) em `oauth_tokens`, nunca no Redis.
 - **RBAC de 3 Papéis**: `operator`, `fiscal_approver` e `admin` verificados pelo middleware `requireRole(...)`.
 - **Rotas Administrativas Auditadas**: `PUT /admin/controls/warehouses/:warehouseId` e `PUT /admin/controls/sync-owner/:platform` exigem papel `admin` (retornam `403` para `operator` e `fiscal_approver`) e gravam obrigatoriamente o histórico em `control_changes` na mesma transação.
 
-#### 2.2 Contratos de API e Mappers (`apps/api/src/contracts/*`)
+##### 2.2 Contratos de API e Mappers (`apps/api/src/contracts/*`)
 - **Fixtures Sanitizados**:
   - `fixtures/bling.fixtures.ts`: Produto simples (`S`), grade (`V`), kit (`E`), variação-kit (`V`+`E`), saldos de depósitos (`seller` e `ml_full`), vínculo de preço por loja (`/produtos/lojas`), webhooks (`stock.updated`, `virtual_stock.updated` com `vinculoComplexo`, `product.updated` com `situacao` `I` e `E`, `product.deleted` + `GET 404` / `GET 200`) e erro `429`.
   - `fixtures/mercadolivre.fixtures.ts`: Item legado com `variations`, família User Product (`family_id`, dois `user_product_id`, duas condições de venda para a mesma variante), estoque distribuído (`meli_facility` vs `seller_warehouse` com header `x-version`), item legado Full (`inventory_id`) e webhook de migração `UPtin`.
@@ -98,7 +255,7 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 - **Mappers Puros (`mappers.ts`)**:
   - `mapBlingProductToCatalog`, `computePublishableStockFromBalances`, `resolveVariantChannelPrice`, `resolveBlingLifecycleSignal`, `classifyApiHttpError`, `mapMercadoLivreListingGroup`, `mapMercadoLivreStockLocations`, `applyMlUptinMigration` e `mapNuvemshopProduct`.
 
-#### 2.3 Banco de Dados — As 33 Migrations (`apps/api/src/db/migrations/*`)
+##### 2.3 Banco de Dados — As 33 Migrations (`apps/api/src/db/migrations/*`)
 1. `1729080000001_identity-and-controls.ts`: `users`, `user_roles`, `sessions`, `oauth_tokens`, `stock_warehouses`, `channel_stores`, `channel_sync_owners`, `enrichment_controls`, `control_changes` (com trigger de imutabilidade), `sync_cursors`, `hub_writes`.
 2. `1729080000002_products-variants-and-axes.ts`: `master_products`, `product_variants` (com índice único parcial `uq_one_default_variant`), `product_components`, `variant_stock_balances`, `variant_channel_prices`, `attribute_axes`, `product_axes`, `attribute_value_aliases`, `variant_attributes`.
 3. `1729080000003_platform-links-and-matching.ts`: `platform_links` (com constraint `family_confidence` para `user_product`), `platform_variant_links`, `ml_selling_conditions`, `ml_stock_locations`, `platform_items`, `matching_queue`, `match_rejections`, `variant_matrix_analysis`.
@@ -133,7 +290,7 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 32. `1729080000032_dead-letters.ts`: fila persistente de cartas mortas (`dead_letters`) com suporte a reprocessamento.
 33. `1729080000033_snapshot-upsert.ts`: constraint única `(product_id, marketplace)` em `marketplace_listings_snapshot` para upsert atômico.
 
-#### 2.4 Conectores, Rate Limiter Global e OAuth Single-Flight (`apps/api/src/connectors/*`)
+##### 2.4 Conectores, Rate Limiter Global e OAuth Single-Flight (`apps/api/src/connectors/*`)
 - **`bling-rate-limiter.ts`**: Balde único de 3 req/s com fila ordenada por prioridade (`token` > `webhook_p1_push_stock` > `stock_sync` > `price_check` > `delta_enrich` > `full_enrich`), proteção de 20 req/60s em `/oauth/token` e repartição da cota diária de 120.000 chamadas (`full_enrich` pausa em 96.000; jobs não-P1 param em 108.000 preservando 12.000 chamadas para P1/webhook/push).
 - **`oauth-token-manager.ts`**: Persistência em `oauth_tokens` com `AES-256-GCM` e renovação single-flight (promessa compartilhada em memória + lock transacional `SELECT ... FOR UPDATE` no PostgreSQL com rotação atômica de `access_token_enc` e `refresh_token_enc`).
 - **`connectors.ts`**:
@@ -141,7 +298,7 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
   - `MercadoLivreConnector`: lê `GET /user-products/{id}/stock` capturando `x-version`, pula escrita quando o anúncio só possui `meli_facility` (`reason = 'ml_full'`), escreve apenas em `/user-products/{id}/stock/type/seller_warehouse` com `X-Version` e faz 1 retry relendo `x-version` em caso de `409 Conflict`.
   - `NuvemshopConnector`: envia medidas isoladas via `PATCH /{storeId}/products/{productId}/variants` sem enviar `price` nem `stock`.
 
-#### 2.5 Motores Fiscais Puros — GVE e NVE (`apps/api/src/engines/gve.ts` e `apps/api/src/engines/nve.ts`)
+##### 2.5 Motores Fiscais Puros — GVE e NVE (`apps/api/src/engines/gve.ts` e `apps/api/src/engines/nve.ts`)
 - **`gve.ts` (GTIN/EAN Validation Engine)**:
   - `validateGs1Gtin`: validação estrutural de 8, 12, 13 e 14 dígitos com módulo 10 (pesos 3/1 da direita), rejeição de dígitos repetidos e sequências aritméticas, e classificação contextual (`gs1_brasil` 789/790, `isbn_issn` 977/978/979, `internal_range` 200–299, `gs1_international`).
   - `evaluateProductGve`: avalia todas as variantes não descontinuadas do produto pai, marca `ean_status = 'duplicate'` e `fiscal_risk_flag = true` apenas nas variantes que compartilham o mesmo EAN válido dentro do mesmo pai (sem abrir `ean_pending_validation` e gerando 1 único alerta aberto por produto e EAN), resolve automaticamente quando resta apenas 1 variante ativa com aquele EAN, e enfileira candidatos externos válidos em `ean_pending_validation` (TTL 30 dias) quando o Bling está vazio.
@@ -150,7 +307,7 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
   - `evaluateProductNve`: detecta conflito de NCM entre variantes não descontinuadas antes de qualquer sugestão (`ncm_status = 'conflict'` e `ncm_fiscal_risk = true` no pai, sem criar sugestão e abrindo 1 alerta `variant_conflict` por produto), limpa `conflict` quando a divergência entre variantes some (mantendo `ncm_fiscal_risk = true` se o NCM do pai for inválido) e abre sugestão `pending_first` quando o Bling está vazio e o canal traz NCM de 8 dígitos válido.
   - `confirmNcmSuggestionStep`: fluxo de dupla confirmação por dois usuários `fiscal_approver` distintos (`second_review_by <> first_review_by`) com nota de consulta à TIPI obrigatória, atualizando `master_products.ncm` e gravando trilha imutável em `ncm_audit_log`.
 
-#### 2.6 Motores de Identidade — PIRE e VIR (`apps/api/src/engines/pire.ts` e `apps/api/src/engines/vir.ts`)
+##### 2.6 Motores de Identidade — PIRE e VIR (`apps/api/src/engines/pire.ts` e `apps/api/src/engines/vir.ts`)
 - **`pire.ts` (Product Identity Resolution Engine)**:
   - `jaroWinklerSimilarity` e `normalizeProductTitleForFuzzy`: normalização com remoção de acentos (`NFD`) e stopwords em português (`de`, `da`, `do`, `com`, `para`, `e`, `o`, `a`, `em`).
   - `resolvePlatformItemPire`: predicado multi-sinal exigindo pelo menos 2 sinais fortes independentes (`sku`, `ean` único com GVE válido e sem `duplicate`, `name_jw_90`) no mesmo candidato e nenhum em outro para `auto_linked` (`score = 95`). Sinal único fica em `suggestion` ($\le 80$). EAN compartilhado entre dois `master_products` distintos cai em `quarantine`. Consulta `match_rejections` antes de avaliar candidatos.
@@ -161,17 +318,17 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
   - `resolveProductVariantsVir`: vincula variantes por produto simples (`is_default`), SKU único, EAN único ou `comboKey`; consolida múltiplas condições de venda sob o mesmo `user_product_id` gravando `ml_selling_conditions` e a trilha obrigatória de `follow_store_price` em `control_changes` (`origin = 'system'`); preenche `variant_matrix_analysis` (`ok`, `missing_ml`, `missing_ns`, `extra_ml`, `extra_ns`) e abre alerta crítico em `extra_ml`/`extra_ns`.
   - `buildMlCreateListingPayload`: garante que contas com a tag `user_product_seller` publiquem com `family_name` e atributos `PARENT_PK`/`CHILD_PK`, sem o array `variations`.
 
-#### 2.7 Motor de Imagens — IQRE (`apps/api/src/engines/iqre.ts`)
+##### 2.7 Motor de Imagens — IQRE (`apps/api/src/engines/iqre.ts`)
 - **`enqueueProductImagesForSync`**: enfileira URLs normalizadas em `image_processing_queue` (`stage = 'queued'`) durante a sync sem realizar download síncrono e sem duplicar a mesma URL normalizada para o mesmo `master_product_id`.
 - **`processQueuedImagesWorkerBatch`**: consome lotes com `stage = 'queued'`, `locked_at IS NULL` e `available_at <= now()` usando `FOR UPDATE SKIP LOCKED` pelo índice parcial `image_processing_queue_claim`, valida hosts permitidos (Bling, Mercado Livre e Nuvemshop), calcula SHA-256 e Average Hash 64-bit, avalia direitos (`owned`, `third_party_risk`, `watermark_suspect`), calcula `quality_score` (resolução 40, fonte 25, formato 15, direitos 20) e elegibilidade de capa ($\ge 55$ pts, $\ge 500\times500$, sem risco de terceiro nem marca d'água). Falhas retornam a `queued` com backoff até 4 tentativas (`max_attempts = 4`), passando a `failed` sem travar o fechamento do produto.
 - **`finalizeProductImagesIqre` (`iqre.finalize`)**: quando não resta nenhuma imagem do produto em `queued`, deduplica exclusivamente dentro do mesmo `master_product_id` (Average Hash com distância de Hamming $\le 5$, mantendo a imagem de maior resolução `width * height`), registra revisão `cross_product_similarity` sem descartar imagens se houver hash parecido em outro produto, e atribui `position_bling`, `position_ml` e `position_ns` respeitando `platform_image_limits`.
 
-#### 2.8 Motor de Qualidade de Conteúdo — CQS (`apps/api/src/engines/cqs.ts`)
+##### 2.8 Motor de Qualidade de Conteúdo — CQS (`apps/api/src/engines/cqs.ts`)
 - **Avaliadores (`evaluateNameQuality`, `evaluateDescriptionQuality`, `evaluateBrandQuality`, `evaluateWeightQuality`, `evaluateDimensionsQuality`, `evaluateInternalCategoryQuality`)**: pontuam de 0 a 100 (grades `A` 81–100, `B` 61–80, `C` 41–60, `D` 21–40, `F` 0–20), penalizando placeholders, textos curtos (`< 30` caracteres em descrição é `F`), ALL CAPS, sentinelas de peso (`0.001`, `0.01`, `1`, `100`) e dimensão (`1×1×1` ou incompleta).
 - **`decideEnrichmentAction`**: implementa a árvore determinística de 7 regras onde a primeira que casar vence, garantindo que **Grade A e Grade B no Bling jamais sofram `REPLACE` automático**.
 - **`evaluateAndApplyCqsEnrichment` e `revertCqsQualityHistoryChange`**: protegem `master_products.name` e `description` (gravando título e descrição de canal em `channel_content_overrides`), respeitam `enrichment_controls` (`mode: 'shadow' | 'live'`, `kill_switch`, `max_replaces_per_run`), registram `hub_writes` nas escritas `live` e permitem reverter alterações aplicadas (bloqueando reversão de linhas `shadow`).
 
-#### 2.9 Motor de Prontidão por Canal — CRE (`apps/api/src/engines/cre.ts`)
+##### 2.9 Motor de Prontidão por Canal — CRE (`apps/api/src/engines/cre.ts`)
 - **`calculateProductReadinessCre`**: calcula e persiste em `channel_readiness_scores` e `channel_readiness_history` os 3 scores por variante:
   - **Score Bling** (fiscal 45, operacional 35, identificação 20; publicar conteúdo $\ge 70$, premium $\ge 90$).
   - **Score Mercado Livre** (título 25, conteúdo 20, imagens 20, atributos 20, logística 15; publicar conteúdo $\ge 50$, premium $\ge 75$; `CREATE` exige categoria verificada em `product_category_mappings`).
@@ -179,7 +336,7 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
   - Calcula o **KPI do produto** como o menor score entre os 3 canais da pior variante ativa e identifica os `blockers` e as **top 3 melhorias** de maior ganho potencial (`top_improvements`).
 - **`checkStepReadinessGate`**: garante que os passos `stock`, `pause` e `price` (em anúncio já publicado) **jamais leiam `channel_readiness_scores`** nem dependam de NCM/EAN/score, enquanto os passos de `CONTENT` e `CREATE` exigem vínculo confirmado, regularidade fiscal e score acima do threshold do canal.
 
-#### 2.10 Guarda de Idempotência de Webhook — WIG (`apps/api/src/engines/wig.ts` e `apps/api/src/routes/webhooks.ts`)
+##### 2.10 Guarda de Idempotência de Webhook — WIG (`apps/api/src/engines/wig.ts` e `apps/api/src/routes/webhooks.ts`)
 - **`verifyWebhookHmacConstantTime` e `ingestWebhookController`**: lê os bytes brutos (`express.raw`) na rota `POST /webhooks/:source`, valida HMAC-SHA256 em tempo constante (`X-Bling-Signature-256`, `x-linkedstore-hmac-sha256` e `x-signature`), retorna `401` sem persistir em caso de assinatura inválida, e grava `webhook_events` com SHA-256 de 64 caracteres (`source:event_type:resource_id:content_hash`) **antes** de responder HTTP `200`.
 - **`processWebhookEventById` e `recoverAndProcessPendingWebhooks`**:
   - Adquire lock de 60 segundos em `resource_locks` (atrasando eventos concorrentes em 2s e sobrescrevendo locks vencidos).
@@ -187,7 +344,7 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
   - Grava mudanças pendentes em `pending_product_changes` e registra `sync_logs` com a mesma `idempotency_key`.
   - Recupera automaticamente qualquer evento em `status IN ('received', 'queued')` após reinício do servidor.
 
-#### 2.11 Motor de Push Atômico — APE (`apps/api/src/engines/ape.ts`)
+##### 2.11 Motor de Push Atômico — APE (`apps/api/src/engines/ape.ts`)
 - **`enqueueOrPromotePushJob`**: agrega mudanças por produto, variante, plataforma e `job_kind` (`STOCK_PRICE`, `CONTENT`, `CREATE`) sobre o índice único parcial `push_jobs_active` (`status = 'pending'`), promovendo prioridade (`P1` vence `P2/P3/P4`) sem bloquear janelas futuras quando o job anterior já está `locked`.
 - **`executePushJobById`**:
   - Lê o estado atual do Bling no instante da execução e executa apenas passos ainda pendentes (`pause` $\to$ `stock` $\to$ `price` $\to$ `CREATE` $\to$ `description`/`product` $\to$ `measures` $\to$ `pictures`/`images`), sem jamais repetir passo `completed` ou `skipped`.
@@ -196,12 +353,12 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
   - Abre alerta crítico `price_below_cost` quando `0 < effectivePrice < cost_price` sem bloquear estoque, pausa, preço nem `CREATE`, e resolve o alerta quando o preço volta a ser $\ge \text{cost\_price}$.
   - No `CREATE`, verifica antes da 1ª chamada se o SKU já existe no canal (cancelando a duplicação e vinculando ao existente); quando cria, envia preço e estoque iniciais uma vez e grava a condição inicial com `follow_store_price = true` e trilha `origin = 'system'` em `control_changes`.
 
-#### 2.12 Gerenciador de Ciclo de Vida de Dados — DLM (`apps/api/src/engines/dlm.ts`)
+##### 2.12 Gerenciador de Ciclo de Vida de Dados — DLM (`apps/api/src/engines/dlm.ts`)
 - **`DLM_BULLMQ_SCHEDULES`**: agenda repetível em `America/Sao_Paulo` (`02:00` limpeza TTL diária, `03:00` dia 1 manutenção de partições, `04:00` domingo arquivamento fiscal, `09:00` dia 1 auditoria de saúde), sem usar `node-cron` em processo.
 - **`runDlmTtlCleanup`**: protegido por lock de coordenação entre réplicas (`dlm:job:ttl_cleanup`) e lotes `FOR UPDATE SKIP LOCKED`; limpa `enrichment_staging` (30d), `matching_queue` (60d após status terminal, preservando `pending`), `enrichment_suggestions` (30d), `image_rights_review_queue` (90d), `image_processing_queue` (7d após `done`, preservando `queued` e `failed`), `push_jobs`/`push_job_steps` (7d após status terminal) e anula `webhook_events.raw_payload` após 30d mantendo a chave de idempotência.
 - **`runDlmFiscalArchive` e `buildDlmPartitionMaintenancePlan`**: move alertas resolvidos ($\ge 90\text{d}$) para `divergence_alerts_archive` e histórico de EAN ($\ge 540\text{d}$) para `ean_validation_history_archive` (retenção imutável de 5 anos), gera `CREATE`/`DROP` das partições mensais (12 meses para logs operacionais e 3 meses para `identity_resolution_logs`) e grava todas as execuções em `dlm_job_runs`.
 
-#### 2.13 Rotas e Telas Prioritárias do Dashboard — Matching e Fiscal (`apps/api/src/routes/dashboard.ts` e `apps/web/src/app/*`)
+##### 2.13 Rotas e Telas Prioritárias do Dashboard — Matching e Fiscal (`apps/api/src/routes/dashboard.ts` e `apps/web/src/app/*`)
 - **Rotas HTTP (`dashboard.ts`)**:
   - `GET /api/dashboard/overview`: resumo de conexões OAuth, pior score CRE, contagem de alertas fiscais, preço abaixo do custo e filas pendentes.
   - `GET /api/matching/queue` e `POST /api/matching/resolve`: listagem de sugestões/quarentena/lacunas da matriz e resolução autenticada (`confirm`, `reject_candidate`, `dismiss`, `new_product`).
@@ -210,18 +367,18 @@ O projeto está estruturado como um **monorepo TypeScript estrito** (`Node.js 20
 - **Telas Next.js (`apps/web/src/app/*`)**:
   - `/` (`page.tsx`), `/matching` (`matching/page.tsx`), `/fiscal/ean` (`fiscal/ean/page.tsx`) e `/fiscal/ncm` (`fiscal/ncm/page.tsx`).
 
-#### 2.14 Orquestrador do Catálogo, Replay e Medição de Lag P1 (`apps/api/src/orchestrator/pipeline.ts`)
+##### 2.14 Orquestrador do Catálogo, Replay e Medição de Lag P1 (`apps/api/src/orchestrator/pipeline.ts`)
 - **`runFullProductCatalogPipeline`**: orquestra o ciclo completo da seção 10.1 (upsert Bling com `stock = null` $\to$ saldos de depósito `/estoques/saldos` e preços `/produtos/lojas` $\to$ PIRE/VIR $\to$ NVE/GVE $\to$ CQS $\to$ enfileiramento assíncrono IQRE $\to$ CRE).
 - **`executeAndMeasureP1StockFlow`**: executa e mede ponta a ponta o lag de estoque P1 desde o recebimento do webhook no WIG até a conclusão do `STOCK_PRICE` no APE e gravação em `push_execution_logs`, validando o SLA inferior a 2 minutos (`< 120.000 ms`).
 - **`replayFailedPushJobById` e `getOperationalMetrics`**: permite replay de jobs `failed` reexecutando apenas passos que falharam (sem repetir passos `completed`) e coleta métricas de profundidade de fila, idade do webhook mais antigo e latência de push.
 
 ---
 
-## 3. O Que Falta (Homologação Operacional e Lacunas de Tela)
+### 3. O Que Falta (Homologação Operacional e Lacunas de Tela)
 
 Todas as **14 fases da espinha dorsal (Fase 0, Fase 0.5 e Fases 1 a 12)** da Seção 13 do Plano Mestre estão **concluídas**. A evolução do dashboard (Etapas 0 a 4) também está **concluída** e coberta por `dashboard_evolution.test.ts`. No total há **15 suítes** de teste na API.
 
-### Já entregue no lugar das rotas da Seção 12
+#### Já entregue no lugar das rotas da Seção 12
 
 | Rota do plano | Rota atual | Estado |
 |---|---|---|
@@ -235,7 +392,7 @@ Todas as **14 fases da espinha dorsal (Fase 0, Fase 0.5 e Fases 1 a 12)** da Se�
 | (trilha) | `/auditoria` | Histórico e diagnóstico |
 | (fila unificada) | `/pendencias` | Central operacional |
 
-### Ainda em aberto
+#### Ainda em aberto
 
 1. **Telas da Seção 12 ainda sem página dedicada**: `/imagens`, `/variacoes`, `/webhooks`, `/admin/dlm` e `/admin/aliases`. Parte da informação já aparece dentro da ficha, de `/publicacoes` ou de `/canais`; falta a superfície própria.
 2. **Calibração do IQRE**: limiar heurístico de marca d'água ainda depende de amostra real maior.
@@ -247,7 +404,7 @@ Todas as **14 fases da espinha dorsal (Fase 0, Fase 0.5 e Fases 1 a 12)** da Se�
 
 ---
 
-## 4. O Que Fica de Fora do Escopo (Limites Operacionais)
+### 4. O Que Fica de Fora do Escopo (Limites Operacionais)
 
 Conforme definido nas seções 1, 7, 9.2, 10.6 e 10.8 do Plano Mestre, **não entram neste sistema**:
 
@@ -262,18 +419,18 @@ Conforme definido nas seções 1, 7, 9.2, 10.6 e 10.8 do Plano Mestre, **não en
 
 ---
 
-## 5. Roteiro Prático Passo a Passo para Continuar a Implantação em Ambiente Real
+### 5. Roteiro Prático Passo a Passo para Continuar a Implantação em Ambiente Real
 
 Siga esta sequência exata para colocar o **JH Sync Hub** em operação com o seu catálogo real:
 
-### Passo 1 — Subir o PostgreSQL 16 e o Redis 7 (Docker) — **[CONCLUÍDO / ATIVO]**
+#### Passo 1 — Subir o PostgreSQL 16 e o Redis 7 (Docker) — **[CONCLUÍDO / ATIVO]**
 1. Containers `bling_sync_postgres` (`postgres:16-alpine`, porta `5432`) e `bling_sync_redis` (`redis:7-alpine`, porta `6379`) iniciados e em estado `healthy`:
    ```bash
    docker compose up -d
    docker compose ps
    ```
 
-### Passo 2 — Configurar o Arquivo `.env` e a Chave Criptográfica — **[CONCLUÍDO / ATIVO]**
+#### Passo 2 — Configurar o Arquivo `.env` e a Chave Criptográfica — **[CONCLUÍDO / ATIVO]**
 1. Arquivo `.env` criado a partir de `.env.example` (ignorado pelo Git em `.gitignore`).
 2. Chave criptográfica exclusiva de 32 bytes (64 caracteres hex) gerada via `node:crypto` e configurada em `OAUTH_ENCRYPTION_KEY` para criptografia `AES-256-GCM` de `oauth_tokens`.
 3. Quando tiver as credenciais de produção das contas, preencha no `.env`:
@@ -281,7 +438,7 @@ Siga esta sequência exata para colocar o **JH Sync Hub** em operação com o se
    - `ML_CLIENT_ID`, `ML_CLIENT_SECRET`, `ML_WEBHOOK_SECRET`
    - `NS_CLIENT_ID`, `NS_CLIENT_SECRET`, `NS_WEBHOOK_SECRET`
 
-### Passo 3 — Rodar o Bootstrap do Banco (Migrations 1–13 + 70 Partições + Usuários Iniciais) — **[CONCLUÍDO / ATIVO]**
+#### Passo 3 — Rodar o Bootstrap do Banco (Migrations 1–13 + 70 Partições + Usuários Iniciais) — **[CONCLUÍDO / ATIVO]**
 1. Comando `npm run bootstrap` executado com sucesso no PostgreSQL 16 (`bling_sync_postgres`):
    ```bash
    npm run bootstrap
@@ -292,7 +449,7 @@ Siga esta sequência exata para colocar o **JH Sync Hub** em operação com o se
    - **Fiscal 2**: `fiscal2@blingsync.local` (papel `fiscal_approver` — 2ª revisão obrigatória de NCM com nota de TIPI)
    - **Operador**: `operador@blingsync.local` (papel `operator` — matching, conteúdo e push manual)
 
-### Passo 4 — Iniciar a API (`apps/api`) e o Dashboard (`apps/web`) — **[CONCLUÍDO / ATIVO]**
+#### Passo 4 — Iniciar a API (`apps/api`) e o Dashboard (`apps/web`) — **[CONCLUÍDO / ATIVO]**
 1. API Express iniciada em segundo plano na porta `3001` (`npm run dev:api`).
 2. Healthcheck validado em `http://localhost:3001/health` retornando HTTP `200`:
    ```json
@@ -300,7 +457,7 @@ Siga esta sequência exata para colocar o **JH Sync Hub** em operação com o se
    ```
 3. Dashboard Next.js iniciado em segundo plano na porta `3000` (`npm run dev:web` — `http://localhost:3000` respondendo HTTP `200`).
 
-### Passo 5 — Classificar Depósitos e Lojas do Bling (Autenticado como `admin`) — **[CONCLUÍDO / ATIVO]**
+#### Passo 5 — Classificar Depósitos e Lojas do Bling (Autenticado como `admin`) — **[CONCLUÍDO / ATIVO]**
 1. Token OAuth 2.0 da conta Bling (`JHS`) autenticado, criptografado (`AES-256-GCM`) e salvo em `oauth_tokens`.
 2. Descoberta automática (`POST /admin/bling/discover`) executada em `GET /depositos` e `GET /canais-venda` na API v3 do Bling.
 3. Depósito real e lojas reais classificados via `admin` com trilha gravada em `control_changes`:
@@ -308,7 +465,7 @@ Siga esta sequência exata para colocar o **JH Sync Hub** em operação com o se
    - **Loja Mercado Livre (`channel_stores`)**: `204990471` — **JHS SHOPPING ML** (`platform = 'mercadolivre'`)
    - **Loja Nuvemshop (`channel_stores`)**: `205681549` — **Nuvemshop** (`platform = 'nuvemshop'`)
 
-### Passo 6 — Configurar os Webhooks nas Três Plataformas — **[DOMÍNIO hub.jhshopping.com.br]**
+#### Passo 6 — Configurar os Webhooks nas Três Plataformas — **[DOMÍNIO hub.jhshopping.com.br]**
 O endereço público é `https://hub.jhshopping.com.br`, com registro A em `201.79.39.118`. O Caddy termina o HTTPS e encaminha para a API em `127.0.0.1:3001`. `PUBLIC_BASE_URL` no servidor usa esse domínio.
 
 URLs para os painéis:
@@ -325,7 +482,7 @@ URLs para os painéis:
    - **URL do Webhook**: `https://hub.jhshopping.com.br/webhooks/nuvemshop`
    - **Eventos**: `product/created`, `product/updated` e `product/deleted`.
 
-### Passo 7 — Operação Inicial em `shadow` e Roteiro Seguro de Virada para `live` / `hub` — **[1ª SYNC REAL EXECUTADA 22/10]**
+#### Passo 7 — Operação Inicial em `shadow` e Roteiro Seguro de Virada para `live` / `hub` — **[1ª SYNC REAL EXECUTADA 22/10]**
 0. **Primeira sincronização real executada** (`apps/api/src/scripts/shadow-sync.ts`): 15 produtos do Bling importados com variantes e saldos reais (`stock` somando só depósito `seller` 14886768228), 50 anúncios do ML (seller 184060242) e 50 produtos da Nuvemshop (store 6667412) lidos → 0 auto-vínculos, ~100 sugestões em `matching_queue` (regra de 2 sinais fortes), scores CRE calculados, nenhuma escrita externa. Migration 13 (`empty-sku-handling`) corrigiu SKU vazio do Bling colidindo na constraint UNIQUE.
 1. **Fase Inicial (`shadow` + `bling_native`)**:
    - O sistema nasce com `enrichment_controls.mode = 'shadow'` e `channel_sync_owners.stock_price = 'bling_native'`.
@@ -339,11 +496,11 @@ URLs para os painéis:
 
 ---
 
-## 6. Evolução do Dashboard (docs/bling_sync_hub_evolucao_dashboard.md) — **[CONCLUÍDA em 28/10/2026]**
+### 6. Evolução do Dashboard (docs/bling_sync_hub_evolucao_dashboard.md) — **[CONCLUÍDA em 28/10/2026]**
 
 Etapas 0 a 4 do plano de evolução foram implantadas. O dashboard operacional está no `main` (`e7aac52`).
 
-### Implantado
+#### Implantado
 - **Login real**: tela `/login` com sessão por cookie `HttpOnly` (`/auth/login`, `/auth/me`, `/auth/logout`). O seletor de papel simulado foi removido; o menu e as ações respeitam os papéis reais (Operador, Revisor Fiscal, Administrador).
 - **Endpoints protegidos**: todas as rotas `/api/dashboard/*` exigem sessão (`401` sem login). Simulação restrita a Operador/Administrador; auditoria restrita a Administrador/Revisor Fiscal (`403` para os demais).
 - **8 áreas operacionais** com dados reais do PostgreSQL: Visão Geral, Catálogo e Ficha Única (7 abas), Correspondências, Central de Pendências, Fiscal EAN, Fiscal NCM, Publicações, Qualidade e Margem, Canais e Auditoria. Estados de carregamento, vazio e erro em todas as telas (sem números fictícios).
@@ -353,7 +510,7 @@ Etapas 0 a 4 do plano de evolução foram implantadas. O dashboard operacional e
 - **10 motores (Seção 6)** com estrutura padronizada e **10 indicadores administrativos (Seção 9)** com fórmula, fonte e período, incluindo tempo médio de resolução calculado.
 - **Publicações (`/publicacoes`)**: simulação sem escrita externa e histórico real de `push_jobs`/`push_job_steps`.
 
-### Decisões e limitações registradas
+#### Decisões e limitações registradas
 - **Reprocessamento real desativado** na interface: sem conector com confirmação remota, o motor de publicação marcaria passos como concluídos sem confirmação do canal. Exige autorização explícita antes de habilitar.
 - **Senhas iniciais**: ver seção 7 (P0.2). O próximo login local exige troca em `/conta/senha`.
 - Testes após o P0: 16 suítes / 62 testes aprovados (`dashboard_evolution.test.ts` e `p0-password.test.ts`).
@@ -361,9 +518,9 @@ Etapas 0 a 4 do plano de evolução foram implantadas. O dashboard operacional e
 
 ---
 
-## 7. Evolução v2 — P0 (05/11/2026)
+### 7. Evolução v2 — P0 (05/11/2026)
 
-Fonte: seção 10 de [bling_sync_hub_evolucao_dashboard.md](bling_sync_hub_evolucao_dashboard.md).  
+Fonte: seção 10 de [bling_sync_hub_evolucao_dashboard.md](01-arquitetura.md).  
 Migration aplicada no PostgreSQL local: `1729080000014_must-change-password`.  
 Testes: 16 suítes / 62 testes (`npm test` na raiz). Typecheck da API e do web aprovados.
 
@@ -386,9 +543,9 @@ A importação completa do Bling gravou 9.926 produtos e 9.930 variações. 76 g
 
 ---
 
-## 8. Evolução v2 — P1 (06/11/2026)
+### 8. Evolução v2 — P1 (06/11/2026)
 
-Fonte: seção 10 de [bling_sync_hub_evolucao_dashboard.md](bling_sync_hub_evolucao_dashboard.md).  
+Fonte: seção 10 de [bling_sync_hub_evolucao_dashboard.md](01-arquitetura.md).  
 Migration: `1729080000015_catalog-v2`.  
 Testes: 17 suítes / 69 testes (`npm test` na raiz), incluindo `p1-catalog.test.ts`. Typecheck da API e do web aprovados.
 
@@ -412,15 +569,15 @@ A completude não tem cache. Cada leitura de home e catálogo recalcula o checkl
 
 Conferência em 06/11/2026: `p1-catalog.test.ts` passou (8 testes), cobrindo home, lista de 1.000 SKUs, arquivar, checklist, categorias, mapa verde e materialização. A ficha segue no código com as abas da seção 6.3.
 
-## 9. Evolução v2 — P2 (06/11/2026)
+### 9. Evolução v2 — P2 (06/11/2026)
 
 P2.1 em andamento. No Catálogo, o operador marca produtos, vê o JSON de cada um em `POST /api/catalog/:id/simulate` e manda o lote para `POST /api/catalog/publish/batch`. Esse lote entra na `publish_queue` mesmo com checklist incompleto; produto sem SKU continua de fora. A rota antiga `POST /api/catalog/products/send-list` segue exigindo checklist verde. A aba Lista de Envio atualiza a cada 2 s e mostra Aguardando, Processando, Concluído ou Falhou. `GET /api/problems` reúne falha da `publish_queue`, webhook com status `failed` e pendência de completude, com SKU, canal e mensagem em português. A tela Problemas filtra por estoque, preço, anúncio e cadastro; Corrigir abre a ficha no modal. Completude agrupa as pendências e cada grupo abre o catálogo com `pendencia`. `GET /api/matching/search` consulta o Mercado Livre pelo conector, sem criar anúncio. `POST /api/matching/link` grava `channel_listing_links` com status Vinculado e não entra na `publish_queue`. O botão + Produto consulta `GET /api/catalog/check-exists` e bloqueia SKU ou EAN que já existem. `GET /api/catalog/export` baixa o catálogo em xlsx. `POST /api/catalog/import` atualiza imagem, descrição e categoria e ignora preço e estoque. A loja `/admin/integracoes` é só do administrador: `GET /api/admin/integrations` agrupa o catálogo e a saúde das credenciais, e `POST /api/admin/integrations/:slug/request` registra o pedido de um app em breve. O operador recebe 403. Com `ENABLE_LIVE_PUBLISHING` diferente de `true`, o worker grava `simulado com sucesso` e não chama o marketplace. Se a escrita ao vivo estiver ligada e o checklist do canal não estiver verde, o worker marca falha e também não chama `createListing`. As credenciais OAuth de cada aplicativo ficam em `channel_app_credentials`; a autorização do Bling e do Mercado Livre lê client id, segredo e callback dessa tabela. A auditoria do que está pronto e do que o P2.1 ainda não cumpre está na seção 10.
 
-## 10. Auditoria de arquitetura — 06/11/2026
+### 10. Auditoria de arquitetura — 06/11/2026
 
 Fonte: leitura do código em `apps/api`, `apps/web`, migrations 1–20 e testes, na manhã de 06/11. O deploy da noite está na seção 11.
 
-### Resumo executivo
+#### Resumo executivo
 
 P0 e P1 estão no código e cobertos por testes de catálogo, webhook, OAuth e fila. O P2 está implementado em partes, mas o critério do P2.1 não está fechado: a tela manda o lote para uma rota que não exige checklist verde. Publicação ao vivo continua desligada. O servidor público ainda não recebeu este código. Go-live de escrita nos marketplaces não está autorizado pelo código atual.
 
@@ -437,7 +594,7 @@ P0 e P1 estão no código e cobertos por testes de catálogo, webhook, OAuth e f
 | P2.7 Planilhas | Parcial | Export xlsx e import com erro por linha. Não há histórico de importações |
 | Admin loja | Pronto na API | `/admin/integracoes` e `requireRole('admin')`. O middleware do Next só vê o cookie se ele vier no host do front |
 
-### Status do P2.1
+#### Status do P2.1
 
 Escopo: selecionar, ver o checklist do canal, simular, e só então publicar quem está verde.
 
@@ -446,7 +603,7 @@ Escopo: selecionar, ver o checklist do canal, simular, e só então publicar que
 - Fila: `POST /api/catalog/products/send-list` recusa checklist incompleto e devolve `skipped`. O botão “Adicionar à Lista de Envio” chama `POST /api/catalog/publish/batch`, que só recusa produto sem SKU. O worker só aplica o checklist quando `ENABLE_LIVE_PUBLISHING` é exatamente `true`. Com a flag desligada, a fila suja e o item termina como sucesso simulado.
 - Simular: `POST /api/catalog/:id/simulate` monta o JSON do conector (título, categoria, preço, estoque, atributos materializados). Atributos completos só entram quando o mapa do canal está verde. O modal avisa `missingAttributes`. Há uma segunda rota igual, `simulate-publish`.
 
-### Pontos críticos
+#### Pontos críticos
 
 Segurança. Credenciais e tokens usam AES-256-GCM. O GET de credenciais não devolve o segredo. Rotas de admin, sync completo e loja exigem papel `admin`. Escrita de catálogo exige operador ou admin. A proteção da URL `/admin/integracoes` no Next só redireciona se o cookie `bling_hub_sid` chegar no host do front; o cookie hoje nasce na API. A página e a API ainda recusam o operador. `OAUTH_ENCRYPTION_KEY` não tem mais valor padrão no código: sem 64 caracteres hex a API não inicia. A chave que já criptografou os tokens do servidor precisa continuar no `.env`; trocá-la impede ler esses tokens. O middleware de `/admin` exige o cookie `bling_hub_sid` e consulta `/auth/me` antes de renderizar a página. No navegador local o front fala com a API pelo mesmo host, para o cookie nascer onde o middleware lê. `listCatalog` pagina com `LIMIT`/`OFFSET` e só monta o checklist da página. A senha padrão do bootstrap não abre sessão quando `NODE_ENV` é `production`.
 
@@ -454,7 +611,7 @@ Arquitetura. `ErpConnector` e `MarketplaceConnector` estão na fábrica. Shopee,
 
 Dívida. Duas rotas de simulação. Duas telas de integrações (`/integracoes` e `/admin/integracoes`). A planilha não grava nome, descrição nem categoria. O botão + Produto chama `ErpConnector.createProduct` e só grava o `bling_id` devolvido pelo Bling. `phase5.test.ts` (imagens) já falhava antes deste P2 e não foi refeito.
 
-### Correção do P2.1
+#### Correção do P2.1
 
 - `apps/web/src/components/catalog-screen.tsx`: o botão e o lote “envio” devem chamar `POST /api/catalog/products/send-list`. Mostrar `skipped` com o motivo. Na Lista de Envio, exibir o checklist que faltou, não só “simulado com sucesso”.
 - `apps/api/src/routes/catalog.ts`: `POST /api/catalog/publish/batch` deve usar a mesma regra da `send-list`, ou deixar de existir. Uma rota de simulação basta.
@@ -465,7 +622,7 @@ Correção aplicada em 06/11/2026. `send-list` e `publish/batch` usam a mesma va
 
 Na mesma noite a Lista de Envio deixou o banner verde com o texto corrido. Produto rejeitado no clique permanece no Catálogo e abre um aviso no canto: nome, SKU, pendências em lista e **Corrigir Cadastro**. A fila vazia explica o próximo passo. Um item que falhou na aba aparece em cartão de alerta, com nome e SKU, sem o identificador interno do Bling, e com **Corrigir Pendências**.
 
-### Próximos passos
+#### Próximos passos
 
 1. Reautorizar o Mercado Livre com a chave de criptografia que já está no servidor.
 2. A planilha não grava nome, descrição nem categoria. O + Produto cria o item na API do Bling e salva o ID oficial; se o Bling recusar, o HUB não grava e mostra o motivo.
@@ -473,7 +630,7 @@ Na mesma noite a Lista de Envio deixou o banner verde com o texto corrido. Produ
 4. Continuar a sync do Bling a partir da página que parou depois dos cerca de 10.000 itens.
 5. Validar a interface com quem opera estoque (seção 12 do plano de evolução).
 
-## 11. Estado no ar — 06/11/2026, noite
+### 11. Estado no ar — 06/11/2026, noite
 
 O HUB público é `https://hub.jhshopping.com.br`, na Droplet `201.79.39.118`. Node 20, PostgreSQL, Redis, Caddy e os serviços `bling-hub-api` e `bling-hub-web` estão ativos. O Caddy entrega o painel na raiz e encaminha `/api`, `/auth`, `/oauth`, `/webhooks` e `/health` para a API.
 
@@ -493,11 +650,11 @@ A última suíte da API conferida nesta data foi de 25 arquivos e 89 testes, ant
 
 ---
 
-## 12. Arquitetura iPaaS — 10/11/2026
+### 12. Arquitetura iPaaS — 10/11/2026
 
 O diagrama de fluxo trata o HUB como a camada do meio: sistemas internos (ERP e apps) entram, o catálogo é normalizado, e os canais de venda recebem o que está pronto. As setas do diagrama são de ida e volta. O código implementa a ida ERP → HUB → canal para preço, estoque e fiscal, e usa o canal só para enriquecer e validar. Pedido, NF-e e escrita de estoque vinda do marketplace não entram.
 
-### O que o diagrama pede e o que o código faz
+#### O que o diagrama pede e o que o código faz
 
 | Ponto | Veredito | Evidência |
 |---|---|---|
@@ -506,7 +663,7 @@ O diagrama de fluxo trata o HUB como a camada do meio: sistemas internos (ERP e 
 | Orquestração | **Parcialmente alinhado** | A fila `publish_queue` e o worker BullMQ em `apps/api/src/queues/publish-queue.ts` publicam em simulação enquanto `ENABLE_LIVE_PUBLISHING` não é `true`. Falhas de fila, webhook e lacuna de cadastro aparecem em `/problemas` (`problem-panel.ts`). Convive com a fila antiga `push_jobs` do motor APE. Não há um único tratador de erro para todo o fluxo. |
 | Conector novo sem mexer no núcleo | **Alinhado na fábrica de canal** | `MarketplaceConnector` está em `connectors/strategy/types.ts`. A fábrica instancia Mercado Livre, Nuvemshop e Shopee. Amazon e TikTok Shop seguem `UnavailableMarketplaceConnector`. A Shopee lê atributos e monta `add_item` sem o catálogo importar o conector. |
 
-### Módulos no painel
+#### Módulos no painel
 
 | Módulo | Rota | Papel no fluxo |
 |---|---|---|
@@ -520,7 +677,7 @@ O diagrama de fluxo trata o HUB como a camada do meio: sistemas internos (ERP e 
 | Fiscal | `/fiscal`, `/fiscal/ean`, `/fiscal/ncm` | Fila humana de EAN e dupla confirmação de NCM. |
 | Governança | `/configuracoes` | Papéis por permissão, convite, chaves e auditoria de configuração. |
 
-### Fases
+#### Fases
 
 | Fase | Estado em 10/11/2026 | Pendência que ainda importa |
 |---|---|---|
@@ -529,48 +686,48 @@ O diagrama de fluxo trata o HUB como a camada do meio: sistemas internos (ERP e 
 | P2 | No ar, em sombra | Publicação ao vivo desligada. Com `AUTO_PUBLISH_ENABLED=true`, completude 100% entra sozinha na `publish_queue`. |
 | P3 | No ar | ERP isolado, contrato do segundo ERP, Atributos lê a fábrica, série de completude e depósitos do anúncio. Amazon e o deploy por pipeline ficam fora desta etapa. |
 
-### Sincronização de volta
+#### Sincronização de volta
 
-O HUB **não** aceita estoque nem preço do marketplace como fonte. A leitura do anúncio existe e gera alerta. A regra está em [arquitetura-reversa.md](arquitetura-reversa.md). Pedido e NF continuam fora. Estoque Full do Mercado Livre é só leitura. A escrita ao vivo continua desligada até as condições daquele documento.
+O HUB **não** aceita estoque nem preço do marketplace como fonte. A leitura do anúncio existe e gera alerta. A regra está em [arquitetura-reversa.md](01-arquitetura.md#14-soberania-e-leitura-reversa). Pedido e NF continuam fora. Estoque Full do Mercado Livre é só leitura. A escrita ao vivo continua desligada até as condições daquele documento.
 
-### Depois da P3
+#### Depois da P3
 
 1. Conector Amazon na mesma fábrica, no padrão da Shopee.
 2. Pipeline de deploy que rode teste, build e `deploy/update-hub.sh`, sem apagar o `.env`.
 
 ---
 
-## 13. Operação em 11/11/2026
+### 13. Operação em 11/11/2026
 
 O painel público continua `https://hub.jhshopping.com.br`. A suíte da API sobe com as migrations até a 029. O Postgres de produção aplica o que ainda não está em `pgmigrations`. O CI em `.github/workflows/ci.yml` roda `npm ci`, `npm run build` e `npm run test` em push e pull request para `main`.
 
-### Leitura do ERP
+#### Leitura do ERP
 
 `POST /api/admin/sync-full` só enfileira um job na `erp-sync-queue` e responde 202. O worker lê 50 produtos por página, espera 450 ms entre chamadas e grava a página em `sync_status`. Se o processo cair, a mesma página recomeça e a anterior não é recontada. `GET /api/admin/sync-status` alimenta o card Saúde da fila de sync. Enquanto `status` é `processing`, o botão fica desabilitado e a home mostra o progresso.
 
-### Publicação automática
+#### Publicação automática
 
 `recalculateCompleteness` mede o canal ativo. Com `AUTO_PUBLISH_ENABLED` exatamente `true` e completude 100%, grava um item `pending` na `publish_queue`. A flag ausente não enfileira. `ENABLE_LIVE_PUBLISHING` continua decidindo se o worker chama o marketplace ou só simula.
 
-### Duplicidade
+#### Duplicidade
 
 `duplicate-detector.service.ts` roda a cada 6 horas e ao fim de um Full Sync. Usa a fábrica, não importa `connectors/bling`. EAN repetido entre produtos ativos vira `duplicate_alerts`. Anúncio ativo com o mesmo SKU ou EAN também. O índice único de `erp_sku` não vazio impede dois cadastros ativos com o mesmo SKU. A home tem o card Duplicidades detectadas. Em Problemas, o filtro Duplicidades oferece vincular o anúncio ou arquivar o produto do ERP.
 
-### Reconciliação do canal
+#### Reconciliação do canal
 
 `reconciliation.service.ts` roda no mesmo relógio. `fetchListings` lê o anúncio por SKU ou EAN. O retrato fica em `marketplace_listings_snapshot`. Preço ou estoque diferente, e canal com imagem enquanto o HUB tem zero, aparecem em Problemas no filtro Divergências de Canal. O vínculo por SKU ou EAN é automático. A ficha, aba Canais, mostra o retrato. Importar Imagem do Canal grava a URL em `product_images` e não altera o Bling.
 
-### Conectores
+#### Conectores
 
 Nuvemshop é o canal ativo. Mercado Livre permanece no código e inativo no produto. Shopee está implementada na fábrica (Open Platform v2) e ainda não tem checklist de publicação. Amazon e TikTok Shop seguem em breve.
 
 ---
 
-## 14. Proteções Pré-Go-Live, Retomada da Sync e Reconciliação em Lote — 12/11/2026
+### 14. Proteções Pré-Go-Live, Retomada da Sync e Reconciliação em Lote — 12/11/2026
 
-Produção atualizada em `https://hub.jhshopping.com.br` (commit `30e088f`, **33 migrations** aplicadas, `bling-hub-api`, `bling-hub-web` e `caddy` ativos). Detalhamento completo de cada ponto em [auditoria-go-live.md](auditoria-go-live.md).
+Produção atualizada em `https://hub.jhshopping.com.br` (commit `30e088f`, **33 migrations** aplicadas, `bling-hub-api`, `bling-hub-web` e `caddy` ativos). Detalhamento completo de cada ponto em [auditoria-go-live.md](auditorias/auditoria-go-live.md).
 
-### O que entrou em produção entre 11/11 e 12/11 (`adbfce8` → `30e088f`)
+#### O que entrou em produção entre 11/11 e 12/11 (`adbfce8` → `30e088f`)
 
 1. **Proteções P0, P1 e P2 da Auditoria de Go-Live:**
    - **Estoque dividido (`stock` vs `catalog_stock`):** somente depósitos `role = 'seller'` com `include_in_push = true` compõem o estoque de envio; sem depósito de venda o checklist bloqueia publicação.
@@ -589,7 +746,7 @@ Produção atualizada em `https://hub.jhshopping.com.br` (commit `30e088f`, **33
    - Na Visão Geral (`/`), o card **Canais Ativos** agora separa visualmente o status da conexão (**`Nuvemshop · Conectado`**, **`Mercado Livre · Pausado`**) da contagem de anúncios vinculados.
    - Todas as chamadas HTTP ao Bling (sync, enriquecimento, reconciliação e OAuth) foram unificadas no agendador atômico `bling:rate_limit` no Redis (`360 ms` de espaçamento mínimo, `~2,7 req/s` medidos em produção, zero erros `429`), respeitando `Retry-After` e backoff exponencial com jitter (`attempts = 5` no `enrichment-worker`).
 
-### Estado verificado no banco de produção (12/11/2026)
+#### Estado verificado no banco de produção (12/11/2026)
 
 - **Depósitos (`stock_warehouses`):** classificados em produção (zero `unclassified`: `14886768228` Geral com saldo virtual `11.624` e `14888973769` com saldo `0`).
 - **Isolamento arquitetural (`architecture.test.ts`):** concluído (`50/50` suítes e `176/176` testes aprovados). Nenhum módulo fora de `connectors/bling` importa dessa pasta.
@@ -600,13 +757,13 @@ Produção atualizada em `https://hub.jhshopping.com.br` (commit `30e088f`, **33
 
 ---
 
-## 15. Pós-Auditoria e Go-Live — 13/11/2026
+### 15. Pós-Auditoria e Go-Live — 13/11/2026
 
-> Numeração: a seção 14 já registra o estado de 12/11. Este bloco é o fechamento da auditoria delta de 13/11 ([auditoria-delta-go-live-2026-11-13.md](auditoria-delta-go-live-2026-11-13.md)) e da revisão 3 da [auditoria-go-live.md](auditoria-go-live.md).
+> Numeração: a seção 14 já registra o estado de 12/11. Este bloco é o fechamento da auditoria delta de 13/11 ([auditoria-delta-go-live-2026-11-13.md](auditorias/auditoria-delta-go-live-2026-11-13.md)) e da revisão 3 da [auditoria-go-live.md](auditorias/auditoria-go-live.md).
 
 Código em `main` (`82ba787` → `75f7365`). O deploy na Droplet segue o checklist da revisão 3 da auditoria. `ENABLE_LIVE_PUBLISHING` continua `false` até o piloto.
 
-### Correções P0 da auditoria delta
+#### Correções P0 da auditoria delta
 
 | ID | Problema | Correção |
 |---|---|---|
@@ -615,19 +772,19 @@ Código em `main` (`82ba787` → `75f7365`). O deploy na Droplet segue o checkli
 | **P0-D3** | Dois jobs ou dois workers podiam criar dois anúncios para o mesmo produto. | Migration **0035** (`publish-queue-open-unique`): índice único parcial `publish_queue (product_id, channel) WHERE status IN ('pending','processing')`. O worker reivindica com `UPDATE ... WHERE id = $1 AND status = 'pending' RETURNING` (lock otimista, sem transação aberta durante o HTTP). `createPublishJobs` e `enqueueAutoPublish` usam `ON CONFLICT DO NOTHING`. |
 | **P0-D4** | O escritor da Nuvemshop não enviava imagem, categoria, atributos nem todas as variações. | `buildNuvemshopDraft` monta o draft com até 3 eixos reais (`product_axes`/`variant_attributes`), uma entrada por variante ativa, marca em `brand`, categoria numérica obrigatória e imagens com a capa primeiro (URL pública `/api/media/:sha256`). `nuvemshop-publish.ts` valida o payload antes da rede, procura o SKU na loja (timeout de 5 s) e reconcilia imagens por `src`. |
 
-### Sanitizador de HTML
+#### Sanitizador de HTML
 
 `connectors/nuvemshop/nuvemshop-html.ts` (`sanitize-html`): texto puro vira `<p>`/`<br />` com escape; HTML de origem só é reconhecido por tag conhecida e passa direto pelo sanitizador (sem escape duplo). Remove `script`, `style`, `img`, atributos de evento e esquemas fora de `http`, `https` e `mailto` (`javascript:` sai do `href`). Links recebem `rel="noopener noreferrer"`.
 
-### Cobertura de testes
+#### Cobertura de testes
 
 `npm test`: **55 suítes / 222 testes aprovados**; `npm run typecheck` limpo na API e no painel. Suítes novas ou ampliadas: `nuvemshop-html`, `nuvemshop-product-body`, `nuvemshop-draft`, `nuvemshop-listing`, `publish-queue-concurrency`, `publish-queue`, `full-sync` e `image-worker`.
 
-### Dívidas aceitas para o Go-Live (P1)
+#### Dívidas aceitas para o Go-Live (P1)
 
 - N+1 na busca de existência por SKU antes do `POST` (até 1 chamada por variante). A busca em lote fica para o P1.
 - Sem `PUT` para atualizar anúncio já publicado na Nuvemshop.
 - Reconciliação de imagem por `src` não casa se a Nuvemshop reescrever a URL para o CDN dela.
 - **Rotação da `OAUTH_ENCRYPTION_KEY` (15/11):** a produção estava com a chave fraca padrão `012345…`. O script `apps/api/src/scripts/rotate-oauth-key.ts` (`npm run rotate:oauth-key`) regravou os 5 registros (`oauth_tokens` e `channel_app_credentials`) numa transação, conferindo cada valor com a chave nova antes do `COMMIT`. Chave antiga removida do `.env`, API reiniciada, leitura real no Bling e na Nuvemshop com 200.
 - ~~Núcleo acoplado à Nuvemshop~~ **resolvido em 15/11:** código da Nuvemshop isolado em `connectors/nuvemshop/` (draft, HTML, HTTP, leitura, publicação e classe do conector). `publish-queue.ts` e `reconciliation.service.ts` usam só `MarketplaceConnector`; `architecture.test.ts` cobre Bling, Nuvemshop e Shopee.
-- Lista completa e riscos novos na revisão 3 da [auditoria-go-live.md](auditoria-go-live.md).
+- Lista completa e riscos novos na revisão 3 da [auditoria-go-live.md](auditorias/auditoria-go-live.md).

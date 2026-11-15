@@ -1,6 +1,227 @@
-# Plano Mestre — JH Sync Hub
+# 01 — Arquitetura e Regras
 
-Leitura em 11/11/2026: este arquivo continua sendo a spec dos motores e da soberania. O código de hoje nomeia a identidade do catálogo como `erp_id` e `erp_sku`. O ERP instalado segue o Bling, isolado em `connectors/bling`. A volta do marketplace, a sync em fila e as flags de publicação estão em [arquitetura-reversa.md](arquitetura-reversa.md) e na seção 13 de [status-implantacao.md](status-implantacao.md). Onde este plano ainda diz `bling_sku`, leia o campo atual `erp_sku`.
+**Documento canônico de arquitetura do JH Sync Hub.**  
+Atualizado em 15/11/2026, commit `c88539c`, produção em `https://hub.jhshopping.com.br` com 35 migrations aplicadas.
+
+Este arquivo tem três partes:
+
+1. **Parte I — Arquitetura viva.** Como o sistema está hoje, incluindo o isolamento hexagonal dos conectores. É a parte que muda com o código.
+2. **Parte II — Referência normativa.** O Plano Mestre integral (motores, schema, fluxos, contratos de API). Muda pouco e serve de consulta.
+3. **Parte III — Arquitetura de navegação e telas.** O desenho de UX que guiou o painel v2.
+
+Documentos irmãos: [02-status-e-roadmap.md](02-status-e-roadmap.md) (estado e próximos passos), [auditorias/](auditorias/) (registros históricos) e [historico/](historico/) (planos executados).
+
+---
+
+## Parte I — Arquitetura viva
+
+### 1.1 Visão e escopo
+
+O HUB é um iPaaS de catálogo entre um **ERP soberano** (hoje o Bling) e os **canais de venda** (Nuvemshop ativo; Mercado Livre e Shopee implementados na fábrica). Ele normaliza produto, variante, categoria e atributo, valida o checklist e só então publica.
+
+Entra no escopo: identidade de produto e variante, EAN e NCM, qualidade de conteúdo e imagem, score de prontidão por canal, push de catálogo, idempotência de webhook, retenção e arquivo fiscal.
+
+Fica fora: pedidos, financeiro, NF-e, frete e expedição. `catalog-mode.ts` recusa eventos `order.*` e `orderNF.*`; a integração nativa do canal com o Bling continua sendo quem trata pedido.
+
+### 1.2 Arquitetura hexagonal (estado final)
+
+O núcleo não conhece nenhum fornecedor. Cada integração vive na própria pasta e implementa um contrato neutro.
+
+```text
+apps/api/src/
+  connectors/
+    strategy/        contratos e peças compartilhadas
+      types.ts       ErpConnector, MarketplaceConnector, ChannelPublishError
+      factory.ts     registro e criação dos conectores
+      catalog-mode.ts
+      listing-signals.ts
+      ml-listing-search.ts
+      marketplaces.ts   (Mercado Livre, stub de escrita)
+      inbound.ts
+    bling/           ERP atual (register.ts, ape.ts, rate-limiter.ts, ...)
+    nuvemshop/       nuvemshop-{html,http,listing,publish,draft}.ts, connector.ts
+    shopee/          Open Platform v2
+  catalog/           catálogo, completude, checklist, publish-preview
+  queues/            publish, erp-sync, enrichment, image, dead-letters, backoff
+  engines/           PIRE, VIR, GVE, NVE, CQS, IQRE, CRE, APE, WIG, DLM
+  orchestrator/      pipeline, erp-port, push-port
+  services/          reconciliação e detector de duplicidade
+```
+
+**Contratos** (`connectors/strategy/types.ts`):
+
+| Contrato | Quem implementa | Papel |
+|---|---|---|
+| `ErpConnector` | `connectors/bling` | Leitura do cadastro, preço, estoque, catálogo paginado, enriquecimento e criação mínima |
+| `MarketplaceConnector` | `bling`? não — `nuvemshop`, `mercadolivre`, `shopee` | Leitura de anúncio, criação, estoque, webhook |
+| `ChannelPublishError` + `isRetryablePublishError` | erros de escrita dos canais | O núcleo decide retry (429 e 5xx) sem citar o canal |
+
+Dois métodos opcionais completam o contrato de marketplace e mantêm a fila e a reconciliação agnósticas:
+
+- `buildListingDraft(productId)` — o canal monta o próprio draft na hora do envio. A Nuvemshop usa; sem ele, a fila cai no preview genérico (Mercado Livre).
+- `createBatchReader()` — o canal carrega o catálogo inteiro de uma vez para a reconciliação. A Nuvemshop usa páginas de 200 produtos; sem ele, a reconciliação lê anúncio por anúncio.
+
+**Regra garantida por teste** (`__tests__/architecture.test.ts`):
+
+- Nenhum arquivo fora de `connectors/<fornecedor>/` importa aquela pasta, exceto a allowlist explícita: `strategy/factory.ts` para todos, e `connectors/connectors.ts`, `routes/oauth.ts`, `routes/app-credentials.ts` para a Nuvemshop (dívida conhecida).
+- `catalog/`, `queues/`, `engines/`, `orchestrator/` e `services/` não importam nenhum fornecedor, sem exceção.
+- `connectors/strategy/` não guarda código da Nuvemshop.
+
+Para adicionar um canal: crie `connectors/<slug>/connector.ts` implementando `MarketplaceConnector`, registre em `strategy/factory.ts` e adicione o slug ao teste de arquitetura. Para adicionar um ERP: implemente `ErpConnector` e registre com `registerErpConnector(slug, factory)`, apontando `ACTIVE_ERP`.
+
+### 1.3 Fluxo de dados
+
+1. **Ingestão.** `erp-sync-queue` percorre o catálogo ativo do Bling (`tipo=P&criterio=2`) em páginas de 50 itens, com `lockDuration` de 5 min e retomada de `lastCompletedPage + 1` no boot. Webhooks assinados (HMAC-SHA256 em tempo constante) entram em `webhook_events` antes do HTTP 200; o WIG descarta duplicata, eco e evento atrasado além da tolerância de 1 s.
+2. **Enriquecimento.** Worker assíncrono busca imagens (enfileiradas no IQRE) e NCM (para aprovação fiscal em duas etapas) por produto, em transação, e recalcula a completude.
+3. **Reconciliação.** Lê o catálogo dos canais conectados, compara preço, estoque e imagens e grava o retrato em `marketplace_listings_snapshot`. O vínculo nasce `vinculado` com dois sinais concordantes e `sugerido` com um só.
+4. **Publicação.** BullMQ (`publish_queue`). O worker reivindica o job com `UPDATE … WHERE status = 'pending' RETURNING` (lock otimista), reconstrói o draft no instante do envio, faz o `POST` no canal e grava o `listing_id` na mesma transação. Um job aberto por produto e canal (índice único parcial da migration 0035). Falhas esgotadas viram `dead_letters`.
+
+### 1.4 Soberania e leitura reversa
+
+O HUB lê o anúncio do canal para alinhar vínculos, diagnosticar divergências e enriquecer mídia/conteúdo por canal. Preço, estoque e fiscal continuam soberanos no ERP: o HUB nunca grava esses campos de volta no Bling.
+
+#### Estoque e preço
+
+O ERP é soberano absoluto.
+
+Se o marketplace divergir — por exemplo, vendeu no canal e o saldo no Bling ainda não baixou, ou há promoção ativa apenas na loja — o HUB não sobrescreve o ERP. A reconciliação faz upsert do retrato em `marketplace_listings_snapshot` (preservando o retrato anterior se a API do canal responder `401`, `429` ou `5xx`) e exibe o alerta em **Problemas** (filtro *Divergências de Canal*). O ajuste comercial ou de saldo é feito pelo operador no Bling.
+
+`MarketplaceConnector.updateStock` permanece recusando escrita direta de estoque (`estoque_na_integracao_nativa`).
+
+#### Dados fiscais
+
+NCM, EAN e SKU nascem no ERP.
+
+- Se um canal trouxer EAN válido ausente no ERP, o motor **GVE** registra sugestão em `ean_pending_validation` para revisão humana em `/fiscal/ean`.
+- NCM obtido no enriquecimento entra como `pending_approval` e exige dupla confirmação por dois revisores fiscais distintos com nota TIPI em `/fiscal/ncm`.
+- O HUB não sobrescreve NCM, EAN nem SKU diretamente no Bling a partir de anúncios externos.
+
+#### Enriquecimento
+
+Imagens e conteúdo de canal entram na camada do HUB sem adulterar o cadastro mestre do Bling:
+
+- Imagens importadas de anúncios entram em `product_images` / `image_processing_queue` (passando pelo **IQRE** antes de elegibilidade de capa).
+- Títulos e descrições específicos de canal ficam em `channel_content_overrides`, mantendo nome e descrição originais do ERP intactos.
+
+#### Duplicidade e reconciliação de vínculos
+
+O detector de duplicidade (`duplicate-detector.service.ts`) sinaliza SKU ou EAN repetido entre produtos ativos e anúncios já existentes.
+
+Na reconciliação (`reconciliation.service.ts`):
+
+- Na **Nuvemshop**, o HUB descobre/valida automaticamente o `store_id` da loja conectada e percorre os anúncios em páginas de 200 itens (`createNuvemshopBatchReader`, exposto por `connector.createBatchReader`).
+- **Regra de dois sinais (`collectListingSignals`):** o vínculo só nasce **`vinculado`** automaticamente quando há pelo menos **dois sinais concordantes** (ex.: `SKU + EAN` ou `SKU + título compatível`). Quando apenas **um sinal** coincide, o HUB grava **`sugerido`** e envia o par para confirmação humana em **`/vinculos`** (`matching_queue`), evitando falsos positivos em kits ou EAN compartilhado.
+- Produto já vinculado nunca entra como criação de novo anúncio na fila de publicação.
+
+#### Quando ligar a publicação ao vivo
+
+`ENABLE_LIVE_PUBLISHING` só envia chamadas reais ao marketplace quando seu valor é exatamente `true`. Qualquer outro valor mantém a fila em simulação. Mesmo com `ENABLE_LIVE_PUBLISHING=true`, apenas os SKUs presentes em **`LIVE_PUBLISH_ALLOWLIST`** são publicados no piloto (lista vazia bloqueia todos os envios), e o **botão de pânico** em `/configuracoes/geral` interrompe imediatamente a fila.
+
+Condições obrigatórias para iniciar o piloto ao vivo, todas ao mesmo tempo:
+
+1. Depósitos reais do Bling conferidos em `/canais/depositos` (somente depósitos próprios de venda com `role = 'seller'` e `include_in_push = true`).
+2. Checklist do canal 100% verde para os SKUs incluídos na `LIVE_PUBLISH_ALLOWLIST`.
+3. Token do canal ativo válido e renovável (Nuvemshop usa token permanente validado na loja `6667412`).
+4. Volta de preço e estoque operando exclusivamente como alerta, sem escrita no ERP.
+5. Simulação (Dry-Run) conferida sem falhas abertas em `/problemas` e pessoa com permissão `push:execute` acompanhando as primeiras 48 horas.
+
+### 1.5 Contrato de um segundo ERP
+
+O HUB fala com o ERP pela interface `ErpConnector` em `apps/api/src/connectors/strategy/types.ts`. O conector ativo é selecionado por `ACTIVE_ERP` (`activeErpConnector()` em `apps/api/src/connectors/strategy/factory.ts`), tendo `bling` como padrão. Outro ERP (ex.: Omie, Tiny, SAP) entra como nova classe registrada na fábrica com `registerErpConnector(slug, factory)`.
+
+> **Estado do isolamento (15/11/2026):** `activeErpConnector()`, o snapshot comercial neutro `ErpCommerceSnapshot` (`readCommerce`), as portas de taxa (`rate-limit-port.ts`) e os erros de domínio (`strategy/types.ts`) estão ativos e validados por `architecture.test.ts` (0 imports diretos de `connectors/bling/*` fora da pasta do conector). Desde 15/11 o teste também protege `connectors/nuvemshop` e `connectors/shopee` e proíbe qualquer fornecedor no núcleo.
+
+#### Campos soberanos
+
+| Campo | Onde o HUB guarda |
+|---|---|
+| Identidade do cadastro | `master_products.erp_id` |
+| SKU | `master_products.erp_sku` e `product_variants.erp_sku` |
+| Preço de cadastro | `product_variants.price` |
+| Estoque publicável (`seller`) | `product_variants.stock` (exibição geral em `catalog_stock`) |
+| NCM | `master_products.ncm` |
+| EAN | `product_variants.ean` |
+
+Nome e descrição do ERP também não são substituídos por texto de canal (`channel_content_overrides` guarda textos por marketplace). Imagem importada de anúncio fica em `product_images` e não altera o ERP.
+
+#### Métodos da interface `ErpConnector`
+
+| Método | Obrigatório | O que entrega |
+|---|---|---|
+| `syncProduct(productId)` | Sim | Confirma se o cadastro existe e devolve `externalId`, `sku` e `name` |
+| `getStock(productId)` | Sim | Quantidade elegível do vendedor no espelho/ERP, ou ausência de leitura |
+| `getPrice(productId)` | Sim | Preço de cadastro, ou ausência de leitura |
+| `listCatalogPage(page, pageSize)` | Sim | Página de IDs externos ativos (`externalIds`, `childIds`, `done`, `total`) |
+| `pullCatalogProduct(externalId)` | Sim | Payload bruto do cadastro por ID externo, ou `null` em `404` |
+| `fetchProductEnrichmentData(erpId)` | Sim | `{ images, ncm, category }` extraídos do cadastro no ERP para o worker de enriquecimento |
+| `createProduct(productData)` | Sim | Cria apenas o cadastro mínimo no ERP (sem lançar saldo em estoque) e devolve `{ erp_id, stockWarning }` |
+| `readCommerce(externalId)` | Opcional | `ErpCommerceSnapshot` neutro (`sku`, `changedAt`, `lines[]` com preço por variante e `balances[]`) |
+| `pullStockBalances(externalIds)` | Opcional | Saldos por depósito para um lote de IDs externos |
+| `listChildIds(parentId)` | Opcional | IDs das variações filhas de um produto-grade |
+| `recordUrl(erpId)` | Opcional | Deep link para abrir o cadastro diretamente na interface do ERP |
+
+### 1.6 Motores
+
+| Motor | Função |
+|---|---|
+| PIRE | Vínculo do produto pai por predicado, não por soma de pontos |
+| VIR | Vínculo de variante por SKU, EAN ou comboKey |
+| GVE | EAN/GTIN com dígito verificador GS1 |
+| NVE | NCM de 8 dígitos, sugestão só com dupla confirmação |
+| CQS | Nota de qualidade e decisão KEEP, REPLACE ou SUGGEST |
+| IQRE | Dedup, direitos e ordem das imagens |
+| CRE | Três scores: Bling, Mercado Livre e Nuvemshop |
+| APE | Push atômico em três tipos: estoque/preço, conteúdo e criação |
+| WIG | HMAC, gravação, fila e só então HTTP 200 |
+| DLM | TTL, partição e arquivo |
+
+### 1.7 Propriedade dos dados
+
+| Grupo | Soberania | Regra |
+|---|---|---|
+| **A (comercial e fiscal)** | Bling | Preço, estoque, custo, SKU, NCM, CEST. Nunca sobrescritos por dado de marketplace. |
+| **A.5 (EAN e NCM sugeridos)** | Bling + revisão fiscal | EAN externo passa pelo GVE e exige aprovação humana; NCM pendente exige dupla confirmação com nota TIPI. |
+| **B (conteúdo)** | Bling mestre / HUB por canal | Nome e descrição do Bling nunca são sobrescritos; textos por canal ficam em `channel_content_overrides`. |
+| **C (mídia)** | HUB (IQRE) | Imagem passa por resolução, dedup (aHash) e direitos antes de virar capa. |
+| **Estoque** | Bling (`seller`) | `product_variants.stock` soma só depósitos `role = 'seller'` com `include_in_push = true`; `catalog_stock` é visual. Estoque Full (`meli_facility`) nunca é somado nem escrito. |
+
+### 1.8 Regras que não voltam atrás
+
+- Grupo A não é escrito por canal nem por enriquecimento.
+- NCM não é auto-preenchido. Sugestão exige dois aprovadores e nota de TIPI. Não existe NCM de variante. Códigos diferentes entre variantes do mesmo produto marcam `conflict` no pai, não viram sugestão e não escolhem um vencedor. O nome do Bling não tem coluna paralela.
+- EAN externo válido não auto-preenche. EAN válido repetido entre variantes do mesmo produto marca `duplicate`, bloqueia CONTENT/CREATE dessas variantes e não sai do Bling. EAN igual em produtos diferentes não é sinal e cai em quarentena.
+- Auto-match exige dois sinais fortes no mesmo candidato e nenhum conflito. EAN sozinho não vale 95. No User Product, `family_confidence` é o score de a `family_id` apontar para um só `master_product`. Conflito entre itens da família vai para quarentena e não parte a família. Confirmação manual vale 100. Legado deixa a coluna nula.
+- Escrita de conteúdo no Bling nasce em shadow, com kill switch por plataforma, teto por execução e reversão pelo `quality_history`. Nome do Bling não recebe título de canal.
+- HTTP 200 de webhook só sai depois do HMAC válido e do INSERT.
+- A cota do Bling é uma só por conta. Nenhum cron soma outro limite de 3 req/s.
+- O push lê o Bling na execução e chama um endpoint por passo. Não reenvia o produto inteiro nem repete passo já concluído.
+- Estoque e pausa de anúncio publicado não esperam NCM, EAN nem preço. Com a integração nativa ligada, quem atualiza estoque e preço de anúncio já publicado é o Bling, não o HUB.
+- `product_variants.stock` é a soma do saldo virtual dos depósitos `seller` com `include_in_push`. Nasce nula. Zero só existe depois da leitura. Depósito `ml_full` não entra.
+- Estoque Full (`meli_facility`) é do Mercado Livre. O HUB não grava, não soma e não subtrai essa quantidade.
+- Preço de cadastro é `product_variants.price` e `promotional_price`. Preço de loja é `variant_channel_prices.store_price` e `store_promotional_price`. Sem linha de preço de loja, o envio espera a leitura. Preço acima de zero e abaixo do custo gera alerta crítico e não segura estoque nem pausa.
+- Produto inativado, excluído ou apagado não é apagado no HUB nem no canal. O cadastro local permanece.
+- Imagem é entidade. Dedup não cruza produto.
+- Tabelas `*_archive` não recebem UPDATE nem DELETE.
+- Credencial OAuth vive em `oauth_tokens` (AES-256-GCM), não no Redis. `raw_payload` de webhook expira. Depósito, loja, dono do estoque e modo live só mudam com admin, e a trilha guarda quem, quando, valor anterior e valor novo.
+
+### 1.9 Publicação na Nuvemshop (contrato do escritor)
+
+- Até **3 eixos** de variação. `attributes` recebe os **nomes** dos eixos; `variants[].values` segue a mesma ordem. Uma entrada por variante ativa, sem descartar SKU.
+- Marca vai em `brand`, nunca em `attributes`. Categoria precisa ser ID numérico positivo.
+- Descrição sai em HTML sanitizado (`connectors/nuvemshop/nuvemshop-html.ts`): texto puro vira `<p>`/`<br />` escapado; `script`, `style`, `img`, atributos de evento e esquemas fora de `http`, `https` e `mailto` são removidos; links ganham `rel="noopener noreferrer"`.
+- Imagens vêm do cache público `/api/media/:sha256`, com a capa na posição 1. O reenvio compara `src` e só envia o que falta.
+- Antes do `POST`, o escritor procura o SKU na loja (timeout de 5 s por SKU). Se achar, devolve `ja_existia` e não cria duplicata.
+- `400` encerra o job; `429` e `5xx` voltam para a fila com backoff exponencial e jitter.
+
+---
+
+## Parte II — Referência normativa (Plano Mestre)
+
+> Esta é a especificação original, mantida integralmente como referência. Onde ela diz `bling_sku`, leia o campo atual `erp_sku`. O ERP instalado é o Bling, isolado em `connectors/bling`; a Nuvemshop, em `connectors/nuvemshop`.
+
+## Plano Mestre — JH Sync Hub
+
+Leitura em 11/11/2026: este arquivo continua sendo a spec dos motores e da soberania. O código de hoje nomeia a identidade do catálogo como `erp_id` e `erp_sku`. O ERP instalado segue o Bling, isolado em `connectors/bling`. A volta do marketplace, a sync em fila e as flags de publicação estão em [arquitetura-reversa.md](01-arquitetura.md#14-soberania-e-leitura-reversa) e na seção 13 de [status-implantacao.md](02-status-e-roadmap.md). Onde este plano ainda diz `bling_sku`, leia o campo atual `erp_sku`.
 
 Versão de desenvolvimento. Substitui o briefing `PLANO MESTRE REVISADO`.
 As regras que se contradiziam naquele texto estão unificadas aqui.
@@ -11,7 +232,7 @@ O Bling é a fonte soberana de preço, do estoque do vendedor e do dado fiscal. 
 Os canais enriquecem conteúdo e mídia quando o Bling está vazio ou com qualidade baixa.
 Enquanto a integração nativa do Bling com o Mercado Livre e a Nuvemshop estiver ligada, ela é quem atualiza estoque e preço de anúncio já publicado. O hub não disputa essa escrita. Na criação confirmada de um anúncio que ainda não existe, o hub envia preço e estoque uma vez, porque a API do canal exige, e não volta a gravá-los.
 
-## 1. Escopo
+### 1. Escopo
 
 Entra:
 
@@ -29,7 +250,7 @@ Entra:
 
 Fica de fora: pedidos, financeiro, emissão de NF-e, frete e serviço (`tipo` diferente de `P`). A nota permanece no Bling.
 
-## 2. Premissas
+### 2. Premissas
 
 - Uma conta Bling, um seller Mercado Livre, uma loja Nuvemshop.
 - Moeda BRL.
@@ -39,7 +260,7 @@ Fica de fora: pedidos, financeiro, emissão de NF-e, frete e serviço (`tipo` di
 - A defasagem aceita de estoque é a do job P1, inferior a 2 minutos, e só vale enquanto o push de estoque não estiver bloqueado. Não vale para o saldo em `meli_facility`, que o hub não escreve.
 - A cota do Bling é da conta, não de cada job: 3 req/s, 120.000 chamadas por dia e um limiter só. O full enrich usa o saldo do dia e retoma pelo cursor.
 
-## 3. Princípios
+### 3. Princípios
 
 1. Dado fiscal e financeiro do Bling não é sobrescrito por canal.
 2. Campo preenchido com lixo vale menos que campo vazio. Todo valor passa por avaliação de qualidade.
@@ -50,7 +271,7 @@ Fica de fora: pedidos, financeiro, emissão de NF-e, frete e serviço (`tipo` di
 7. Toda operação registra origem, instante, responsável e resultado.
 8. Histórico de NCM e EAN não é apagado. O arquivo do hub guarda esses registros por 5 anos. A NF-e continua no Bling.
 
-## 4. Arquitetura
+### 4. Arquitetura
 
 ```
 Entrada
@@ -80,7 +301,7 @@ Dados
 Escrita do hub no Bling grava `hub_writes` com `origin = hub`.
 Webhook que só repete essa escrita é ignorado (`reason = echo`) e não abre push.
 
-## 5. Stack
+### 5. Stack
 
 | Camada | Escolha |
 |---|---|
@@ -103,7 +324,7 @@ Token OAuth fica em `oauth_tokens`, criptografado. Redis guarda cache e lock de 
 
 Log é estruturado. Métricas mínimas: profundidade da fila, idade do webhook mais antigo e latência de push. Job `failed` tem replay pelo id e não reprocessa chave de idempotência já concluída.
 
-## 6. Papéis
+### 6. Papéis
 
 | Papel | Pode |
 |---|---|
@@ -117,7 +338,7 @@ O login confere `password_hash` (Argon2id) e abre uma linha em `sessions`. O coo
 
 Operador e aprovador fiscal não alteram depósito, loja do canal, dono do estoque, modo de enriquecimento nem `follow_store_price`. Essas chamadas respondem 403. A mudança e a linha em `control_changes` acontecem na mesma transação. Sem a linha, a mudança não grava.
 
-## 7. Propriedade dos dados
+### 7. Propriedade dos dados
 
 | Grupo | Dono | Regra |
 |---|---|---|
@@ -129,7 +350,7 @@ Operador e aprovador fiscal não alteram depósito, loja do canal, dono do estoq
 
 Categoria de canal não é o campo `category` do produto. Ela vive em `product_category_mappings`.
 
-### Matriz de fonte (Grupo B)
+#### Matriz de fonte (Grupo B)
 
 A primeira fonte válida pelo CQS vence. Fonte grade F ou score menor que 15 é pulada.
 
@@ -142,7 +363,7 @@ A primeira fonte válida pelo CQS vence. Fonte grade F ou score menor que 15 é 
 | Peso e dimensões | Só com as três medidas preenchidas e concordância dentro de 5%. Senão, SUGGEST |
 | Categoria interna | Bling permanece. Path de canal não sobrescreve |
 
-### Decisão de enriquecimento
+#### Decisão de enriquecimento
 
 A primeira regra que casar vence. Grades: F 0–20, D 21–40, C 41–60, B 61–80, A 81–100.
 
@@ -165,7 +386,7 @@ Avaliadores:
 - Dimensões: as três medidas ou nenhuma. Penaliza zeradas e 1×1×1.
 - Categoria interna: penaliza "geral" e "outros".
 
-## 8. Motores
+### 8. Motores
 
 | Motor | Responsabilidade |
 |---|---|
@@ -180,7 +401,7 @@ Avaliadores:
 | WIG | Webhook |
 | DLM | Retenção, partição e arquivo |
 
-### 8.1 PIRE
+#### 8.1 PIRE
 
 Sinais fortes e independentes: SKU normalizado com um único candidato em `product_variants.bling_sku`, EAN com GVE válido e um único dono, nome com Jaro-Winkler de pelo menos 0,90 no mesmo candidato. Preço (±10%) e peso (±15%) não contam como um desses dois. EAN de anúncio compara com a variante. GTIN compartilhado não é sinal.
 
@@ -210,7 +431,7 @@ Item novo com `family_id` já vinculada entra no pai existente. Sinal forte para
 
 CREATE só com vínculo confirmado por uma pessoa, para lacuna `missing_ml` ou `missing_ns`. Vale com a integração nativa dona do estoque e do preço. O preço e o estoque iniciais vão nessa criação. Enquanto `stock_price = bling_native`, isso não abre atualização contínua. Enriquecimento, ainda em shadow, só com vínculo confirmado ou com auto-vínculo de score pelo menos 95 e dois sinais fortes. Abaixo disso não há REPLACE nem override.
 
-### 8.2 VIR
+#### 8.2 VIR
 
 Roda depois do pai resolvido. Auto-vínculo da variante:
 
@@ -243,7 +464,7 @@ Lacunas em `variant_matrix_analysis`:
 | `missing_ml` / `missing_ns` | existe no Bling e falta no canal; candidato a CREATE |
 | `extra_ml` / `extra_ns` | existe no canal sem Bling; alerta crítico (venda sem lastro de estoque e de nota) |
 
-### 8.3 GVE
+#### 8.3 GVE
 
 Validação estrutural: 8, 12, 13 ou 14 dígitos, dígito GS1 (pesos 3/1 da direita, módulo 10), rejeição de placeholder e de sequência. Validação contextual: prefixo GS1 Brasil 789/790, ISBN/ISSN, faixa interna 200–299.
 
@@ -259,7 +480,7 @@ A comparação usa só os dígitos. EAN vazio não conta. Variante `discontinued
 
 STOCK_PRICE de anúncio já publicado não espera essa fila.
 
-### 8.4 NVE
+#### 8.4 NVE
 
 NCM do Mercado Livre não entra no enriquecimento automático. Formato exibido: `0000.00.00` (8 dígitos). A limpeza remove ponto, espaço e hífen. Capítulo válido: 01–97. Placeholder (`00000000`, `99999999`, `12345678`) é inválido.
 
@@ -275,7 +496,7 @@ NCM não é alterado por processo automático. Cada decisão gera linha imutáve
 
 O conflito compara o NCM de cada variante não descontinuada na mesma passagem: o código que veio no payload da variação no Bling e o atributo de NCM do anúncio vinculado no Mercado Livre. A limpeza é a desta seção. Placeholder e código inválido não entram na conta. Dois códigos válidos diferentes no mesmo pai são o conflito. Código vazio não conta. O mesmo código em todas as variantes não é conflito. O alerta é um por produto, em `ncm_divergence_alerts`. Essa linha é avaliada antes da sugestão. Quando o NVE seguinte não encontra dois códigos válidos diferentes, `conflict` sai. `ncm_fiscal_risk` permanece se o NCM do pai for inválido.
 
-### 8.5 CQS
+#### 8.5 CQS
 
 Aplica a decisão da seção 7 a marca, peso e dimensões. Nome e descrição do Bling ficam de fora. Título e descrição de canal vão para `channel_content_overrides`. Grupo A não é escrito.
 
@@ -285,7 +506,7 @@ O modo padrão é `shadow`. A decisão e o valor proposto ficam em `quality_hist
 
 Em `live`, o REPLACE chama `applyToBling`, grava `hub_writes` e marca `quality_history.applied = true`. Reverter um campo lê o `old_value` dessa linha, grava de volta no Bling e abre outra linha em `quality_history` com `source = revert`. Linha de shadow não é revertida, porque não chegou a ser escrita.
 
-### 8.6 IQRE
+#### 8.6 IQRE
 
 Imagem é linha em `product_images`, não JSON no produto. O enriquecimento não processa as imagens na mesma chamada. Ele grava uma linha em `image_processing_queue` por URL e segue. Um worker BullMQ consome a fila, uma imagem por vez, com `FOR UPDATE SKIP LOCKED`, pela ordem de `available_at` no índice parcial da seção 9.5.
 
@@ -310,7 +531,7 @@ Limites iniciais, editáveis em `platform_image_limits`:
 | Nuvemshop | 50 | 200×200 | Alt text recomendado |
 | Bling | 10 | 100×100 | Até 10 imagens |
 
-### 8.7 CRE
+#### 8.7 CRE
 
 Três scores de 0 a 100 por variante. O KPI do produto é o menor score entre os canais da pior variante.
 
@@ -324,7 +545,7 @@ O score não bloqueia STOCK_PRICE. Bloqueia CONTENT abaixo do threshold e CREATE
 
 Cada cálculo guarda bloqueios e as três melhorias de maior ganho. Histórico vai para `channel_readiness_history`.
 
-### 8.8 APE
+#### 8.8 APE
 
 Tipos de job:
 
@@ -381,7 +602,7 @@ Preço abaixo do custo não entra nessa tabela. `cost_price` nulo não compara. 
 
 Não devolver um campo à plataforma que o originou se o valor já é igual.
 
-### 8.9 WIG
+#### 8.9 WIG
 
 Ordem do controller:
 
@@ -403,7 +624,7 @@ O worker, depois do 200:
 
 Os passos acima são o worker de `source = bling`. Mercado Livre e Nuvemshop entram pela mesma ordem do controller, com o segredo de assinatura de cada um, e seguem o fluxo 10.5. Esse worker não lê o evento como mudança do Bling e não abre push a partir do payload do canal.
 
-### 8.10 DLM
+#### 8.10 DLM
 
 | Alvo | Retenção | Método |
 |---|---|---|
@@ -433,7 +654,7 @@ Horários em America/Sao_Paulo, via BullMQ:
 - arquivo, domingo, 04:00
 - saúde, dia 1, 09:00
 
-## 9. Schema
+### 9. Schema
 
 Timestamps são `timestamptz`. PK de tabela particionada é `(created_at, id)`. Produto simples usa a variante default, então `variant_id` operacional é `NOT NULL`.
 
@@ -447,7 +668,7 @@ master_products
 
 `product_axes` é a grade declarada do pai. `variant_attributes` é o valor daquela variante em cada eixo. Não há array de UUID no produto.
 
-### 9.1 Identidade e acesso
+#### 9.1 Identidade e acesso
 
 ```sql
 CREATE TABLE users (
@@ -552,7 +773,7 @@ A renovação trava a linha com `SELECT … FOR UPDATE`. Se a resposta trouxer o
 
 A tabela não recebe UPDATE nem DELETE. O DLM não a limpa. Depósito novo vindo da API, ainda `unclassified`, não gera linha. A classificação feita pelo admin gera. O seed inicial grava `old_value` nulo. Cada gravação de `follow_store_price`, inclusive o INSERT da condição, gera uma linha nesta tabela na mesma transação. `old_value` nulo marca o nascimento. Valor igual ao anterior não gera outra linha. Sem a linha, `follow_store_price` não muda.
 
-### 9.2 Produto e variante
+#### 9.2 Produto e variante
 
 ```sql
 CREATE TABLE master_products (
@@ -669,7 +890,7 @@ CREATE TABLE variant_channel_prices (
 
 `product_variants.price`, `promotional_price` e `use_promotional` são o preço de cadastro. `variant_channel_prices` é só o vínculo da loja: `store_price` e `store_promotional_price`. Não há coluna de cadastro nessa tabela, e o `GET /produtos/lojas` não copia `product_variants.price` para ela. A escolha entre os dois está na seção 10.7.
 
-### 9.3 Atributos e vínculos
+#### 9.3 Atributos e vínculos
 
 ```sql
 CREATE TABLE attribute_axes (
@@ -783,7 +1004,7 @@ No legado, `platform_links.platform_product_id` é o item e `platform_variant_id
 
 No legado há um preço por variação, e esse preço segue a loja. No User Product, várias condições de venda da mesma variante não recebem o mesmo preço só por existirem. `follow_store_price` verdadeiro é quem recebe o preço da seção 10.7. `follow_set_by` nulo deixa o sistema marcar verdadeiro quando a variante tem uma condição só. A segunda condição nasce falsa. Essa marcação do sync grava `control_changes` com `origin = system`. Admin que grava `follow_set_by` fixa a escolha, grava `origin = admin` na mesma transação, e o sync seguinte não a troca. `follow_set_by` é o último admin que fixou. O histórico das trocas é `control_changes`.
 
-### 9.4 Filas fiscais e de matching
+#### 9.4 Filas fiscais e de matching
 
 ```sql
 CREATE TABLE platform_items (
@@ -866,7 +1087,7 @@ Título e descrição de canal não têm coluna em `master_products`. As duas pl
 
 `variant_matrix_analysis` guarda o `comboKey` e a presença em Bling, Mercado Livre e Nuvemshop, com status `ok`, `missing_ml`, `missing_ns`, `extra_ml`, `extra_ns` ou `discontinued`.
 
-### 9.5 Imagens, push e webhook
+#### 9.5 Imagens, push e webhook
 
 `product_images` permanece a entidade de imagem (url, average hash, sha256, dimensões, direitos, score, elegibilidade e posição por canal). Não há coluna `images` em `master_products`.
 
@@ -939,7 +1160,7 @@ CREATE TABLE push_job_steps (
 
 `channel_readiness_scores` é única por `variant_id`.
 
-### 9.6 Partições
+#### 9.6 Partições
 
 Particionadas por mês: `identity_resolution_logs`, `quality_history`, `push_execution_logs`, `sync_logs`, `channel_readiness_history`.
 
@@ -962,7 +1183,7 @@ CREATE TABLE sync_logs (
 
 As outras partições usam a mesma forma de chave. A migration inicial cria 14 partições, de 12 meses atrás até 2 meses à frente.
 
-### 9.7 Migrations
+#### 9.7 Migrations
 
 1. `users`, `user_roles`, `sessions`, `oauth_tokens`, `stock_warehouses`, `channel_stores`, `control_changes`, `sync_cursors`, `hub_writes`
 2. `master_products`, `product_variants`, componentes, saldos por depósito, preços por loja, eixos, aliases e atributos
@@ -977,9 +1198,9 @@ As outras partições usam a mesma forma de chave. A migration inicial cria 14 p
 11. índices
 12. partições iniciais e seeds (eixos, aliases, limites de imagem, políticas de retenção, depósitos com `role` e `include_in_push` explícitos, `channel_stores` das duas lojas)
 
-## 10. Fluxos
+### 10. Fluxos
 
-### 10.0 Cota do Bling
+#### 10.0 Cota do Bling
 
 Todas as chamadas da conta passam por um limiter no Redis. Full enrich, delta, stock sync, price check, leitura do push e refresh do token disputam a mesma cota. Réplica extra não ganha outro balde.
 
@@ -1002,7 +1223,7 @@ Repartição das 120.000, por dia:
 
 Na mesma segundo, a ordem de quem consome o balde é: token, leitura de estoque e de webhook P1, price check, delta, full. O full não corre ao lado do delta quando a reserva do dia já foi embora. Nenhum desses jobs trata 3 req/s como cota própria.
 
-### 10.1 Enriquecimento
+#### 10.1 Enriquecimento
 
 Full diário e delta a cada 30 minutos, ambos retomáveis pelo cursor, dentro da cota da seção 10.0. Limites oficiais de Mercado Livre e Nuvemshop têm limiter próprio e não entram na conta do Bling.
 
@@ -1017,7 +1238,7 @@ Para cada produto com `catalog_status = 'active'`:
 7. SUGGEST vira `enrichment_suggestions`.
 8. Mudança real no Bling, que não seja eco, abre agregação de push.
 
-### 10.2 Push
+#### 10.2 Push
 
 Webhook do Bling ou delta chama o WIG, detecta campos e agrega. O flush abre um job por tipo. O worker lê o Bling na hora, escolhe o builder da operação e registra a tentativa. Webhook de Mercado Livre ou Nuvemshop não entra neste fluxo.
 
@@ -1027,11 +1248,11 @@ Recursos assinados no Bling: `product` (`created`, `updated`, `deleted`), `stock
 
 Check de preço a cada 30 minutos compara cada anúncio com o preço da seção 10.7. Condição com `follow_store_price` entra no passo `price` só se `stock_price = hub`. Condição sem a marca não entra nesse passo: preço diferente vira alerta. O valor do canal não grava no Bling. A leitura de saldo reusa o snapshot do stock sync quando ele tem menos de 15 minutos. O preço de loja vem de `GET /produtos/lojas` da `channel_stores` daquele canal.
 
-### 10.3 Variantes
+#### 10.3 Variantes
 
 PIRE no pai, upsert das variantes do Bling, GVE por EAN, `comboKey`, VIR nos canais, lacunas na matriz. No Mercado Livre o VIR lê `variations` só no item legado e `user_product_id` na família. Preço e estoque saem sempre pela variante, inclusive na default do produto simples e na do kit. Produto com variações não é enviado como produto simples. Pai `formato` V não é anúncio: quem vende é a variação. Serviço (`tipo` diferente de `P`) fica `ignored`, motivo `service`, e não cria linha. Se um produto P passar a serviço, o cadastro local vai a `inactive` e sai do enrich e do push.
 
-### 10.4 Inativado ou removido no Bling
+#### 10.4 Inativado ou removido no Bling
 
 Inativar e apagar não apagam a linha local. NCM, EAN, vínculos, composição e `match_rejections` ficam. O DLM não remove `master_products`.
 
@@ -1061,7 +1282,7 @@ Variante removida e pai ainda ativo: só essa variante fica `discontinued`. O pa
 
 Produto `inactive` ou `deleted` não entra em enriquecimento, IQRE, CREATE nem CONTENT.
 
-### 10.5 Webhook de Mercado Livre e Nuvemshop
+#### 10.5 Webhook de Mercado Livre e Nuvemshop
 
 O diagrama de entrada recebe os três. O fluxo 10.2 trata só o Bling. Evento com `source` `mercadolivre` ou `nuvemshop` passa pelo controller do WIG e pelo worker desta seção.
 
@@ -1077,7 +1298,7 @@ A notificação do Mercado Livre é um aviso fino (tópico e recurso). O worker 
 
 Estoque e pausa disparados daqui seguem a regra do APE e o dono em `channel_sync_owners`: não consultam NCM, EAN nem preço, e não saem enquanto o dono for `bling_native`. Conteúdo disparado daqui respeita `enrichment_controls`. Sem vínculo confirmado, o evento só atualiza `platform_items` e não empurra o Bling.
 
-### 10.6 Convivência com a integração nativa
+#### 10.6 Convivência com a integração nativa
 
 O Bling já pode sincronizar estoque e preço com o Mercado Livre e com a Nuvemshop. Dois escritores no mesmo anúncio se atropelam. O dono é configurável e nasce assim:
 
@@ -1099,7 +1320,7 @@ CREATE TABLE channel_sync_owners (
 
 O hub continua lendo estoque e preço no Bling para o cadastro local e para o alerta de divergência. Não os devolve a anúncio já publicado enquanto `stock_price = bling_native`. A criação confirmada envia esses valores uma vez porque a API do canal exige, e não abre job de atualização. Passar um canal para `hub` é manual e só depois de desligar, no Bling, a sincronização nativa de estoque e preço desse canal. Desligar a sincronização nativa de estoque e preço não desliga a entrada de pedidos no Bling: sem o pedido, o saldo que o hub lê deixa de se mover. Os dois modos não ficam ligados juntos. Conteúdo nativo do Bling para o canal fica desligado enquanto `content = hub`, para o título do anúncio não ser reescrito pelos dois.
 
-### 10.7 Kit, depósito e preço da loja
+#### 10.7 Kit, depósito e preço da loja
 
 O anúncio é o SKU vendável. Kit (`formato` E) não vira vários anúncios dos componentes, e a grade (`formato` V) não vira anúncio do pai.
 
@@ -1128,7 +1349,7 @@ Preço zero ou negativo no número escolhido bloqueia o passo `price` das condi�
 
 `channel_stores` guarda o `bling_loja_id` do Mercado Livre e o da Nuvemshop.
 
-### 10.8 Estoque Full do Mercado Livre
+#### 10.8 Estoque Full do Mercado Livre
 
 O saldo Full mora no depósito do Mercado Livre, local `meli_facility`. A API não aceita escrita nesse local. Entrada de peça no Full é inbound pelo painel do Mercado Livre, fora deste hub. A conta é MLB: a escrita de `selling_address` documentada para Argentina e Chile não se aplica.
 
@@ -1148,7 +1369,7 @@ Preço, título, descrição e imagem do anúncio Full seguem as regras já defi
 
 Notificação de estoque num anúncio Full atualiza o espelho e pode alertar. Não grava esse número no Bling e não abre passo `stock` para o local Full. CREATE pelo hub não nasce anúncio Full.
 
-## 11. Contratos de API
+### 11. Contratos de API
 
 Antes dos motores, gravar fixtures sanitizados de cada plataforma:
 
@@ -1174,7 +1395,7 @@ Antes dos motores, gravar fixtures sanitizados de cada plataforma:
 
 O mapper fecha contra esses arquivos. Endpoint e shape de SKU vêm do fixture, não de memória.
 
-## 12. Dashboard
+### 12. Dashboard
 
 A primeira entrega é matching e fiscal. O restante acompanha o motor correspondente.
 
@@ -1195,7 +1416,7 @@ A primeira entrega é matching e fiscal. O restante acompanha o motor correspond
 | `/admin/dlm` | volume, partição e jobs |
 | `/admin/aliases` | aliases e valores não mapeados |
 
-## 13. Ordem de construção
+### 13. Ordem de construção
 
 31–46 dias úteis cobrem a espinha de backend. As telas não cabem nesse intervalo. Cada fase fecha no teste nomeado.
 
@@ -1216,7 +1437,7 @@ A primeira entrega é matching e fiscal. O restante acompanha o motor correspond
 | 11 | Matching e fiscal no dashboard | Dois usuários confirmam o mesmo NCM |
 | 12 | Ensaio com recorte real do catálogo | Lag de estoque medido |
 
-## 14. Regras que não voltam atrás
+### 14. Regras que não voltam atrás
 
 - Grupo A não é escrito por canal nem por enriquecimento.
 - NCM não é auto-preenchido. Sugestão exige dois aprovadores e nota de TIPI. Não existe NCM de variante. Códigos diferentes entre variantes do mesmo produto marcam `conflict` no pai, não viram sugestão e não escolhem um vencedor. O nome do Bling não tem coluna paralela.
@@ -1234,3 +1455,252 @@ A primeira entrega é matching e fiscal. O restante acompanha o motor correspond
 - Imagem é entidade. Dedup não cruza produto.
 - Tabelas `*_archive` não recebem UPDATE nem DELETE.
 - Nome de operador vive em `users`. Credencial OAuth vive em `oauth_tokens`, não no Redis. `raw_payload` de webhook expira. Depósito, loja, dono do estoque e modo live só mudam com admin, e a trilha guarda quem, quando, valor anterior e valor novo. `follow_store_price` entra na mesma trilha: admin com o usuário da sessão, sync com `origin = system`. O nascimento da condição também gera linha. Sem essa linha, o booleano não muda.
+
+---
+
+## Parte III — Arquitetura de navegação e telas
+
+> Absorvido de `bling_sync_hub_evolucao_dashboard.md` (seções 4 a 7 e 9). O restante daquele documento era plano de execução e foi concluído; o resultado está em [02-status-e-roadmap.md](02-status-e-roadmap.md).
+
+### 4. Arquitetura de navegação (abas distintas)
+
+Menu lateral sugerido — ordem do fluxo mental do operador:
+
+| Aba | Job | O que o operador faz |
+|---|---|---|
+| **Início** | Decidir o que fazer agora | Lê hero cards e vai ao filtro certo |
+| **Catálogo** | Gerenciar o produto | Busca, edita, variações, imagens, status de completude |
+| **Completude** | Corrigir cadastro | Fila unificada do que falta (EAN, NCM, imagem, atributo, vínculo) |
+| **Atributos** | Regularizar por canal | Mapeia categoria HUB ↔ categoria canal; fixo / dinâmico / manual |
+| **Publicações** | Anunciar / sincronizar | Cria anúncio, vê status por canal, simula, publica |
+| **Vínculos** | Ligar o que já existe | Match de anúncios já no ML/NS sem duplicar |
+| **Canais** | Contas e donos | OAuth, depósitos, `bling_native`/`hub`, shadow/live |
+| **Problemas** | Consertar sync | Falhas de estoque, preço, anúncio, com mensagem do canal |
+| **Auditoria** | Rastrear | Quem mudou o quê (admin / fiscal) |
+
+Rotas atuais a remapear (sem jogar código fora):
+
+| Hoje | Vira |
+|---|---|
+| `/` | Início (hero cards de catálogo) |
+| `/catalogo`, `/catalogo/[id]` | Catálogo + ficha (abas internas: Geral, Variações, Imagens, Canais, Fiscal) |
+| `/pendencias`, `/fiscal/*`, `/qualidade-margem` | Completude (filtros por tipo) |
+| *(novo)* | Atributos |
+| `/publicacoes` | Publicações |
+| `/matching` | Vínculos |
+| `/canais` | Canais |
+| *(novo ou derivado de publicações)* | Problemas |
+| `/auditoria` | Auditoria |
+
+---
+
+### 5. Home — Dashboard com hero cards
+
+A primeira tela não é um painel de motores. É um **dashboard de catálogo**.
+
+#### 5.1 Hero cards (obrigatórios)
+
+| Card | Mostra | Clique leva a |
+|---|---|---|
+| **Produtos no catálogo** | Total de SKUs ativos | `/catalogo` |
+| **Prontos para publicar** | Completude OK em todos os canais ativos | `/catalogo?status=ready` |
+| **Incompletos** | Falta dado obrigatório | `/completude` |
+| **Sem vínculo** | Anúncio no canal sem produto HUB / vice-versa | `/vinculos` |
+| **Problemas de sync** | Falhas abertas de estoque/preço/anúncio | `/problemas` |
+| **Publicações hoje** | Enviadas / falhas / na fila | `/publicacoes` |
+
+#### 5.2 Faixa secundária
+
+- Estado dos canais (conectado / token / nativa vs hub) — sem jargão OAuth.
+- Última sync bem-sucedida vs última com erro.
+- “Turbine seu catálogo” (inspirado Moovin): % de completude + top 3 lacunas clicáveis.
+
+#### 5.3 O que some da home
+
+- Cards cujo único rótulo é a sigla de um motor.
+- Números sem próximo passo.
+- Alertas sem SKU afetado.
+
+---
+
+### 6. Catálogo — onde o produto mora
+
+#### 6.1 Modelo mental
+
+```
+ERP (Bling)  ──espelho soberano──►  Catálogo HUB  ──projeção──►  Anúncio ML / NS
+     ▲                                    │
+     │                                    ├── variações
+     │                                    ├── imagens
+     │                                    ├── completude
+     └──── nunca duplicar SKU ────────────┴── vínculos
+```
+
+- **Um SKU vendável** = uma variante no HUB (alinhado ao plano-mestre).
+- Produto simples, grade e kit aparecem com tipo claro (como no Plugg).
+- Arquivar ≠ apagar (recomendação Plugg).
+
+#### 6.2 Lista do catálogo — layout de referência
+
+A captura enviada (lista de produtos do Plugg.to) é o padrão a seguir na tela `Catálogo`. Ela resolve o problema central: o operador vê o produto, o SKU, o estoque e onde ele está publicado numa linha só.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Catálogo                                                        [+ Produto] │
+├──────────────┬──────────────────────────────────────────────────────────────┤
+│ FILTROS      │ [Lista de produtos] [Lista de envio] [Importações] [Exportações]│
+│ SKU…         │ ┌Todos 1.234┐┌Publicados 5┐┌Completude 87┐┌Rejeitados 1┐┌Arquivados 0┐│
+│ Nome…        │ ☐ │Imagem│Nome│Tipo│SKU│Estoque│Preço│Promo│Canais│Completude│Ações│
+│ Ver mais ▾   │ ☐ │ [img]│…   │Simples│…│ 20 │650,00│600,00│ ML NS│ ● 82% │✎ ⧉ 📍 🗂 │
+│ [Filtrar]    │   │Variações ▾                                                │
+│ [Limpar]     │                                                               │
+│              │                                                               │
+│ AÇÕES EM LOTE│                                                               │
+│ Status… ▾    │                                                               │
+│ [Executar]   │                                                               │
+│              │                                                               │
+│ IMPORTAÇÃO   │                                                               │
+│ Importar… ▾  │                                                               │
+└──────────────┴──────────────────────────────────────────────────────────────┘
+```
+
+**Barra lateral esquerda**
+
+| Bloco | Conteúdo |
+|---|---|
+| Filtros | SKU, nome, “Ver mais” (marca, categoria, canal, estoque zerado, sem EAN, sem imagem, sem categoria mapeada); botões Filtrar e Limpar |
+| Ações e relatórios | Seleção de ação em lote sobre as linhas marcadas + Executar (arquivar, enviar para lista de envio, recalcular completude, exportar seleção) |
+| Ações de importação | Reimportar do ERP, importar planilha de enriquecimento (só campos não soberanos) |
+
+**Botões do topo** (sub-visões da mesma aba, não abas novas do menu)
+
+| Botão | Mostra |
+|---|---|
+| Lista de produtos | O catálogo (padrão) |
+| Lista de envio | Produtos selecionados para publicar, com o checklist de cada canal |
+| Importações | Histórico de importações do ERP e de planilhas, com erros por linha |
+| Exportações | Exportações geradas, para baixar |
+
+**Abas de estado com contador**
+
+| Aba | Critério |
+|---|---|
+| Todos | `catalog_status = active` |
+| Publicados | Ao menos um canal com anúncio vinculado e ativo (no Plugg é “Places”; aqui o nome é Publicados, porque “Places” lá significa centro de distribuição) |
+| Completude | Produtos com algum item do checklist da seção 6.4 pendente |
+| Rejeitados | Anúncio recusado pelo canal ou passo de publicação `failed` |
+| Arquivados | Arquivados pelo operador; não somem do ERP |
+
+**Colunas da tabela**
+
+| Coluna | Regra |
+|---|---|
+| ☐ | Seleção para ação em lote |
+| Imagem | Capa elegível. Abaixo, “Variações ▾” expande as variantes em sub-linhas (SKU, eixos, estoque, preço) |
+| Nome | Nome do ERP. Título de canal não substitui |
+| Tipo | Simples, Com variações, Kit — em português, não `S`/`V`/`E` |
+| SKU | SKU vendável. Vazio aparece em destaque vermelho com “Sem SKU — não sincroniza” |
+| Estoque | `floor` do estoque publicado; “—” quando ainda não lido (coluna nula) |
+| Preço / Promo | Preço de cadastro do ERP; promocional só quando maior que zero |
+| Canais | Logo de cada canal. Colorido = publicado e vinculado. Cinza = vinculado sem publicar ou aguardando. Vermelho = rejeitado. Ausente = não está no canal |
+| Completude | Semáforo + %; tooltip lista o que falta em português |
+| Ações | Editar (abre a ficha), Duplicar como rascunho de variação, Depósitos (onde o estoque sai), Arquivar. **Excluir não aparece para operador**; arquivar é a ação padrão |
+
+**Ajustes em relação à captura**
+
+- Remover “Excluir” da linha. Produto no HUB é espelho do ERP; apagar aqui não pode apagar no ERP nem no canal.
+- Trocar “Integrado” por **Canais** com rótulo textual no hover (“Mercado Livre — publicado”), para não depender só de logo e cor.
+- Acrescentar a coluna **Completude**, que a captura não tem e é o centro da v2.
+- “Duplicar” não cria SKU novo no ERP. Abre um rascunho que exige SKU novo e passa pelo gate anti-duplicação.
+- Botão verde **+ Produto** abre o fluxo de vínculo/importação primeiro; criar do zero só se nada for encontrado por SKU/EAN.
+
+#### 6.3 Ficha do produto (abas internas)
+
+1. **Geral** — nome Bling, títulos de canal, marca, categoria HUB.
+2. **Variações** — eixos, SKUs, EAN, preço, estoque.
+3. **Imagens** — capa, ordem por canal, direitos.
+4. **Atributos do produto** — características usadas no mapeamento dinâmico.
+5. **Canais** — status de publicação, preço de loja, follow_store_price.
+6. **Fiscal** — NCM/EAN em linguagem humana + estado de aprovação.
+
+#### 6.4 Boas práticas exigidas (gate de publicação)
+
+Checklist mínimo antes de `CREATE` / republicar conteúdo:
+
+| Regra | Bloqueia publicação? |
+|---|---|
+| SKU preenchido e único no catálogo | Sim |
+| Pelo menos 1 imagem elegível de capa | Sim |
+| Categoria HUB definida | Sim |
+| Categoria do canal mapeada (verde) | Sim |
+| Atributos obrigatórios do canal resolvidos (fixo/dinâmico/manual) | Sim |
+| EAN válido quando o canal/categoria exige | Sim |
+| NCM válido e sem `conflict` | Sim (conteúdo/criação; estoque/pausa seguem o plano-mestre) |
+| Preço > 0 | Sim (passo preço) |
+| Sem candidato duplicado SKU/EAN no ERP | Sim — oferece vínculo em vez de criar |
+
+A UI explica o bloqueio em uma frase e oferece o botão “Corrigir”.
+
+---
+
+### 7. Serviço avançado de regularização de atributos
+
+Este é o núcleo da evolução de integração.
+
+#### 7.1 Problema
+
+Cada marketplace (e cada categoria) exige atributos diferentes, com nomes e valores diferentes. Sem regularização, o operador preenche o mesmo produto N vezes — ou o ERP ganha cadastros paralelos “para o ML” e “para a Nuvemshop”.
+
+#### 7.2 Solução
+
+**Mapear uma vez por (categoria do catálogo × canal).** Depois, qualquer produto daquela categoria publica com os campos preenchidos.
+
+Três modos (padrão Moovin, alinhado ao atrelamento Plugg):
+
+| Modo | Quando | Exemplo |
+|---|---|---|
+| **Fixo** | Mesmo valor para todos da categoria | Gênero = Feminino |
+| **Dinâmico** | Valor vem do produto/variante | Marca ← `product.brand`; Cor ← eixo da variante |
+| **Manual** | Só na hora do anúncio | Campo que muda SKU a SKU |
+
+#### 7.3 Capacidade do serviço
+
+1. Descobrir atributos obrigatórios/opcionais da categoria no canal (fixtures + API).
+2. Sugerir De-Para de nomes (`Cor` ↔ `COLOR` / `Collor`) e de valores (`M` ↔ `Médio`).
+3. Marcar categoria **verde** quando obrigatórios estão resolvidos.
+4. Na publicação, materializar o payload do canal sem o operador reabrir o formulário.
+5. Guardar aliases em `attribute_axes` / `attribute_value_aliases` (já existentes) e evoluir para mapa por canal/categoria.
+6. Nunca gravar de volta no ERP um atributo só de marketplace como se fosse cadastro fiscal novo.
+
+#### 7.4 Entidades novas (rascunho de schema — a fechar na implementação)
+
+| Entidade | Papel |
+|---|---|
+| `hub_categories` | Árvore de categorias do catálogo HUB |
+| `channel_category_maps` | Categoria HUB ↔ categoria canal |
+| `channel_attribute_maps` | Atributo canal: modo fixo/dinâmico/manual + origem |
+| `channel_attribute_value_maps` | De-Para de valores |
+| `catalog_completeness` | Cache do checklist por produto/variante/canal |
+
+Reaproveitar: `attribute_axes`, `attribute_value_aliases`, `product_category_mappings`, `channel_content_overrides`, motores VIR/CQS/CRE/APE.
+
+---
+
+
+### 9. Camada de linguagem — traduzir motores
+
+| Motor (interno) | O que o operador vê |
+|---|---|
+| PIRE / VIR | Vínculos / Match |
+| GVE | Código de barras (EAN) |
+| NVE | Classificação fiscal (NCM) |
+| CQS | Qualidade do texto |
+| IQRE | Imagens |
+| CRE | Completude / pronto para publicar |
+| APE | Publicações / envio |
+| WIG | Entrada de atualizações |
+| DLM | Limpeza (só admin) |
+
+Detalhe técnico e siglas ficam em Auditoria e tooltips avançados — nunca como único rótulo do card.
+
+---

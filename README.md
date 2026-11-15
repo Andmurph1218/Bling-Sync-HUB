@@ -2,63 +2,170 @@
 
 [![CI](https://github.com/Andmurph1218/Bling-Sync-HUB/actions/workflows/ci.yml/badge.svg)](https://github.com/Andmurph1218/Bling-Sync-HUB/actions/workflows/ci.yml)
 
-HUB / iPaaS de normalização de catálogo. Sistemas internos (ERP e apps) entregam o cadastro. O HUB padroniza produto, variante, categoria e atributo. Os canais de venda recebem só o que passou na validação.
+HUB / iPaaS de normalização de catálogo entre um ERP soberano e os canais de venda. O ERP entrega o cadastro, o HUB padroniza produto, variante, categoria e atributo, e os canais recebem só o que passou na validação.
 
-O ERP instalado hoje é o Bling. Os canais com código são Nuvemshop (ativo) e Mercado Livre (código presente, produto inativo). Shopee, Amazon e TikTok Shop aparecem na loja como em breve. Preço, estoque e fiscal continuam soberanos no ERP. O canal enriquece conteúdo e mídia. Pedido e NF-e ficam fora.
+O ERP instalado é o **Bling**. Os canais com código são **Nuvemshop** (ativo) e **Mercado Livre** (código presente, produto inativo); **Shopee** está na fábrica de conectores e **Amazon** e **TikTok Shop** aparecem na loja como em breve. Preço, estoque e fiscal são soberanos no ERP. Pedido e NF-e ficam fora.
 
-O painel público é `https://hub.jhshopping.com.br`. O acompanhamento está em [docs/status-implantacao.md](docs/status-implantacao.md) (seção 15) e a auditoria pré-go-live em [docs/auditoria-go-live.md](docs/auditoria-go-live.md).
+- **Painel:** https://hub.jhshopping.com.br
+- **Estado:** V2 concluída, piloto de publicação em andamento (`ENABLE_LIVE_PUBLISHING=false`)
+- **Produção:** commit `c88539c`, 35 migrations aplicadas, 56 suítes / 232 testes
 
-## Escopo
+## Documentação
 
-Entra neste sistema:
+Quatro pontos de entrada, sem duplicata:
 
-- identidade de produto e variante
-- validação de EAN (GS1) e NCM
-- qualidade de conteúdo e de imagem
-- score de prontidão por canal
-- push de catálogo, preço e estoque
-- idempotência de webhook
-- retenção e arquivo fiscal
+| Documento | O que tem |
+|---|---|
+| [docs/01-arquitetura.md](docs/01-arquitetura.md) | **Arquitetura e regras.** Hexagonal final (conectores isolados), soberania do ERP, motores, contrato de ERP, schema e fluxos de referência, arquitetura de telas |
+| [docs/02-status-e-roadmap.md](docs/02-status-e-roadmap.md) | **Estado e roadmap.** O que está no ar, o que falta para o piloto, dívidas P1, histórico de implantação |
+| [docs/auditorias/](docs/auditorias/) | **Registros históricos.** Auditoria de go-live (revisão 3) e auditoria delta de 13/11. Ambas concluídas |
+| [docs/historico/](docs/historico/) | **Planos executados.** P0-D4 da publicação Nuvemshop, marcado como concluído |
 
-Fica de fora: pedidos, financeiro, emissão de NF-e e frete. O Bling já cobre a nota.
-
-## Arquitetura iPaaS
+## Estrutura do repositório
 
 ```text
-Sistemas internos          HUB                         Canais de venda
-ERP, apps        ->        recebe                      catálogo e preço
-                           normaliza atributos   ->    estoque
-                           sincroniza e envia    <-    status de catálogo
+apps/api        API Express + workers BullMQ (catálogo, filas, motores, conectores)
+apps/web        Painel Next.js 14 (App Router)
+deploy          Scripts de deploy da Droplet (update-hub.sh, push-update.py, ...)
+docs            Documentação canônica (este índice), auditorias e histórico
+docker-compose.yml   PostgreSQL 16 + Redis 7 para desenvolvimento
 ```
 
-O modelo do meio é `master_products` + `product_variants` + mapas de categoria e atributo por canal. A fábrica de conectores é `apps/api/src/connectors/strategy/factory.ts`. Cada fornecedor vive na própria pasta (`connectors/bling`, `connectors/nuvemshop`, `connectors/shopee`); a fila e a reconciliação falam só com o contrato `MarketplaceConnector` (`buildListingDraft`, `createBatchReader`, `ChannelPublishError`), e o `architecture.test.ts` impede que o núcleo importe uma pasta de fornecedor. A fila de distribuição é `publish_queue` (BullMQ). Com `ENABLE_LIVE_PUBLISHING` diferente de `true`, o worker simula e não chama o marketplace.
+Dentro da API:
 
-A Nuvemshop publica o produto completo: até 3 eixos de variação (`attributes` com os nomes dos eixos e uma entrada em `variants` por variante ativa, sem descartar SKU), marca em `brand`, categoria numérica obrigatória e imagens com a capa na posição 1, servidas pelo cache `/api/media/:sha256`. A descrição sai em HTML sanitizado (`connectors/nuvemshop/nuvemshop-html.ts`, `sanitize-html`): texto puro vira parágrafo, `script`, eventos e `javascript:` são removidos. Produto com mais de 3 eixos falha com mensagem explícita e não publica.
+```text
+apps/api/src/connectors/strategy/   contratos (ErpConnector, MarketplaceConnector) e fábrica
+apps/api/src/connectors/bling/      ERP atual
+apps/api/src/connectors/nuvemshop/  canal ativo (html, http, listing, publish, draft, connector)
+apps/api/src/connectors/shopee/     Open Platform v2
+apps/api/src/catalog/               catálogo, completude, checklist, preview
+apps/api/src/queues/                publicação, sync do ERP, enriquecimento, imagens, cartas mortas
+apps/api/src/engines/               PIRE, VIR, GVE, NVE, CQS, IQRE, CRE, APE, WIG, DLM
+```
 
-A volta desenhada no diagrama (preço, estoque e pedido saindo do canal e entrando no ERP) não está ligada. Webhook de catálogo é aceito. Webhook de pedido ou nota é recusado. `updateStock` do conector de canal devolve `estoque_na_integracao_nativa`.
+O núcleo não importa pasta de fornecedor. `apps/api/src/__tests__/architecture.test.ts` garante isso na CI.
 
-## Módulos
+## Desenvolvimento
 
-| Módulo | Rota |
+```bash
+npm ci
+docker compose up -d          # PostgreSQL 16 + Redis 7
+cp .env.example .env          # preencha as variáveis obrigatórias
+npm run migrate:up
+npm run seed:admin
+npm run dev:api               # http://127.0.0.1:3001
+npm run dev:web               # http://127.0.0.1:3000
+```
+
+Verificação antes de abrir PR:
+
+```bash
+npm run typecheck
+npm test
+npm run build
+```
+
+A suíte não abre banco nem Redis: os testes usam `pg-mem`. A CI roda os mesmos três comandos.
+
+## Variáveis de ambiente
+
+Obrigatórias para a API subir:
+
+| Variável | Para que serve |
 |---|---|
-| Catálogo | `/catalogo` |
-| Completude | `/completude` |
-| Atributos | `/atributos` |
-| Vínculos | `/vinculos` |
-| Problemas | `/problemas` |
-| Lista de envio | `/publicacoes` |
-| Loja de apps | `/admin/integracoes` |
-| Fiscal | `/fiscal` |
-| Governança | `/configuracoes` |
+| `DATABASE_URL` | PostgreSQL 16. A API não sobe sem ela |
+| `REDIS_URL` | Redis 7 para BullMQ, cota do Bling e pausa da publicação |
+| `OAUTH_ENCRYPTION_KEY` | **64 caracteres hex (32 bytes).** Cifra tokens OAuth e credenciais de app (AES-256-GCM). Sem ela a API recusa iniciar. Gere com `openssl rand -hex 32` e nunca reuse a chave de exemplo do repositório |
+| `PUBLIC_BASE_URL` | Base pública (`https://hub.jhshopping.com.br`). É daqui que sai a URL das imagens servidas em `/api/media/:sha256` |
+| `SESSION_COOKIE_NAME` | Nome do cookie de sessão |
+| `SESSION_COOKIE_SECURE` | `true` em produção (HTTPS) |
 
-## Fases da evolução v2
+Recomendadas e de operação:
 
-| Fase | Estado | Pendência |
+| Variável | Padrão | Efeito |
 |---|---|---|
-| P0 | No ar | Ajustes externos de OAuth do Mercado Livre e de webhook de pedido no Bling |
-| P1 | No ar | Lista lê o espelho do HUB, não o ERP ao vivo |
-| P2 | No ar, em sombra | Escrita ao vivo desligada. Checklist verde é a porta do envio real |
-| P3 | Aberto | Shopee e Amazon, publicação automática do checklist verde, série de qualidade, deploy por pipeline |
+| `PORT` | `3001` | Porta da API |
+| `HOST` | `0.0.0.0` | Interface de escuta |
+| `NODE_ENV` | — | `production` no systemd. Não exporte no shell do `npm install` (ver Migrations) |
+| `LOG_LEVEL` | `info` | Nível do log |
+| `ACTIVE_ERP` | `bling` | ERP soberano |
+| `ENABLE_LIVE_PUBLISHING` | `false` | Só `true` faz chamada real ao marketplace |
+| `LIVE_PUBLISH_ALLOWLIST` | vazio | SKUs do piloto, separados por vírgula. Vazio não publica ninguém |
+| `AUTO_PUBLISH_ENABLED` | `false` | Enfileira publicação automática quando o checklist fica 100% |
+| `NUVEMSHOP_STORE_ID` | descoberto no OAuth | Fixa a loja (produção usa `6667412`) |
+| `MEDIA_STORAGE_DIR` | `data/media` | Onde o IQRE grava o cache de imagens |
+| `BLING_CLIENT_ID` / `BLING_CLIENT_SECRET` / `BLING_WEBHOOK_SECRET` | — | OAuth e HMAC do Bling |
+| `NS_CLIENT_ID` / `NS_CLIENT_SECRET` / `NS_WEBHOOK_SECRET` | — | Credenciais da Nuvemshop |
+| `ML_CLIENT_ID` / `ML_CLIENT_SECRET` / `ML_WEBHOOK_SECRET` | — | Credenciais do Mercado Livre (canal inativo) |
+
+Rode `openssl rand -hex 32` uma vez e guarde a chave fora do repositório. Trocar a chave exige re-cifrar os segredos:
+
+```bash
+OAUTH_ENCRYPTION_KEY_OLD=<antiga> OAUTH_ENCRYPTION_KEY_NEW=<nova> \
+  npm run rotate:oauth-key --workspace=@bling-sync/api -- --dry-run
+# confira "N registros prontos para rotação" e repita com --execute
+```
+
+O script roda numa transação e faz `ROLLBACK` se qualquer segredo não abrir com a chave nova. Pare a API antes do `--execute`.
+
+## Migrations
+
+As migrations ficam em `apps/api/src/db/migrations` e são TypeScript. O `node-pg-migrate` carrega cada arquivo com `require()`. No Linux o Node recusa essa sintaxe (`SyntaxError: Unexpected token '{'`). O script `npm run migrate:up` executa o binário com `tsx`, que transpila o TypeScript nesse `require`.
+
+```bash
+npm run migrate:up      # aplica as pendentes
+npm run migrate:down    # reverte a última
+```
+
+Migrations recentes:
+
+| Migration | O que faz |
+|---|---|
+| `1729080000034_image-queue-erp-source` | Amplia o `CHECK` de `image_processing_queue.source_platform` para aceitar `'erp'`. Sem ela o Full Sync não enfileira a imagem do ERP e o produto fica sem capa |
+| `1729080000035_publish-queue-open-unique` | Índice único parcial `publish_queue (product_id, channel) WHERE status IN ('pending', 'processing')`: um job aberto por produto e canal. Falha se a base já tiver dois jobs abertos para o mesmo par; confira antes do deploy |
+
+O build da API grava `apps/api/dist/db/migrations/package.json` com `{"type":"commonjs"}`. O `tsc` emite essas migrations como CommonJS, e esse arquivo faz o Node tratá-las assim. Não crie esse arquivo à mão no servidor.
+
+## Deploy na Droplet
+
+O deploy não é `git pull` no servidor. O `deploy/push-update.py` empacota o repositório local, envia por SSH para `201.79.39.118` e executa o `deploy/update-hub.sh` como root.
+
+### Passo a passo
+
+```bash
+# 1. Local: publicar o código
+git push origin main
+
+# 2. Servidor: backup antes de mexer no banco
+ssh root@201.79.39.118
+set -a; . /opt/bling-sync-hub/.env; set +a
+pg_dump -Fc -d "$DATABASE_URL" -f /root/pre-deploy-$(date +%Y%m%d-%H%M).dump
+
+# 3. Servidor: conferir que não há dois jobs abertos por produto e canal
+psql "$DATABASE_URL" -c "SELECT product_id, channel, count(*) FROM publish_queue \
+  WHERE status IN ('pending','processing') GROUP BY 1,2 HAVING count(*) > 1;"
+
+# 4. Local: empacotar e executar o deploy
+HUB_SSH_PW=<senha> python deploy/push-update.py
+```
+
+O `update-hub.sh` faz, nesta ordem: copia o código sobre `/opt/bling-sync-hub`, remove arquivos obsoletos de `connectors/strategy`, roda `npm ci` e o build da API e do painel (com `NODE_ENV` removido do ambiente), aplica `npm run migrate:up`, reescreve o `systemd` da API e do painel, recarrega o Caddy e valida `/health` e a tela de login.
+
+Critérios de sucesso na saída: `Migrations complete!`, `env_preserved`, `/health` com `postgres.ok` e `redis.ok`, `web:200` e `UPDATE_OK`.
+
+### Pós-deploy
+
+```bash
+psql "$DATABASE_URL" -tAc "select count(*), max(name) from pgmigrations;"   # 35 migrations
+curl -fsS https://hub.jhshopping.com.br/health
+journalctl -u bling-hub-api -p err --since "-5min"
+```
+
+### Cuidados
+
+- **`NODE_ENV=production` não pode vazar para o `npm install`.** Isso omite devDependencies e deixa o build e a migration sem `tsc` e `tsx`. O script já contorna com `env -u NODE_ENV`; não use `--omit=dev` nem `--production`.
+- **`OAUTH_ENCRYPTION_KEY` não é gerada pelo deploy.** O `.env` do servidor é preservado entre versões (`chmod 600`, dono `blinghub`). Se a chave mudar, rode a rotação antes de reiniciar a API.
+- **`data/media` não é tocado pelo deploy.** O cache de imagens fica fora do pacote e é servido por `/api/media/:sha256`.
 
 ## Princípios
 
@@ -70,74 +177,6 @@ A volta desenhada no diagrama (preço, estoque e pedido saindo do canal e entran
 6. EAN inválido, NCM divergente ou preço zero bloqueiam publicação. Estoque de anúncio já publicado continua.
 7. NCM e EAN não são apagados. O arquivo fiscal permanece por 5 anos.
 
-## Integração contínua
+## Licença e contato
 
-O workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) roda em cada push e em cada pull request para `main`. O job usa Ubuntu e Node.js 20, instala com `npm ci`, compila API e painel com `npm run build` e executa a suíte da API com `npm run test`. Um passo vermelho marca o commit. A suíte não abre banco nem Redis: os testes usam pg-mem.
-
-## Stack prevista
-
-TypeScript estrito, Node.js 20, Express, Next.js, PostgreSQL 16, Redis 7, BullMQ, Sharp, Docker.
-
-Premissa de operação atual: uma conta de ERP, os canais que estiverem conectados. O segundo ERP e os canais em breve entram por classe nova na fábrica.
-
-## Migrations
-
-As migrations ficam em `apps/api/src/db/migrations` e são TypeScript. O `node-pg-migrate` carrega cada arquivo com `require()`. No Linux o Node recusa essa sintaxe (`SyntaxError: Unexpected token '{'`). O script `npm run migrate:up` executa o binário com `tsx`, que transpila o TypeScript nesse `require`.
-
-Migrations recentes:
-
-| Migration | O que faz |
-|---|---|
-| `1729080000034_image-queue-erp-source` | Amplia o `CHECK` de `image_processing_queue.source_platform` para aceitar `'erp'`. Sem ela o Full Sync não enfileira a imagem do ERP e o produto fica sem capa. |
-| `1729080000035_publish-queue-open-unique` | Índice único parcial `publish_queue (product_id, channel) WHERE status IN ('pending', 'processing')`: um job aberto por produto e canal. A migration falha se a base já tiver dois jobs abertos para o mesmo par; confira antes do deploy. |
-
-No servidor, depois de atualizar o código:
-
-```bash
-git pull
-npm install
-npm run build
-npm run migrate:up
-```
-
-A Droplet compila a API e o painel e aplica as migrations na própria máquina. `typescript` (`tsc`) e `tsx` estão em devDependencies, então o install do servidor é o completo (`npm install` ou `npm ci`). O espaço extra fica na casa de dezenas de megabytes e cabe na Droplet.
-
-O servidor não deve usar `npm install --omit=dev`, `npm ci --omit=dev` nem `npm install --production`. Um shell com `NODE_ENV=production` tem o mesmo efeito: o npm deixa as devDependencies de fora e `tsc` ou `tsx` passam a falhar com comando não encontrado. O `NODE_ENV=production` do `.env` vale para o processo do systemd. O install roda sem essa variável exportada no shell.
-
-`npm run migrate:down` reverte a última migration pelo mesmo loader.
-
-O build da API grava `apps/api/dist/db/migrations/package.json` com `{"type":"commonjs"}`. O `tsc` emite essas migrations como CommonJS, e esse arquivo faz o Node tratá-las assim. Não crie esse arquivo à mão no servidor.
-
-## Motores
-
-| Motor | Função |
-|---|---|
-| PIRE | Vínculo do produto pai por predicado, não por soma de pontos |
-| VIR | Vínculo de variante por SKU, EAN ou comboKey |
-| GVE | EAN/GTIN com dígito verificador GS1 |
-| NVE | NCM de 8 dígitos, sugestão só com dupla confirmação |
-| CQS | Nota de qualidade e decisão KEEP, REPLACE ou SUGGEST |
-| IQRE | Dedup, direitos e ordem das imagens |
-| CRE | Três scores: Bling, Mercado Livre e Nuvemshop |
-| APE | Push atômico em três tipos: estoque/preço, conteúdo e criação |
-| WIG | HMAC, gravação, fila e só então HTTP 200 |
-| DLM | TTL, partição e arquivo |
-
-## Estado
-
-A espinha das fases 0 a 12 do plano-mestre está concluída. A evolução v2 (P0 a P2) está no ar em sombra. O P3 não começou. O detalhe, com veredito de alinhamento ao diagrama, está na seção 12 de [docs/status-implantacao.md](docs/status-implantacao.md). O plano normativo continua em [docs/plano-mestre.md](docs/plano-mestre.md). As fases abaixo são a espinha desse plano, não o recorte da evolução v2.
-
-- **Fase 0 concluída**: monorepo (`apps/api`, `apps/web`), Docker Compose (PostgreSQL 16 + Redis 7), migration 001 (identidade, sessões opacas SHA-256, senhas Argon2id, `oauth_tokens` AES-256-GCM e trilha imutável `control_changes`), healthcheck e RBAC (`operator`, `fiscal_approver`, `admin`).
-- **Fase 0.5 concluída**: fixtures sanitizados de Bling v3, Mercado Livre (Legado, Família User Product, Estoque Full `meli_facility` / `seller_warehouse` com `x-version`, Migração UPtin) e Nuvemshop (`inventory_levels`) + mappers puros cobrindo produto simples, variação, kit, variação-kit, saldos, preço de loja, 429 e `product.deleted`.
-- **Fase 1 concluída**: schema completo do PostgreSQL 16 (migrations 001 a 012 com `up` e `down`, 39 tabelas de domínio, 70 partições mensais iniciais, índices parciais `uq_one_default_variant`, `image_processing_queue_claim`, `push_jobs_active`, triggers de imutabilidade fiscal e seeds iniciais).
-- **Fase 2 concluída**: conectores HTTP (`BlingConnector`, `MercadoLivreConnector`, `NuvemshopConnector`), rate limiter global do Bling (3 req/s + 120.000/dia com fila de prioridades e reserva P1), e gerenciador `oauth_tokens` com renovação single-flight e rotação criptografada.
-- **Fase 3 concluída**: motores fiscais puros **GVE** (`gve.ts`) e **NVE** (`nve.ts`) cobrindo vetores GS1 (8, 12, 13, 14 dígitos, Brasil 789/790, ISBN, faixa interna 200 e placeholders), NCM `0000.00.00` (capítulos 01–97), detecção de EAN `duplicate` entre variantes do mesmo produto, detecção de NCM `conflict` entre variantes no pai e fluxo de dupla confirmação por dois `fiscal_approver` distintos com nota de TIPI.
-- **Fase 4 concluída**: motores de identidade **PIRE** (`pire.ts`) e **VIR** (`vir.ts`) cobrindo predicado multi-sinal (mínimo 2 sinais fortes para score 95; sinal único limitado a 80), quarentena em EAN compartilhado entre produtos, `family_confidence` para famílias User Product (quarentena sem partir a família quando itens conflitam), cache negativo permanente `match_rejections`, normalização de `comboKey` por aliases (`Medium -> M`), consolidação de `ml_selling_conditions` com trilha `control_changes`, análise de matriz (`missing_ml`/`extra_ml`) e publicação em conta `user_product_seller` sem `variations`.
-- **Fase 5 concluída**: motor de imagens **IQRE** (`iqre.ts`) cobrindo enfileiramento assíncrono em `image_processing_queue` sem download na sync, consumo em lote com `FOR UPDATE SKIP LOCKED`, validação de hosts autorizados, Average Hash 64-bit, deduplicação no fechamento (`iqre.finalize`) com distância de Hamming $\le 5$ mantendo maior resolução sem cruzar produtos diferentes, fila de direitos (`third_party_risk`, `watermark_suspect`) e elegibilidade de capa ($\ge 500\times500$ e score $\ge 55$).
-- **Fase 6 concluída**: motor de qualidade de conteúdo **CQS** (`cqs.ts`) cobrindo avaliadores por campo (grades A a F), árvore determinística `KEEP`/`REPLACE`/`SUGGEST` onde Grade A e Grade B jamais sofrem `REPLACE`, proteção de nome e descrição do Bling (`channel_content_overrides` por canal), modo `shadow` vs `live`, `kill_switch`, teto `max_replaces_per_run`, registro em `hub_writes` e reversão via `quality_history`.
-- **Fase 7 concluída**: motor de prontidão por canal **CRE** (`cre.ts`) cobrindo cálculo dos 3 scores por variante (Bling 70/90, Mercado Livre 50/75 + categoria verificada em `CREATE`, Nuvemshop 45/85 com SEO), KPI do produto pela pior variante ativa, top 3 melhorias e garantia de que o envio de estoque (`stock`, `pause` e `price` em anúncio já publicado) jamais lê nem depende do score.
-- **Fase 8 concluída**: guarda de idempotência de webhook **WIG** (`wig.ts` e `routes/webhooks.ts`) cobrindo leitura de raw body, validação HMAC em tempo constante (`X-Bling-Signature-256`, `x-linkedstore-hmac-sha256`, `x-signature`), `INSERT` síncrono em `webhook_events` com SHA-256 de 64 chars antes do HTTP 200, recovery automático pós-restart sem perda de evento, lock de recurso de 60s, watermark por campo com tolerância de 1s e detecção de eco (`hub_writes` e `push_job_steps`).
-- **Fase 9 concluída**: motor de push atômico **APE** (`ape.ts`) cobrindo agregação por prioridade (`push_jobs_active`), execução passo a passo lendo o Bling na hora sem repetir passos `completed`, skip de estoque em anúncio só Full (`ml_full`), escrita de preço apenas na condição com `follow_store_price = true`, envio de estoque zero e pausa mesmo com NCM inválido, alerta crítico de preço abaixo do custo sem bloquear e proteção contra eco do `PUT`.
-- **Fase 10 concluída**: gerenciador de ciclo de vida de dados **DLM** (`dlm.ts`) cobrindo agenda repetível BullMQ em `America/Sao_Paulo`, lock de coordenação entre réplicas (réplica extra não duplica limpeza nem arquivamento), limpeza TTL em lote com `FOR UPDATE SKIP LOCKED` preservando `pending`/`queued`/`failed` e `control_changes`, anulação de `webhook_events.raw_payload` após 30 dias, arquivamento fiscal de 5 anos (`MOVE` para `*_archive`) e manutenção de partições mensais.
-- **Fase 11 concluída**: rotas de operação (`routes/dashboard.ts`) e telas prioritárias do Dashboard em Next.js (`/`, `/matching`, `/fiscal/ean`, `/fiscal/ncm`), validando o fluxo autenticado onde dois usuários `fiscal_approver` distintos confirmam o mesmo NCM com nota de TIPI.
-- **Fase 12 concluída**: ensaio ponta a ponta com recorte real do catálogo (`orchestrator/pipeline.ts`), métricas operacionais, replay de job `failed` sem repetir passos concluídos e medição do lag de estoque P1 abaixo de 2 minutos (**todas as 14 suítes / 52 testes aprovados**).
+Repositório privado da JH Shopping. Dúvidas de operação: `catalogo@jhshopping.com.br`.

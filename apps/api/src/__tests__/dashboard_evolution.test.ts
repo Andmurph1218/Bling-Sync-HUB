@@ -19,7 +19,7 @@ async function loginCookie(app: ReturnType<typeof createApp>, email: string, pas
   return (Array.isArray(header) ? header[0] : header)!;
 }
 
-describe('Evolução do Dashboard (docs/bling_sync_hub_evolucao_dashboard.md — Camada Consolidada, 10 Motores, 10 Indicadores, Simulador, Ficha Única e Auditoria)', () => {
+describe('Evolução do Dashboard (docs/01-arquitetura.md (Parte III) — Camada Consolidada, 10 Motores, 10 Indicadores, Simulador, Ficha Única e Auditoria)', () => {
   let poolInstance: DbPoolLike;
   const app = createApp();
   let adminCookie = '';

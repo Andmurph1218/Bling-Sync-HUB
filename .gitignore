@@ -14,3 +14,13 @@ Thumbs.db
 
 # Binários de plataforma das skills locais (reinstaláveis, ~20 MB cada)
 **/skills/impeccable/scripts/bin/
+
+# Pastas de agentes e estado local de ferramentas
+.devin/
+.vscode/
+.planning/
+.superpowers/
+.impeccable/
+.interface-design/
+# .cursor/ fica versionado de propósito: as skills do impeccable são compartilhadas.
+# Para parar de versionar, rode: git rm -r --cached .cursor

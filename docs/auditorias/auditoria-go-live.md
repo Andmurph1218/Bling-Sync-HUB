@@ -4,6 +4,9 @@ Auditoria original: 11/11/2026, base `7fcbb49`.
 Última atualização: **13/11/2026** (revisão 3, abaixo). Revisão anterior: **12/11/2026**, produção em `0671858` (`https://hub.jhshopping.com.br`).  
 Método: leitura do código da API e da web + conferência somente leitura no PostgreSQL e Redis de produção (`201.79.39.118`, 33 migrations aplicadas).
 
+> ## ✅ Concluído / Resolvido
+> **Registro histórico.** As três auditorias abaixo (11/11, 12/11 e revisão 3 de 13/11) estão encerradas. Os P0 e P1 apontados foram corrigidos e verificados; a revisão 3 registra o que ficou como dívida P1 consciente. O estado vigente está em [02-status-e-roadmap.md](../02-status-e-roadmap.md) e a arquitetura em [01-arquitetura.md](../01-arquitetura.md). Nada aqui é pendência.
+
 ---
 
 ## Revisão 3 — 13/11/2026 (pós-auditoria delta)

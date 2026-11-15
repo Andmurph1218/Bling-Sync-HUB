@@ -1,5 +1,10 @@
 # Auditoria Delta de Go-Live — JH Sync Hub
 
+> ## ✅ Concluído / Resolvido
+> **Registro histórico.** Esta auditoria apontou 4 bloqueadores (P0-D1 a P0-D4) em 13/11/2026. Todos foram corrigidos e verificados antes do go-live: migration `0034` (fila de imagem aceita `erp`), bloqueio de `sugerido` no `CREATE`, migration `0035` (um job aberto por produto e canal) e escritor completo da Nuvemshop (imagens, categoria, atributos, variações e HTML sanitizado).
+> O veredito 🔴 NO-GO abaixo vale para o estado do código **antes** dessas correções. O estado atual está em [02-status-e-roadmap.md](../02-status-e-roadmap.md) e a revisão 3 em [auditoria-go-live.md](auditoria-go-live.md). Nada aqui é pendência.
+
+
 **Data:** 13/11/2026
 **Base auditada:** `main` @ `e22c27b` (`feat(images): ativar worker IQRE com cache local /api/media, S3 do Bling, Nuvemshop e endpoint oficial de variações`)
 **Método:** leitura integral do código da API/web + execução limpa da suíte + prova isolada de constraint com `pg-mem`. **Nenhuma escrita de aplicação foi feita.** Não houve chamada real a Bling/Nuvemshop nem inspeção do PostgreSQL/Redis de produção nesta rodada.
