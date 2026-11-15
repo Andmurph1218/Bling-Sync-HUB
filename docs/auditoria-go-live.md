@@ -30,6 +30,12 @@ Base: `main` em `75f7365`. Verificação local: `npm run typecheck` limpo e `npm
 7. ~~**Acoplamento do núcleo à Nuvemshop**~~ **Resolvido (15/11):** o código foi para `connectors/nuvemshop/`. A fila usa `connector.buildListingDraft` e `isRetryablePublishError`/`ChannelPublishError` de `strategy/types.ts`; a reconciliação usa `connector.createBatchReader`. O `architecture.test.ts` agora cobre Bling, Nuvemshop e Shopee e proíbe qualquer fornecedor em `catalog/`, `queues/`, `engines/`, `orchestrator/` e `services/`. Dívida que sobra: `routes/oauth.ts`, `routes/app-credentials.ts` e a classe legada `connectors/connectors.ts` ainda importam a Nuvemshop direto (allowlist explícita no teste).
 8. **P1-D1 a P1-D13 da auditoria delta** (allowlist do IQRE, recálculo fora da transação, capa que não perde elegibilidade, `/health` com Redis fora, `listing_status = 'Ativo'` fixo no commit, entre outros). P1-D14 foi absorvido pelo P0-D4.
 
+### Segurança: chave OAuth rotacionada em 15/11
+
+A conferência no servidor confirmou `OAUTH_ENCRYPTION_KEY` igual à chave padrão publicada em `deploy/remote-deploy.sh`. A rotação foi feita com a API parada: `npm run rotate:oauth-key -- --dry-run` mostrou 5 registros prontos e `--execute` regravou os 5 numa transação, com conferência de cada segredo pela chave nova antes do `COMMIT`. Validação: `GET /produtos` no Bling e `GET /products` na Nuvemshop responderam 200 com os tokens rotacionados; `/health` 200; nenhum erro no `journalctl`.
+
+Atenção: os dumps anteriores (`/root/pre-0035-*.dump`) contêm os segredos cifrados com a chave antiga, que é pública. Apague-os depois de confirmar o piloto, ou trate-os como material sensível.
+
 ### Veredito da revisão 3
 
 **Go para o piloto controlado** (até 10 SKUs em `LIVE_PUBLISH_ALLOWLIST`, `ENABLE_LIVE_PUBLISHING=true` sob supervisão), depois de aplicar as migrations `0034` e `0035` na Droplet e confirmar que não há dois jobs abertos para o mesmo produto e canal. **No-Go para o catálogo inteiro** até fechar os itens 1, 2 e 4 acima e concluir o piloto de 48 h.

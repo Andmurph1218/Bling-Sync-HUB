@@ -10,7 +10,8 @@
     "bootstrap": "tsx src/scripts/bootstrap.ts",
     "seed:admin": "tsx src/scripts/seed-admin.ts",
     "migrate:up": "tsx ../../node_modules/node-pg-migrate/bin/node-pg-migrate.js up -m src/db/migrations --no-check-order",
-    "migrate:down": "tsx ../../node_modules/node-pg-migrate/bin/node-pg-migrate.js down -m src/db/migrations --no-check-order"
+    "migrate:down": "tsx ../../node_modules/node-pg-migrate/bin/node-pg-migrate.js down -m src/db/migrations --no-check-order",
+    "rotate:oauth-key": "tsx src/scripts/rotate-oauth-key.ts"
   },
   "dependencies": {
     "bullmq": "5.12.12",

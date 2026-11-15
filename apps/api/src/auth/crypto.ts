@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { argon2id, argon2Verify } from 'hash-wasm';
 import { env } from '../config/env.js';
+import { decryptWithKey, encryptWithKey } from './oauth-key.js';
 
 const ARGON2_MEMORY_COST = 19456;
 const ARGON2_ITERATIONS = 2;
@@ -41,34 +42,12 @@ export function hashSessionToken(opaqueToken: string): string {
 
 /**
  * Criptografa tokens OAuth (AES-256-GCM) para armazenamento em oauth_tokens (bytea).
- * Formato binário interno: [12 bytes IV][16 bytes AuthTag][ciphertext], codificado em bytes hex no Buffer bytea.
+ * O formato do envelope e as primitivas ficam em `oauth-key.ts`.
  */
 export function encryptOAuthToken(plainText: string): Buffer {
-  const key = Buffer.from(env.OAUTH_ENCRYPTION_KEY, 'hex');
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  const encrypted = Buffer.concat([cipher.update(plainText, 'utf8'), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  const rawEnvelope = Buffer.concat([iv, authTag, encrypted]);
-  return Buffer.from(rawEnvelope.toString('hex'), 'utf8');
+  return encryptWithKey(env.OAUTH_ENCRYPTION_KEY, plainText);
 }
 
 export function decryptOAuthToken(payload: Buffer): string {
-  const asText = payload.toString('utf8');
-  const rawEnvelope =
-    /^[0-9a-fA-F]+$/.test(asText) && asText.length >= 56
-      ? Buffer.from(asText, 'hex')
-      : payload;
-
-  if (rawEnvelope.length < 28) {
-    throw new Error('Payload de token OAuth criptografado inválido');
-  }
-  const key = Buffer.from(env.OAUTH_ENCRYPTION_KEY, 'hex');
-  const iv = rawEnvelope.subarray(0, 12);
-  const authTag = rawEnvelope.subarray(12, 28);
-  const encrypted = rawEnvelope.subarray(28);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(authTag);
-  const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-  return decrypted.toString('utf8');
+  return decryptWithKey(env.OAUTH_ENCRYPTION_KEY, payload);
 }

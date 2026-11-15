@@ -628,5 +628,6 @@ Código em `main` (`82ba787` → `75f7365`). O deploy na Droplet segue o checkli
 - N+1 na busca de existência por SKU antes do `POST` (até 1 chamada por variante). A busca em lote fica para o P1.
 - Sem `PUT` para atualizar anúncio já publicado na Nuvemshop.
 - Reconciliação de imagem por `src` não casa se a Nuvemshop reescrever a URL para o CDN dela.
+- **Rotação da `OAUTH_ENCRYPTION_KEY` (15/11):** a produção estava com a chave fraca padrão `012345…`. O script `apps/api/src/scripts/rotate-oauth-key.ts` (`npm run rotate:oauth-key`) regravou os 5 registros (`oauth_tokens` e `channel_app_credentials`) numa transação, conferindo cada valor com a chave nova antes do `COMMIT`. Chave antiga removida do `.env`, API reiniciada, leitura real no Bling e na Nuvemshop com 200.
 - ~~Núcleo acoplado à Nuvemshop~~ **resolvido em 15/11:** código da Nuvemshop isolado em `connectors/nuvemshop/` (draft, HTML, HTTP, leitura, publicação e classe do conector). `publish-queue.ts` e `reconciliation.service.ts` usam só `MarketplaceConnector`; `architecture.test.ts` cobre Bling, Nuvemshop e Shopee.
 - Lista completa e riscos novos na revisão 3 da [auditoria-go-live.md](auditoria-go-live.md).
