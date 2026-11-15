@@ -67,7 +67,7 @@ describe('envios travados em processamento', () => {
     );
     const freshJob = await query<{ id: string }>(
       `INSERT INTO publish_queue (product_id, channel, status, payload_json, updated_at)
-       VALUES ($1, 'nuvemshop', 'processing', '{}', $2)
+       VALUES ($1, 'mercadolivre', 'processing', '{}', $2)
        RETURNING id`,
       [productId, new Date(now - 60_000)]
     );
