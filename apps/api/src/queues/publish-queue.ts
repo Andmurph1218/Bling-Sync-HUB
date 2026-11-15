@@ -8,7 +8,7 @@ import { query, withTransaction } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
 import { getRedis } from '../lib/redis.js';
 import { EXISTING_LISTING_MESSAGE } from '../catalog/completeness.js';
-import { buildPublishPreview, checklistForChannel, linkedListingExternalId, PublishChannel } from '../catalog/publish-preview.js';
+import { buildNuvemshopDraft, buildPublishPreview, checklistForChannel, linkedListingExternalId, PublishChannel } from '../catalog/publish-preview.js';
 import { isFinalQueueAttempt, JITTERED_BACKOFF, jitteredBackoffStrategy } from './backoff.js';
 import { recordDeadLetter } from './dead-letters.js';
 
@@ -138,6 +138,7 @@ async function mark(
 }
 
 async function listingDraftNow(productId: string, channel: PublishChannel): Promise<ListingDraft | null> {
+  if (channel === 'nuvemshop') return buildNuvemshopDraft(productId);
   const preview = await buildPublishPreview(productId, channel);
   if (!preview?.payload.seller_custom_field) return null;
   return {
@@ -157,9 +158,17 @@ async function commitCreatedListing(
   externalId: string
 ): Promise<void> {
   await withTransaction(async (client) => {
+    // O vínculo pode existir como 'sugerido' (reconciliação). O upsert promove a
+    // linha em vez de estourar o UNIQUE (product_id, channel).
     await client.query(
       `INSERT INTO channel_listing_links (product_id, channel, listing_id, listing_title, listing_price, listing_status, link_status)
-       VALUES ($1, $2, $3, $4, $5, 'Ativo', 'vinculado')`,
+       VALUES ($1, $2, $3, $4, $5, 'Ativo', 'vinculado')
+       ON CONFLICT (product_id, channel) DO UPDATE
+       SET listing_id = EXCLUDED.listing_id,
+           listing_title = EXCLUDED.listing_title,
+           listing_price = EXCLUDED.listing_price,
+           listing_status = EXCLUDED.listing_status,
+           link_status = 'vinculado'`,
       [productId, channel, externalId, draft.title ?? null, draft.price]
     );
     await client.query(
@@ -185,18 +194,25 @@ export async function processPublishQueueItem(
     maxAttempts?: number;
   }
 ): Promise<void> {
-  const found = await query<PublishRow>(
-    `SELECT id, product_id, channel, payload_json
-     FROM publish_queue
-     WHERE id = $1`,
+  // Lock otimista: apenas um worker leva o job de 'pending' para 'processing'.
+  // rowCount === 0 significa que outro worker já reivindicou (ou o job terminou),
+  // então este worker não faz POST nem grava vínculo. O UPDATE auto-commita, por
+  // isso a conexão não fica presa durante a chamada HTTP.
+  const claimed = await query<PublishRow>(
+    `UPDATE publish_queue
+     SET status = 'processing', error_message = NULL, updated_at = now()
+     WHERE id = $1 AND status = 'pending'
+     RETURNING id, product_id, channel, payload_json`,
     [id]
   );
-  const row = found.rows[0];
+  const row = claimed.rows[0];
   if (!row) return;
 
   try {
-    if (await isPublishingPaused()) throw new PublishPausedError();
-    await mark(id, 'processing', null);
+    if (await isPublishingPaused()) {
+      await mark(id, 'pending', PUBLISH_PAUSED_MESSAGE);
+      throw new PublishPausedError();
+    }
     if (!checklistChannel(row.channel)) {
       await mark(id, 'failed', CHECKLIST_BLOCKED_MESSAGE);
       return;
@@ -323,10 +339,12 @@ export async function createPublishJobs(items: PublishJobInput[]): Promise<strin
     const inserted = await query<{ id: string }>(
       `INSERT INTO publish_queue (product_id, channel, status, payload_json)
        VALUES ($1, $2, 'pending', $3)
+       ON CONFLICT DO NOTHING
        RETURNING id`,
       [item.productId, item.channel, JSON.stringify(item.payload)]
     );
-    const id = inserted.rows[0]!.id;
+    const id = inserted.rows[0]?.id;
+    if (!id) continue;
     ids.push(id);
     if (process.env.VITEST) {
       await processPublishQueueItem(id);

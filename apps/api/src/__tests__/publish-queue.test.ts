@@ -460,7 +460,7 @@ describe('P2 — fila de publicação', () => {
       .put(`/api/catalog/categories/${categoryId}/channels/nuvemshop`)
       .set('Cookie', cookie)
       .send({
-        channelCategoryId: 'NS-CAT',
+        channelCategoryId: '123456',
         channelCategoryName: 'Casa',
         attributes: [
           { channelAttributeId: 'BRAND', channelAttributeName: 'Marca', required: true, mode: 'fixed', fixedValue: 'JHS' },
@@ -484,17 +484,25 @@ describe('P2 — fila de publicação', () => {
     });
 
     const posts: string[] = [];
+    const imagePosts: Array<{ src: string; position: number }> = [];
     let mode: 'retry' | 'reject' | 'create' | 'exists' = 'retry';
     setNuvemshopFetchForTests(async (url, init) => {
       const json = (status: number, body: unknown) => new Response(JSON.stringify(body), {
         status,
         headers: { 'content-type': 'application/json', 'x-rate-limit-remaining': '20' },
       });
+      if (init?.method === 'POST' && url.includes('/images')) {
+        imagePosts.push(JSON.parse(String(init.body)) as { src: string; position: number });
+        return json(201, { id: imagePosts.length });
+      }
       if (init?.method === 'POST') {
         posts.push(String(init.body ?? ''));
         if (mode === 'retry') return json(503, { message: 'indisponível' });
         if (mode === 'reject') return json(400, { description: 'nome inválido' });
         return json(201, { id: 88421 });
+      }
+      if (url.includes('/images')) {
+        return json(200, imagePosts.map((image) => ({ src: image.src })));
       }
       if (url.includes('/products/sku/')) {
         if (mode === 'exists') return json(200, { product_id: 88421, sku: 'NS-NOVO', price: '49.90', stock: 7 });
@@ -504,6 +512,14 @@ describe('P2 — fila de publicação', () => {
     });
 
     const enqueue = async () => {
+      // A fila só permite um job aberto por produto e canal: fecha o anterior
+      // antes de simular uma nova tentativa manual.
+      await query(
+        `UPDATE publish_queue
+         SET status = 'failed'
+         WHERE product_id = $1 AND channel = 'nuvemshop' AND status IN ('pending', 'processing')`,
+        [productId]
+      );
       const inserted = await query<{ id: string }>(
         `INSERT INTO publish_queue (product_id, channel, payload_json)
          VALUES ($1, 'nuvemshop', $2)
