@@ -21,8 +21,15 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
   },
 };
 
-/** Texto puro com sinal de menor ("5 < 10") não casa: exige letra logo após o "<". */
-const HTML_TAG = /<[a-z][^>]*>/i;
+/**
+ * Só considera HTML quando aparece uma tag que o sanitizador conhece (ou uma
+ * que ele remove). Texto puro como "Tamanho <G>" ou "5 < 10" não casa: a letra
+ * logo após o "<" não forma uma tag válida, então o texto é escapado e preservado.
+ */
+const HTML_TAG = new RegExp(
+  `</?(?:${[...ALLOWED_TAGS, 'script', 'style', 'img'].join('|')})\\b[^>]*>`,
+  'i'
+);
 
 function escapeText(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

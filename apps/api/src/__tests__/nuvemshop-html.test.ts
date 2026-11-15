@@ -16,6 +16,18 @@ describe('toNuvemshopHtml', () => {
 
   it('preserva HTML existente sem escapar de novo', () => {
     expect(toNuvemshopHtml('<p>Texto <strong>forte</strong></p>')).toBe('<p>Texto <strong>forte</strong></p>');
+    expect(toNuvemshopHtml('<div>Texto</div>')).toBe('<div>Texto</div>');
+    expect(toNuvemshopHtml('Linha 1<br>Linha 2')).toBe('Linha 1<br />Linha 2');
+  });
+
+  it('é idempotente: sanitizar o próprio resultado não escapa nada', () => {
+    const once = toNuvemshopHtml('Linha 1\n\nLinha 2')!;
+    expect(toNuvemshopHtml(once)).toBe(once);
+  });
+
+  it('não confunde texto com tag desconhecida e preserva o conteúdo', () => {
+    expect(toNuvemshopHtml('Tamanho <G>')).toBe('<p>Tamanho &lt;G&gt;</p>');
+    expect(toNuvemshopHtml('Tamanho <M> e <GG>')).toBe('<p>Tamanho &lt;M&gt; e &lt;GG&gt;</p>');
   });
 
   it('não transforma &amp; em &amp;amp;', () => {
