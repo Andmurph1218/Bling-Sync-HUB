@@ -94,6 +94,7 @@ Continua em aberto como evolução futura. O HUB opera em modo catálogo (recusa
 - [x] Publicação idempotente na Nuvemshop validada em testes automatizados, com `LIVE_PUBLISH_ALLOWLIST` e botão de pânico ativos.
 - [x] Reconciliação pagina por ID, descobre `store_id` da Nuvemshop, lê em lote sem apagar retrato em `429`/`5xx` e exige 2 sinais para vínculo automático.
 - [x] Sync do Bling destravado acima da página 195 com `lockDuration` de 5 min e retomada automática no boot.
+- [ ] Verificar se a sincronização dos produtos ativos do Bling travou na página 197 (24.368 itens ativos).
 - [x] `architecture.test.ts` sem ofensores (`50/50` suítes e `176/176` testes aprovados).
 - [ ] Preparação operacional dos SKUs do piloto em produção: criar categoria em `hub_categories` + mapeamento Nuvemshop em `/atributos`, trocar senha inicial dos 2 revisores fiscais (`must_change_password`), aprovar NCM e definir capa dos SKUs escolhidos.
 - [ ] Piloto de 48 h concluído sem *oversell* e sem anúncio duplicado.
