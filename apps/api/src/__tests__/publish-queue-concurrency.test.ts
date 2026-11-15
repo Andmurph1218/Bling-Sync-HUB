@@ -34,6 +34,7 @@ describe('publicação sem duplicidade (sugerido + lock otimista)', () => {
   let poolInstance: DbPoolLike;
   let categoryId = '';
   let posts = 0;
+  let images = 0;
   let listingSeq = 900000;
   let nextListingId = 900001;
   const previousStore = process.env.NUVEMSHOP_STORE_ID;
@@ -97,10 +98,15 @@ describe('publicação sem duplicidade (sugerido + lock otimista)', () => {
         status,
         headers: { 'content-type': 'application/json', 'x-rate-limit-remaining': '20' },
       });
+      if (init?.method === 'POST' && url.includes('/images')) {
+        images += 1;
+        return json(201, { id: images, src: JSON.parse(String(init.body)).src });
+      }
       if (init?.method === 'POST') {
         posts += 1;
         return json(201, { id: nextListingId });
       }
+      if (url.includes('/products/') && url.includes('/images')) return json(200, []);
       if (url.includes('/products/sku/')) return json(404, {});
       return json(200, []);
     });
@@ -108,11 +114,14 @@ describe('publicação sem duplicidade (sugerido + lock otimista)', () => {
 
   beforeEach(() => {
     posts = 0;
+    images = 0;
     listingSeq += 1;
     nextListingId = listingSeq;
   });
 
   afterAll(async () => {
+    posts = 0;
+    images = 0;
     setNuvemshopFetchForTests(null);
     resetNuvemshopRateLimitForTests();
     if (previousStore === undefined) delete process.env.NUVEMSHOP_STORE_ID;

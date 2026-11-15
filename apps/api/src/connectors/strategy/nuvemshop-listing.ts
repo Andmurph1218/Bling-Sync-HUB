@@ -220,8 +220,18 @@ export async function createNuvemshopBatchReader(): Promise<((product: MasterPro
   };
 }
 
+export interface FetchNuvemshopListingOptions {
+  /** Timeout de cada requisição. O default continua 15s. */
+  timeoutMs?: number;
+  /** Só o endpoint /products/sku/{sku}, sem o fallback /products?q=. */
+  skuOnly?: boolean;
+}
+
 /** Busca o anúncio da loja pelo SKU. Sem loja ou token, devolve null e não publica nada. */
-export async function fetchNuvemshopListing(product: MasterProduct): Promise<MarketplaceListing | null> {
+export async function fetchNuvemshopListing(
+  product: MasterProduct,
+  options: FetchNuvemshopListingOptions = {}
+): Promise<MarketplaceListing | null> {
   const sku = product.sku.trim();
   const storeId = await resolveNuvemshopStoreId();
   if (!storeId || !sku) return null;
@@ -230,7 +240,11 @@ export async function fetchNuvemshopListing(product: MasterProduct): Promise<Mar
   if (!stored) return null;
   const headers = nuvemshopHeaders(stored.accessToken);
   const base = `https://api.nuvemshop.com.br/2025-03/${encodeURIComponent(storeId)}`;
-  const bySku = await nuvemshopFetch(`${base}/products/sku/${encodeURIComponent(sku)}`, { headers });
+  const requestInit: RequestInit = {
+    headers,
+    ...(options.timeoutMs ? { signal: AbortSignal.timeout(options.timeoutMs) } : {}),
+  };
+  const bySku = await nuvemshopFetch(`${base}/products/sku/${encodeURIComponent(sku)}`, requestInit);
   if (assertNuvemshopReadable(bySku.status) === 'ok') {
     const body = (await bySku.json()) as NuvemshopProduct & {
       product_id?: number | string;
@@ -267,7 +281,9 @@ export async function fetchNuvemshopListing(product: MasterProduct): Promise<Mar
     if (listing) return listing;
   }
 
-  const response = await nuvemshopFetch(`${base}/products?q=${encodeURIComponent(sku)}`, { headers });
+  if (options.skuOnly) return null;
+
+  const response = await nuvemshopFetch(`${base}/products?q=${encodeURIComponent(sku)}`, requestInit);
   if (assertNuvemshopReadable(response.status) === 'missing') return null;
   const payload = (await response.json()) as NuvemshopProduct[];
   const match = (Array.isArray(payload) ? payload : []).find((item) =>
