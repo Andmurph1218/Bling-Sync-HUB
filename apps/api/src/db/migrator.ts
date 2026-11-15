@@ -32,6 +32,8 @@ import * as m030 from './migrations/1729080000030_stock-split.js';
 import * as m031 from './migrations/1729080000031_pending-review.js';
 import * as m032 from './migrations/1729080000032_dead-letters.js';
 import * as m033 from './migrations/1729080000033_snapshot-upsert.js';
+import * as m034 from './migrations/1729080000034_image-queue-erp-source.js';
+import * as m035 from './migrations/1729080000035_publish-queue-open-unique.js';
 
 export interface MigrationStep {
   id: number;
@@ -74,6 +76,8 @@ export const ALL_MIGRATIONS: MigrationStep[] = [
   { id: 31, name: '1729080000031_pending-review', upSql: m031.UP_SQL, downSql: m031.DOWN_SQL },
   { id: 32, name: '1729080000032_dead-letters', upSql: m032.UP_SQL, downSql: m032.DOWN_SQL },
   { id: 33, name: '1729080000033_snapshot-upsert', upSql: m033.UP_SQL, downSql: m033.DOWN_SQL },
+  { id: 34, name: '1729080000034_image-queue-erp-source', upSql: m034.UP_SQL, downSql: m034.DOWN_SQL },
+  { id: 35, name: '1729080000035_publish-queue-open-unique', upSql: m035.UP_SQL, downSql: m035.DOWN_SQL },
 ];
 
 /**
