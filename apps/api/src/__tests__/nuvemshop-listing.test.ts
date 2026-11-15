@@ -3,7 +3,7 @@ import {
   assertNuvemshopReadable,
   listingFromProduct,
   NuvemshopListingError,
-} from '../connectors/strategy/nuvemshop-listing.js';
+} from '../connectors/nuvemshop/nuvemshop-listing.js';
 
 describe('leitura do anúncio da Nuvemshop', () => {
   it('trata 404 como ausência e 401, 429 e 5xx como falha', () => {

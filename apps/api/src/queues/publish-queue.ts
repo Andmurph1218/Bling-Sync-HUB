@@ -1,14 +1,13 @@
 import { DelayedError, Queue, UnrecoverableError, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { env } from '../config/env.js';
-import { isRetryablePublishError } from '../connectors/strategy/nuvemshop-publish.js';
-import { ListingDraft } from '../connectors/strategy/types.js';
+import { isRetryablePublishError, ListingDraft, MarketplaceConnector } from '../connectors/strategy/types.js';
 import { getMarketplaceConnector } from '../connectors/strategy/factory.js';
 import { query, withTransaction } from '../db/pool.js';
 import { logger } from '../lib/logger.js';
 import { getRedis } from '../lib/redis.js';
 import { EXISTING_LISTING_MESSAGE } from '../catalog/completeness.js';
-import { buildNuvemshopDraft, buildPublishPreview, checklistForChannel, linkedListingExternalId, PublishChannel } from '../catalog/publish-preview.js';
+import { buildPublishPreview, checklistForChannel, linkedListingExternalId, PublishChannel } from '../catalog/publish-preview.js';
 import { isFinalQueueAttempt, JITTERED_BACKOFF, jitteredBackoffStrategy } from './backoff.js';
 import { recordDeadLetter } from './dead-letters.js';
 
@@ -137,8 +136,12 @@ async function mark(
   );
 }
 
-async function listingDraftNow(productId: string, channel: PublishChannel): Promise<ListingDraft | null> {
-  if (channel === 'nuvemshop') return buildNuvemshopDraft(productId);
+async function listingDraftNow(
+  connector: MarketplaceConnector,
+  productId: string,
+  channel: PublishChannel
+): Promise<ListingDraft | null> {
+  if (connector.buildListingDraft) return connector.buildListingDraft(productId);
   const preview = await buildPublishPreview(productId, channel);
   if (!preview?.payload.seller_custom_field) return null;
   return {
@@ -237,7 +240,8 @@ export async function processPublishQueueItem(
       await mark(id, 'pending', PUBLISH_PAUSED_MESSAGE);
       throw new PublishPausedError();
     }
-    const draft = await listingDraftNow(row.product_id, row.channel);
+    const connector = getMarketplaceConnector(row.channel);
+    const draft = await listingDraftNow(connector, row.product_id, row.channel);
     if (!draft) {
       await mark(id, 'failed', 'Sem SKU — não sincroniza');
       return;
@@ -246,7 +250,6 @@ export async function processPublishQueueItem(
       await mark(id, 'success', DRY_RUN_LOG);
       return;
     }
-    const connector = getMarketplaceConnector(row.channel);
     if (hooks?.publish) {
       await hooks.publish(connector.id, draft);
       await mark(id, 'success', null);
@@ -254,7 +257,7 @@ export async function processPublishQueueItem(
     }
     const result = await connector.createListing(draft);
     if (!result.performed || !result.externalId) {
-      await mark(id, 'failed', result.reason || 'A Nuvemshop não devolveu o id do anúncio.');
+      await mark(id, 'failed', result.reason || 'O canal não devolveu o id do anúncio.');
       return;
     }
     await commitCreatedListing(id, row.product_id, row.channel, draft, result.externalId);

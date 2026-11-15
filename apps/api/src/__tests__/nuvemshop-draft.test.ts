@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import { newDb, DataType } from 'pg-mem';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildNuvemshopDraft, checklistForChannel } from '../catalog/publish-preview.js';
+import { checklistForChannel } from '../catalog/publish-preview.js';
+import { buildNuvemshopDraft } from '../connectors/nuvemshop/nuvemshop-draft.js';
 import { DbPoolLike, query, setPool } from '../db/pool.js';
 import { runAllMigrationsUp } from '../db/migrator.js';
 import { setRedis } from '../lib/redis.js';

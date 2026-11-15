@@ -1,8 +1,38 @@
 # Auditoria de Go-Live — JH Sync Hub
 
 Auditoria original: 11/11/2026, base `7fcbb49`.  
-Última atualização: **12/11/2026**, produção em `0671858` (`https://hub.jhshopping.com.br`).  
+Última atualização: **13/11/2026** (revisão 3, abaixo). Revisão anterior: **12/11/2026**, produção em `0671858` (`https://hub.jhshopping.com.br`).  
 Método: leitura do código da API e da web + conferência somente leitura no PostgreSQL e Redis de produção (`201.79.39.118`, 33 migrations aplicadas).
+
+---
+
+## Revisão 3 — 13/11/2026 (pós-auditoria delta)
+
+Base: `main` em `75f7365`. Verificação local: `npm run typecheck` limpo e `npm test` com **55 suítes / 222 testes aprovados**. Achados de origem em [auditoria-delta-go-live-2026-11-13.md](auditoria-delta-go-live-2026-11-13.md).
+
+### Os 4 P0 da auditoria delta estão resolvidos no código
+
+| ID | Situação | Evidência |
+|---|---|---|
+| P0-D1 Fila de imagem recusava `source_platform = 'erp'` | **Resolvido** | Migration `0034` amplia o `CHECK`; teste do Full Sync com mídia do ERP. |
+| P0-D2 `sugerido` não bloqueava `CREATE` | **Resolvido** | Checklist e worker tratam `sugerido` com `listing_id` como anúncio existente (0 POST); `commitCreatedListing` faz upsert para `vinculado`. |
+| P0-D3 Dois jobs criavam dois anúncios | **Resolvido** | Migration `0035` (único parcial em `pending`/`processing`) + reivindicação `UPDATE ... WHERE status = 'pending'`; `publish-queue-concurrency.test.ts`. |
+| P0-D4 Escritor sem imagem, categoria e atributos | **Resolvido** | Draft completo (até 3 eixos, todas as variações, `brand`, categoria numérica, capa primeiro) e descrição em HTML sanitizado; contrato em `nuvemshop-product-body.test.ts` e `nuvemshop-draft.test.ts`. |
+
+### Dívidas P1 que continuam abertas
+
+1. **N+1 na criação de anúncio:** antes do `POST`, `findExistingNuvemshopListing` faz até 1 `GET /products/sku/{sku}` por variante (timeout de 5 s cada). Aceito para o piloto; a busca em lote fica para o P1.
+2. **Sem `PUT` para anúncio existente:** produto já publicado não recebe atualização de título, descrição, categoria, variação nova ou ordem de imagem. Variação criada no ERP depois da publicação não chega à Nuvemshop.
+3. **Imagem reenviada no retry:** a reconciliação compara `src`; se a Nuvemshop reescrever a URL para o CDN, o retry duplica a imagem. P1: mapa `{listing_id, position, sha256}`.
+4. **Valor de eixo vazio passa na validação local:** variante sem valor em um eixo vai como `{"pt": ""}`; quem recusa é a Nuvemshop (400), não o HUB.
+5. **Limites da Nuvemshop só aparecem no envio real:** mais de 3 eixos e categoria inválida falham no worker em modo real; no modo simulado o job fica `success`. O checklist não verifica esses dois pontos.
+6. **Produto encontrado por SKU recebe imagens do HUB:** no caminho `ja_existia`, `syncNuvemshopImages` acrescenta imagens a um anúncio criado fora do HUB.
+7. ~~**Acoplamento do núcleo à Nuvemshop**~~ **Resolvido (15/11):** o código foi para `connectors/nuvemshop/`. A fila usa `connector.buildListingDraft` e `isRetryablePublishError`/`ChannelPublishError` de `strategy/types.ts`; a reconciliação usa `connector.createBatchReader`. O `architecture.test.ts` agora cobre Bling, Nuvemshop e Shopee e proíbe qualquer fornecedor em `catalog/`, `queues/`, `engines/`, `orchestrator/` e `services/`. Dívida que sobra: `routes/oauth.ts`, `routes/app-credentials.ts` e a classe legada `connectors/connectors.ts` ainda importam a Nuvemshop direto (allowlist explícita no teste).
+8. **P1-D1 a P1-D13 da auditoria delta** (allowlist do IQRE, recálculo fora da transação, capa que não perde elegibilidade, `/health` com Redis fora, `listing_status = 'Ativo'` fixo no commit, entre outros). P1-D14 foi absorvido pelo P0-D4.
+
+### Veredito da revisão 3
+
+**Go para o piloto controlado** (até 10 SKUs em `LIVE_PUBLISH_ALLOWLIST`, `ENABLE_LIVE_PUBLISHING=true` sob supervisão), depois de aplicar as migrations `0034` e `0035` na Droplet e confirmar que não há dois jobs abertos para o mesmo produto e canal. **No-Go para o catálogo inteiro** até fechar os itens 1, 2 e 4 acima e concluir o piloto de 48 h.
 
 ---
 

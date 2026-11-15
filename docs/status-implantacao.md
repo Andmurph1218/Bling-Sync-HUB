@@ -597,3 +597,36 @@ Produção atualizada em `https://hub.jhshopping.com.br` (commit `30e088f`, **33
   1. Preparar os SKUs do piloto em produção: hoje `hub_categories = 0` e `channel_category_maps = 0` (é preciso criar a categoria + mapa Nuvemshop em `/atributos`, concluir a troca de senha inicial dos 2 usuários `fiscal_approver` pendentes e aprovar NCM + capa dos SKUs escolhidos).
   2. Definir até 10 SKUs em `LIVE_PUBLISH_ALLOWLIST` antes de ligar `ENABLE_LIVE_PUBLISHING=true`.
 
+
+---
+
+## 15. Pós-Auditoria e Go-Live — 13/11/2026
+
+> Numeração: a seção 14 já registra o estado de 12/11. Este bloco é o fechamento da auditoria delta de 13/11 ([auditoria-delta-go-live-2026-11-13.md](auditoria-delta-go-live-2026-11-13.md)) e da revisão 3 da [auditoria-go-live.md](auditoria-go-live.md).
+
+Código em `main` (`82ba787` → `75f7365`). O deploy na Droplet segue o checklist da revisão 3 da auditoria. `ENABLE_LIVE_PUBLISHING` continua `false` até o piloto.
+
+### Correções P0 da auditoria delta
+
+| ID | Problema | Correção |
+|---|---|---|
+| **P0-D1** | O Full Sync enfileirava imagem do ERP com `source_platform = 'erp'` e o `CHECK` de `image_processing_queue` recusava o `INSERT`. O produto ficava sem capa elegível e sem auto-publicação. | Migration **0034** (`image-queue-erp-source`) amplia o `CHECK` para `('bling', 'erp', 'mercadolivre', 'nuvemshop')`. Teste cobre a mídia do ERP no Full Sync. |
+| **P0-D2** | Vínculo `sugerido` não bloqueava o `CREATE` e o commit estourava o `UNIQUE (product_id, channel)`, deixando anúncio órfão na Nuvemshop. | `linkedListingExternalId` e o checklist tratam `sugerido` com `listing_id` como anúncio existente (0 POST). `commitCreatedListing` faz upsert e promove a linha para `vinculado`. |
+| **P0-D3** | Dois jobs ou dois workers podiam criar dois anúncios para o mesmo produto. | Migration **0035** (`publish-queue-open-unique`): índice único parcial `publish_queue (product_id, channel) WHERE status IN ('pending','processing')`. O worker reivindica com `UPDATE ... WHERE id = $1 AND status = 'pending' RETURNING` (lock otimista, sem transação aberta durante o HTTP). `createPublishJobs` e `enqueueAutoPublish` usam `ON CONFLICT DO NOTHING`. |
+| **P0-D4** | O escritor da Nuvemshop não enviava imagem, categoria, atributos nem todas as variações. | `buildNuvemshopDraft` monta o draft com até 3 eixos reais (`product_axes`/`variant_attributes`), uma entrada por variante ativa, marca em `brand`, categoria numérica obrigatória e imagens com a capa primeiro (URL pública `/api/media/:sha256`). `nuvemshop-publish.ts` valida o payload antes da rede, procura o SKU na loja (timeout de 5 s) e reconcilia imagens por `src`. |
+
+### Sanitizador de HTML
+
+`connectors/nuvemshop/nuvemshop-html.ts` (`sanitize-html`): texto puro vira `<p>`/`<br />` com escape; HTML de origem só é reconhecido por tag conhecida e passa direto pelo sanitizador (sem escape duplo). Remove `script`, `style`, `img`, atributos de evento e esquemas fora de `http`, `https` e `mailto` (`javascript:` sai do `href`). Links recebem `rel="noopener noreferrer"`.
+
+### Cobertura de testes
+
+`npm test`: **55 suítes / 222 testes aprovados**; `npm run typecheck` limpo na API e no painel. Suítes novas ou ampliadas: `nuvemshop-html`, `nuvemshop-product-body`, `nuvemshop-draft`, `nuvemshop-listing`, `publish-queue-concurrency`, `publish-queue`, `full-sync` e `image-worker`.
+
+### Dívidas aceitas para o Go-Live (P1)
+
+- N+1 na busca de existência por SKU antes do `POST` (até 1 chamada por variante). A busca em lote fica para o P1.
+- Sem `PUT` para atualizar anúncio já publicado na Nuvemshop.
+- Reconciliação de imagem por `src` não casa se a Nuvemshop reescrever a URL para o CDN dela.
+- ~~Núcleo acoplado à Nuvemshop~~ **resolvido em 15/11:** código da Nuvemshop isolado em `connectors/nuvemshop/` (draft, HTML, HTTP, leitura, publicação e classe do conector). `publish-queue.ts` e `reconciliation.service.ts` usam só `MarketplaceConnector`; `architecture.test.ts` cobre Bling, Nuvemshop e Shopee.
+- Lista completa e riscos novos na revisão 3 da [auditoria-go-live.md](auditoria-go-live.md).

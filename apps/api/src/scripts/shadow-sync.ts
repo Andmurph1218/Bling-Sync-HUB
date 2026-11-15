@@ -11,7 +11,7 @@
  * 6. Resumo JSON no stdout. CQS/controles permanecem em mode='shadow'.
  */
 
-import { nuvemshopFetch } from '../connectors/strategy/nuvemshop-http.js';
+import { nuvemshopFetch } from '../connectors/nuvemshop/nuvemshop-http.js';
 import { getPool, query } from '../db/pool.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
 import { sharedBlingRateLimiter } from '../connectors/bling/rate-limiter.js';

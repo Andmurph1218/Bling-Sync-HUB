@@ -1,18 +1,15 @@
 import { OAuthTokenManager } from '../oauth-token-manager.js';
-import { ListingDraft, ListingResult, MasterProduct } from './types.js';
+import { ChannelPublishError, ListingDraft, ListingResult, MasterProduct } from '../strategy/types.js';
 import { fetchNuvemshopListing, NUVEMSHOP_FETCH_TIMEOUT_MS, NuvemshopListingError, resolveNuvemshopStoreId } from './nuvemshop-listing.js';
 import { nuvemshopFetch } from './nuvemshop-http.js';
 
-export class NuvemshopPublishError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message);
+export { isRetryablePublishError } from '../strategy/types.js';
+
+export class NuvemshopPublishError extends ChannelPublishError {
+  constructor(status: number, message: string) {
+    super(status, message);
     this.name = 'NuvemshopPublishError';
   }
-}
-
-/** Só 429 e 5xx voltam para a fila. 400 e o restante encerram o job. */
-export function isRetryablePublishError(error: unknown): boolean {
-  return error instanceof NuvemshopPublishError && (error.status === 429 || error.status >= 500);
 }
 
 function publishMessage(status: number, body: unknown): string {

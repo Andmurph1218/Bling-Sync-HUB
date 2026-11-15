@@ -4,7 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { EXISTING_LISTING_MESSAGE } from '../catalog/completeness.js';
 import { checklistForChannel } from '../catalog/publish-preview.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
-import { resetNuvemshopRateLimitForTests, setNuvemshopFetchForTests } from '../connectors/strategy/nuvemshop-http.js';
+import { resetNuvemshopRateLimitForTests, setNuvemshopFetchForTests } from '../connectors/nuvemshop/nuvemshop-http.js';
 import { DbPoolLike, query, setPool } from '../db/pool.js';
 import { runAllMigrationsUp } from '../db/migrator.js';
 import { setRedis } from '../lib/redis.js';

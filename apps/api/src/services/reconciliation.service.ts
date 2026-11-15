@@ -3,8 +3,7 @@ import { productsWithSellerWarehouse } from '../catalog/warehouse-stock.js';
 import { ACTIVE_CATALOG_CHANNELS } from '../config/channels.js';
 import { activeErpConnector, getMarketplaceConnector } from '../connectors/strategy/factory.js';
 import { collectListingSignals, linkStatusFromSignals, ListingSignal } from '../connectors/strategy/listing-signals.js';
-import { createNuvemshopBatchReader } from '../connectors/strategy/nuvemshop-listing.js';
-import { MarketplaceListing, MasterProduct } from '../connectors/strategy/types.js';
+import { ListingBatchReader, MarketplaceListing, MasterProduct } from '../connectors/strategy/types.js';
 import { query } from '../db/pool.js';
 import { enqueueProductImagesForSync, isAllowedImageHost } from '../engines/iqre.js';
 import { logger } from '../lib/logger.js';
@@ -388,26 +387,28 @@ export async function reconcileAll(read: ListingReader = defaultReader): Promise
     if (channels.length === 0) {
       return { snapshots: 0, alerts: 0, linked: 0 };
     }
-    let nuvemshopBatch: ((product: MasterProduct) => MarketplaceListing | null) | null = null;
-    if (channels.includes('nuvemshop')) {
+    const batches = new Map<string, ListingBatchReader>();
+    for (const channel of channels) {
+      const connector = getMarketplaceConnector(channel);
+      if (!connector.createBatchReader) continue;
       try {
-        nuvemshopBatch = await createNuvemshopBatchReader();
-        logger.info('Índice em lote da Nuvemshop carregado para reconciliação', {
-          enabled: nuvemshopBatch !== null,
+        const batch = await connector.createBatchReader();
+        logger.info('Índice em lote do canal carregado para reconciliação', {
+          channel,
+          enabled: batch !== null,
         });
+        if (batch) batches.set(channel, batch);
       } catch (error) {
-        logger.warn('Falha ao carregar índice em lote da Nuvemshop; usando leitura individual', {
+        logger.warn('Falha ao carregar índice em lote do canal; usando leitura individual', {
+          channel,
           error: error instanceof Error ? error.message : String(error),
         });
       }
     }
-    if (nuvemshopBatch !== null) {
-      const lookup = nuvemshopBatch;
+    if (batches.size > 0) {
       effectiveRead = async (channel, product) => {
-        if (channel === 'nuvemshop') {
-          return lookup(product);
-        }
-        return defaultReader(channel, product);
+        const lookup = batches.get(channel);
+        return lookup ? lookup(product) : defaultReader(channel, product);
       };
     }
   }

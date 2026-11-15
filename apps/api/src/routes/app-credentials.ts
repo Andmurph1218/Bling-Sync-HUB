@@ -93,7 +93,7 @@ async function writeCredentials(req: Request, res: Response, next: NextFunction)
     }
     if (provider === 'nuvemshop') {
       const explicitStoreId = parsed.data.storeId?.trim() ?? '';
-      const listing = await import('../connectors/strategy/nuvemshop-listing.js');
+      const listing = await import('../connectors/nuvemshop/nuvemshop-listing.js');
       if (/^\d+$/.test(explicitStoreId)) {
         await listing.rememberNuvemshopStoreId(explicitStoreId);
       } else {

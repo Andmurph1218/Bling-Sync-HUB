@@ -6,7 +6,7 @@ HUB / iPaaS de normalização de catálogo. Sistemas internos (ERP e apps) entre
 
 O ERP instalado hoje é o Bling. Os canais com código são Nuvemshop (ativo) e Mercado Livre (código presente, produto inativo). Shopee, Amazon e TikTok Shop aparecem na loja como em breve. Preço, estoque e fiscal continuam soberanos no ERP. O canal enriquece conteúdo e mídia. Pedido e NF-e ficam fora.
 
-O painel público é `https://hub.jhshopping.com.br`. O acompanhamento está em [docs/status-implantacao.md](docs/status-implantacao.md) (seção 14) e a auditoria pré-go-live em [docs/auditoria-go-live.md](docs/auditoria-go-live.md).
+O painel público é `https://hub.jhshopping.com.br`. O acompanhamento está em [docs/status-implantacao.md](docs/status-implantacao.md) (seção 15) e a auditoria pré-go-live em [docs/auditoria-go-live.md](docs/auditoria-go-live.md).
 
 ## Escopo
 
@@ -31,7 +31,9 @@ ERP, apps        ->        recebe                      catálogo e preço
                            sincroniza e envia    <-    status de catálogo
 ```
 
-O modelo do meio é `master_products` + `product_variants` + mapas de categoria e atributo por canal. A fábrica de conectores é `apps/api/src/connectors/strategy/factory.ts`. A fila de distribuição é `publish_queue` (BullMQ). Com `ENABLE_LIVE_PUBLISHING` diferente de `true`, o worker simula e não chama o marketplace.
+O modelo do meio é `master_products` + `product_variants` + mapas de categoria e atributo por canal. A fábrica de conectores é `apps/api/src/connectors/strategy/factory.ts`. Cada fornecedor vive na própria pasta (`connectors/bling`, `connectors/nuvemshop`, `connectors/shopee`); a fila e a reconciliação falam só com o contrato `MarketplaceConnector` (`buildListingDraft`, `createBatchReader`, `ChannelPublishError`), e o `architecture.test.ts` impede que o núcleo importe uma pasta de fornecedor. A fila de distribuição é `publish_queue` (BullMQ). Com `ENABLE_LIVE_PUBLISHING` diferente de `true`, o worker simula e não chama o marketplace.
+
+A Nuvemshop publica o produto completo: até 3 eixos de variação (`attributes` com os nomes dos eixos e uma entrada em `variants` por variante ativa, sem descartar SKU), marca em `brand`, categoria numérica obrigatória e imagens com a capa na posição 1, servidas pelo cache `/api/media/:sha256`. A descrição sai em HTML sanitizado (`connectors/nuvemshop/nuvemshop-html.ts`, `sanitize-html`): texto puro vira parágrafo, `script`, eventos e `javascript:` são removidos. Produto com mais de 3 eixos falha com mensagem explícita e não publica.
 
 A volta desenhada no diagrama (preço, estoque e pedido saindo do canal e entrando no ERP) não está ligada. Webhook de catálogo é aceito. Webhook de pedido ou nota é recusado. `updateStock` do conector de canal devolve `estoque_na_integracao_nativa`.
 
@@ -81,6 +83,13 @@ Premissa de operação atual: uma conta de ERP, os canais que estiverem conectad
 ## Migrations
 
 As migrations ficam em `apps/api/src/db/migrations` e são TypeScript. O `node-pg-migrate` carrega cada arquivo com `require()`. No Linux o Node recusa essa sintaxe (`SyntaxError: Unexpected token '{'`). O script `npm run migrate:up` executa o binário com `tsx`, que transpila o TypeScript nesse `require`.
+
+Migrations recentes:
+
+| Migration | O que faz |
+|---|---|
+| `1729080000034_image-queue-erp-source` | Amplia o `CHECK` de `image_processing_queue.source_platform` para aceitar `'erp'`. Sem ela o Full Sync não enfileira a imagem do ERP e o produto fica sem capa. |
+| `1729080000035_publish-queue-open-unique` | Índice único parcial `publish_queue (product_id, channel) WHERE status IN ('pending', 'processing')`: um job aberto por produto e canal. A migration falha se a base já tiver dois jobs abertos para o mesmo par; confira antes do deploy. |
 
 No servidor, depois de atualizar o código:
 

@@ -3,7 +3,7 @@ import {
   nuvemshopFetch,
   nuvemshopWaitMs,
   resetNuvemshopRateLimitForTests,
-} from '../connectors/strategy/nuvemshop-http.js';
+} from '../connectors/nuvemshop/nuvemshop-http.js';
 import { setRedis } from '../lib/redis.js';
 
 describe('cota da Nuvemshop', () => {

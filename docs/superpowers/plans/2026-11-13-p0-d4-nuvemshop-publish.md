@@ -33,7 +33,7 @@
 - Create: `apps/api/src/connectors/strategy/nuvemshop-html.ts`
 - Create: `apps/api/src/__tests__/nuvemshop-html.test.ts`
 
-- [ ] **Step 1: instalar a dependência**
+- [x] **Step 1: instalar a dependência**
 
 ```powershell
 npm install sanitize-html@2.13.1 --workspace=@bling-sync/api
@@ -42,7 +42,7 @@ npm install -D @types/sanitize-html@2.13.3 --workspace=@bling-sync/api
 
 Confirme que `apps/api/package.json` ganhou `sanitize-html` em `dependencies` e `@types/sanitize-html` em `devDependencies`, e que o `package-lock.json` da raiz mudou.
 
-- [ ] **Step 2: escrever o teste que falha**
+- [x] **Step 2: escrever o teste que falha**
 
 `apps/api/src/__tests__/nuvemshop-html.test.ts`:
 
@@ -100,7 +100,7 @@ describe('toNuvemshopHtml', () => {
 });
 ```
 
-- [ ] **Step 3: rodar e ver falhar**
+- [x] **Step 3: rodar e ver falhar**
 
 ```powershell
 npm test --workspace=@bling-sync/api -- nuvemshop-html
@@ -108,7 +108,7 @@ npm test --workspace=@bling-sync/api -- nuvemshop-html
 
 Esperado: falha de resolução do módulo `nuvemshop-html.js`.
 
-- [ ] **Step 4: criar o módulo**
+- [x] **Step 4: criar o módulo**
 
 `apps/api/src/connectors/strategy/nuvemshop-html.ts`:
 
@@ -165,7 +165,7 @@ export function toNuvemshopHtml(input: string | null | undefined): string | null
 }
 ```
 
-- [ ] **Step 5: rodar o teste**
+- [x] **Step 5: rodar o teste**
 
 ```powershell
 npm test --workspace=@bling-sync/api -- nuvemshop-html
@@ -173,7 +173,7 @@ npm test --workspace=@bling-sync/api -- nuvemshop-html
 
 Esperado: 9 testes verdes. Se `sanitize-html` emitir `<br />` em vez de `<br>`, ajuste a asserção ao output real **e** mantenha `<br />` como formato canônico no teste; não mexa no sanitizador para forçar `<br>`.
 
-- [ ] **Step 6: commit**
+- [x] **Step 6: commit**
 
 ```powershell
 git add apps/api/package.json package-lock.json apps/api/src/connectors/strategy/nuvemshop-html.ts apps/api/src/__tests__/nuvemshop-html.test.ts
@@ -189,7 +189,7 @@ git commit -m "feat(nuvemshop): converter e sanitizar descricao para HTML"
 - Modify: `apps/api/src/connectors/strategy/nuvemshop-publish.ts` (`productBody`)
 - Create: `apps/api/src/__tests__/nuvemshop-product-body.test.ts`
 
-- [ ] **Step 1: escrever o teste que falha**
+- [x] **Step 1: escrever o teste que falha**
 
 `apps/api/src/__tests__/nuvemshop-product-body.test.ts`:
 
@@ -328,13 +328,13 @@ describe('buildNuvemshopProductBody', () => {
 });
 ```
 
-- [ ] **Step 2: rodar e ver falhar**
+- [x] **Step 2: rodar e ver falhar**
 
 ```powershell
 npm test --workspace=@bling-sync/api -- nuvemshop-product-body
 ```
 
-- [ ] **Step 3: estender `ListingDraft`**
+- [x] **Step 3: estender `ListingDraft`**
 
 Em `apps/api/src/connectors/strategy/types.ts`, substitua a interface atual por:
 
@@ -372,7 +372,7 @@ export interface ListingDraft {
 }
 ```
 
-- [ ] **Step 4: implementar `buildNuvemshopProductBody`**
+- [x] **Step 4: implementar `buildNuvemshopProductBody`**
 
 Em `apps/api/src/connectors/strategy/nuvemshop-publish.ts`, apague `productBody` e adicione no lugar (mantenha `NuvemshopPublishError` e `publishMessage` acima):
 
@@ -442,7 +442,7 @@ export function buildNuvemshopProductBody(draft: ListingDraft): Record<string, u
 
 Troque a chamada no POST de `productBody(draft)` por `buildNuvemshopProductBody(draft)`.
 
-- [ ] **Step 5: rodar**
+- [x] **Step 5: rodar**
 
 ```powershell
 npm test --workspace=@bling-sync/api -- nuvemshop-product-body
@@ -451,7 +451,7 @@ npm run typecheck
 
 Esperado: testes verdes; `typecheck` pode acusar outros usos de `ListingDraft` que ainda compilam (campos novos são opcionais). Se acusar `attributes` sem `name`, nada a fazer: `name` é opcional.
 
-- [ ] **Step 6: commit**
+- [x] **Step 6: commit**
 
 ```powershell
 git add apps/api/src/connectors/strategy/types.ts apps/api/src/connectors/strategy/nuvemshop-publish.ts apps/api/src/__tests__/nuvemshop-product-body.test.ts
@@ -466,7 +466,7 @@ git commit -m "feat(nuvemshop): montar payload com todas as variacoes e atributo
 - Modify: `apps/api/src/catalog/publish-preview.ts`
 - Create: `apps/api/src/__tests__/nuvemshop-draft.test.ts`
 
-- [ ] **Step 1: escrever o teste que falha**
+- [x] **Step 1: escrever o teste que falha**
 
 `apps/api/src/__tests__/nuvemshop-draft.test.ts` (bootstrap igual ao dos outros testes de banco):
 
@@ -648,13 +648,13 @@ describe('buildNuvemshopDraft', () => {
 });
 ```
 
-- [ ] **Step 2: rodar e ver falhar**
+- [x] **Step 2: rodar e ver falhar**
 
 ```powershell
 npm test --workspace=@bling-sync/api -- nuvemshop-draft
 ```
 
-- [ ] **Step 3: implementar**
+- [x] **Step 3: implementar**
 
 Em `apps/api/src/catalog/publish-preview.ts`, adicione os imports:
 
@@ -887,7 +887,7 @@ export async function buildNuvemshopDraft(productId: string): Promise<ListingDra
 }
 ```
 
-- [ ] **Step 4: rodar**
+- [x] **Step 4: rodar**
 
 ```powershell
 npm test --workspace=@bling-sync/api -- nuvemshop-draft
@@ -897,7 +897,7 @@ Esperado: 3 testes verdes. Se a ordem das imagens falhar, confira `is_cover_elig
 
 > **pg-mem + índice parcial:** o planejador do pg-mem usa `product_images_cover_lookup` (parcial, `WHERE is_cover_eligible = true`) em qualquer igualdade de `master_product_id` e devolve só a capa. O índice foi envolvido em `-- mem-skip-start/-- mem-skip-end` na migration 16 (mecanismo já usado na migration 33); em produção ele continua sendo criado. Sem esse ajuste o teste de imagens vê uma imagem só.
 
-- [ ] **Step 5: commit**
+- [x] **Step 5: commit**
 
 ```powershell
 git add apps/api/src/catalog/publish-preview.ts apps/api/src/db/migrations/1729080000016_catalog-list-indexes.ts apps/api/src/__tests__/nuvemshop-draft.test.ts
@@ -915,7 +915,7 @@ O Bling grava produto variável sem `is_default=true`. Hoje `checklistForChannel
 - Modify: `apps/api/src/__tests__/nuvemshop-draft.test.ts` (novo teste)
 - Modify: `apps/api/src/__tests__/publish-queue-concurrency.test.ts` (fixture de categoria numérica)
 
-- [ ] **Step 1: escrever o teste que falha**
+- [x] **Step 1: escrever o teste que falha**
 
 Adicione ao `nuvemshop-draft.test.ts` (novo `it` no describe já existente). Importe `checklistForChannel` na linha de import de `../catalog/publish-preview.js` que já existe no topo (`import { buildNuvemshopDraft, checklistForChannel } ...`):
 
@@ -943,7 +943,7 @@ Adicione ao `nuvemshop-draft.test.ts` (novo `it` no describe já existente). Imp
   });
 ```
 
-- [ ] **Step 2: rodar e ver falhar**
+- [x] **Step 2: rodar e ver falhar**
 
 ```powershell
 npm test --workspace=@bling-sync/api -- nuvemshop-draft
@@ -951,7 +951,7 @@ npm test --workspace=@bling-sync/api -- nuvemshop-draft
 
 Esperado: falha em `checklist?.ready` / preço.
 
-- [ ] **Step 3: corrigir a query**
+- [x] **Step 3: corrigir a query**
 
 Em `checklistForChannels`, troque o `SELECT` de `products` por:
 
@@ -972,7 +972,7 @@ O `productById` já mantém a **primeira** linha de cada produto (`if (!productB
 
 > Se o pg-mem reclamar de `ORDER BY (pv.is_default = true) DESC`, troque por `CASE WHEN pv.is_default = true THEN 0 ELSE 1 END ASC` — o comportamento é o mesmo.
 
-- [ ] **Step 4: ajustar a fixture do teste de concorrência**
+- [x] **Step 4: ajustar a fixture do teste de concorrência**
 
 Em `apps/api/src/__tests__/publish-queue-concurrency.test.ts`, o mapa usa `'NS-DUP'`, que vai falhar na validação de categoria numérica da Task 3. Troque por `'123457'` nas duas ocorrências:
 
@@ -980,7 +980,7 @@ Em `apps/api/src/__tests__/publish-queue-concurrency.test.ts`, o mapa usa `'NS-D
 VALUES ($1, 'nuvemshop', '123457', 'Duplicidade')
 ```
 
-- [ ] **Step 5: rodar**
+- [x] **Step 5: rodar**
 
 ```powershell
 npm test --workspace=@bling-sync/api -- nuvemshop-draft publish-queue-concurrency
@@ -988,7 +988,7 @@ npm test --workspace=@bling-sync/api -- nuvemshop-draft publish-queue-concurrenc
 
 Esperado: verde.
 
-- [ ] **Step 6: commit**
+- [x] **Step 6: commit**
 
 ```powershell
 git add apps/api/src/catalog/publish-preview.ts apps/api/src/__tests__/nuvemshop-draft.test.ts apps/api/src/__tests__/publish-queue-concurrency.test.ts
@@ -1004,7 +1004,7 @@ git commit -m "fix(checklist): usar variante representante quando nao ha is_defa
 - Modify: `apps/api/src/connectors/strategy/nuvemshop-publish.ts` (`createNuvemshopListing`)
 - Modify: `apps/api/src/__tests__/publish-queue-concurrency.test.ts` (mock separa produto de imagem)
 
-- [ ] **Step 1: estender `fetchNuvemshopListing` com opções**
+- [x] **Step 1: estender `fetchNuvemshopListing` com opções**
 
 Em `nuvemshop-listing.ts`, troque a assinatura e o miolo de rede:
 
@@ -1043,7 +1043,7 @@ export async function fetchNuvemshopListing(
 
 Não altere `NUVEMSHOP_FETCH_TIMEOUT_MS` (15s) nem o comportamento do caminho sem opções.
 
-- [ ] **Step 2: reescrever `createNuvemshopListing`**
+- [x] **Step 2: reescrever `createNuvemshopListing`**
 
 Em `nuvemshop-publish.ts`, extraia autenticação e implemente a busca por SKU:
 
@@ -1160,7 +1160,7 @@ export async function createNuvemshopListing(draft: ListingDraft): Promise<Listi
 
 Ajuste também o import de `MasterProduct` se ele deixar de ser usado.
 
-- [ ] **Step 3: separar POST de produto de POST de imagem no mock de concorrência**
+- [x] **Step 3: separar POST de produto de POST de imagem no mock de concorrência**
 
 Em `publish-queue-concurrency.test.ts`:
 
@@ -1186,14 +1186,14 @@ setNuvemshopFetchForTests(async (url, init) => {
 
 Declare `let images = 0;` junto de `posts`, zere em `beforeEach` e no `afterAll`. O teste continua contando **somente** POST de produto em `posts`.
 
-- [ ] **Step 4: rodar**
+- [x] **Step 4: rodar**
 
 ```powershell
 npm run typecheck
 npm test --workspace=@bling-sync/api -- publish-queue-concurrency
 ```
 
-- [ ] **Step 5: commit**
+- [x] **Step 5: commit**
 
 ```powershell
 git add apps/api/src/connectors/strategy/nuvemshop-listing.ts apps/api/src/__tests__/publish-queue-concurrency.test.ts
@@ -1210,7 +1210,7 @@ git commit -m "feat(nuvemshop): procurar existencia por SKU com timeout curto"
 - Modify: `apps/api/src/connectors/strategy/nuvemshop-publish.ts`
 - Modify: `apps/api/src/__tests__/nuvemshop-product-body.test.ts` (novo teste isolado com mock de fetch)
 
-- [ ] **Step 1: escrever o teste que falha**
+- [x] **Step 1: escrever o teste que falha**
 
 Acrescente ao `nuvemshop-product-body.test.ts` (junte `beforeEach`/`afterEach` ao import de `vitest` do topo e `syncNuvemshopImages` ao import de `nuvemshop-publish.js`):
 
@@ -1289,13 +1289,13 @@ describe('syncNuvemshopImages', () => {
 });
 ```
 
-- [ ] **Step 2: rodar e ver falhar**
+- [x] **Step 2: rodar e ver falhar**
 
 ```powershell
 npm test --workspace=@bling-sync/api -- nuvemshop-product-body
 ```
 
-- [ ] **Step 3: implementar**
+- [x] **Step 3: implementar**
 
 Substitua o stub `syncNuvemshopImages` por:
 
@@ -1363,7 +1363,7 @@ export async function syncNuvemshopImages(
 }
 ```
 
-- [ ] **Step 4: rodar**
+- [x] **Step 4: rodar**
 
 ```powershell
 npm test --workspace=@bling-sync/api -- nuvemshop-product-body
@@ -1371,7 +1371,7 @@ npm test --workspace=@bling-sync/api -- nuvemshop-product-body
 
 Esperado: 12 testes verdes (7 do body + 5 de imagens).
 
-- [ ] **Step 5: commit**
+- [x] **Step 5: commit**
 
 ```powershell
 git add apps/api/src/connectors/strategy/nuvemshop-publish.ts apps/api/src/__tests__/nuvemshop-product-body.test.ts
@@ -1386,7 +1386,7 @@ git commit -m "feat(nuvemshop): sincronizar imagens por URL sem duplicar no retr
 - Modify: `apps/api/src/queues/publish-queue.ts` (`listingDraftNow`)
 - Modify: `apps/api/src/__tests__/publish-queue.test.ts` (fixture de categoria numérica)
 
-- [ ] **Step 1: implementar o roteamento**
+- [x] **Step 1: implementar o roteamento**
 
 Em `publish-queue.ts`, importe `buildNuvemshopDraft` de `../catalog/publish-preview.js` e troque `listingDraftNow` por:
 
@@ -1407,7 +1407,7 @@ async function listingDraftNow(productId: string, channel: PublishChannel): Prom
 
 > `buildPublishPreview` continua sendo usado por `enqueueReadyProducts` e `enqueueAutoPublish`; não remova o import.
 
-- [ ] **Step 2: ajustar a fixture numérica em `publish-queue.test.ts`**
+- [x] **Step 2: ajustar a fixture numérica em `publish-queue.test.ts`**
 
 A categoria `'NS-CAT'` do teste "cria o anúncio na Nuvemshop..." falharia na validação. Troque por `'123456'`:
 
@@ -1415,7 +1415,7 @@ A categoria `'NS-CAT'` do teste "cria o anúncio na Nuvemshop..." falharia na va
 channelCategoryId: '123456',
 ```
 
-- [ ] **Step 3: separar POST de imagem no mock do teste existente**
+- [x] **Step 3: separar POST de imagem no mock do teste existente**
 
 O mock atual conta **todo** POST como criação de produto. Com a sincronização de imagens, a capa passaria a inflar `posts` e quebraria `expect(posts).toHaveLength(3)`. Em `publish-queue.test.ts`, no teste "cria o anúncio na Nuvemshop...", troque o mock por:
 
@@ -1449,7 +1449,7 @@ setNuvemshopFetchForTests(async (url, init) => {
 
 Mantenha o resto do teste igual. `posts` continua contando só produto.
 
-- [ ] **Step 4: rodar**
+- [x] **Step 4: rodar**
 
 ```powershell
 npm run typecheck
@@ -1458,7 +1458,7 @@ npm test --workspace=@bling-sync/api -- publish-queue.test
 
 Esperado: o teste existente continua verde. As asserções atuais (`sent.variants[0]` com `price`, `stock`, `sku`) seguem válidas porque o produto é simples.
 
-- [ ] **Step 5: commit**
+- [x] **Step 5: commit**
 
 ```powershell
 git add apps/api/src/queues/publish-queue.ts apps/api/src/__tests__/publish-queue.test.ts
@@ -1472,7 +1472,7 @@ git commit -m "feat(nuvemshop): usar draft completo no worker de publicacao"
 **Files:**
 - Modify: `apps/api/src/__tests__/publish-queue.test.ts`
 
-- [ ] **Step 1: escrever o teste de contrato**
+- [x] **Step 1: escrever o teste de contrato**
 
 Adicione um novo `it` no describe `P2 — fila de publicação`, com SKUs únicos. Use exatamente esta estrutura (adapte o helper de enqueue do bloco existente):
 
@@ -1684,7 +1684,7 @@ it('publica produto variável com HTML, categoria, marca, atributos e imagens na
 
 > O `GET /products/{id}/images` do mock devolve o que já entrou em `imagePosts`. Na segunda tentativa, a capa está no `Set` e só a secundária é enviada na posição 2 — é exatamente a reconciliação que queremos provar.
 
-- [ ] **Step 2: rodar o contrato**
+- [x] **Step 2: rodar o contrato**
 
 ```powershell
 npm test --workspace=@bling-sync/api -- publish-queue.test
@@ -1692,7 +1692,7 @@ npm test --workspace=@bling-sync/api -- publish-queue.test
 
 Esperado: verde, com 2 objetos em `variants` e imagens nas posições 1 e 2.
 
-- [ ] **Step 3: rodar a suíte completa e o typecheck**
+- [x] **Step 3: rodar a suíte completa e o typecheck**
 
 ```powershell
 npm run typecheck
@@ -1701,14 +1701,14 @@ npm test -- --maxWorkers=2
 
 `--maxWorkers=2` evita a flakiness do `p1-catalog` causada pelos processos externos do wago. Esperado: **exit 0**, todos os arquivos verdes.
 
-- [ ] **Step 4: conferir o comportamento de produção**
+- [x] **Step 4: conferir o comportamento de produção**
 
 Antes de fechar, verifique no `.env` de produção:
 - `PUBLIC_BASE_URL` preenchido (sem ele, as imagens usam a URL de origem e podem ser recusadas);
 - `LIVE_PUBLISH_ALLOWLIST` com os SKUs do teste ou vazio, conforme a política da janela;
 - `NUVEMSHOP_STORE_ID` resolvido (env ou cursor).
 
-- [ ] **Step 5: commit**
+- [x] **Step 5: commit**
 
 ```powershell
 git add apps/api/src/__tests__/publish-queue.test.ts
@@ -1719,17 +1719,17 @@ git commit -m "test(nuvemshop): contrato de publicacao com variacoes e imagens"
 
 ## Critérios de aceite (verificar um por um)
 
-- [ ] `npm run typecheck` exit 0.
-- [ ] `npm test -- --maxWorkers=2` exit 0.
-- [ ] `POST /products` contém `description.pt` em HTML, `categories` numérico, `brand` e `attributes` com os nomes dos eixos.
-- [ ] O body tem **um objeto em `variants` por variante ativa**, com SKU, preço, estoque e `values` na ordem dos `attributes`.
-- [ ] Produto com 10 variações envia 10 objetos (teste unitário cobre).
-- [ ] Primeira imagem enviada tem `position: 1`; capa elegível vem primeiro.
-- [ ] Retry após falha de imagem não reenvia o que já está no anúncio.
-- [ ] Produto variável sem `is_default` fica com checklist verde.
-- [ ] Categoria não numérica falha com mensagem clara e não faz POST.
-- [ ] SKU existente na Nuvemshop (fora do HUB) não gera segundo POST.
-- [ ] 429/5xx voltam o job para `pending`; 4xx encerram.
+- [x] `npm run typecheck` exit 0.
+- [x] `npm test -- --maxWorkers=2` exit 0.
+- [x] `POST /products` contém `description.pt` em HTML, `categories` numérico, `brand` e `attributes` com os nomes dos eixos.
+- [x] O body tem **um objeto em `variants` por variante ativa**, com SKU, preço, estoque e `values` na ordem dos `attributes`.
+- [x] Produto com 10 variações envia 10 objetos (teste unitário cobre).
+- [x] Primeira imagem enviada tem `position: 1`; capa elegível vem primeiro.
+- [x] Retry após falha de imagem não reenvia o que já está no anúncio.
+- [x] Produto variável sem `is_default` fica com checklist verde.
+- [x] Categoria não numérica falha com mensagem clara e não faz POST.
+- [x] SKU existente na Nuvemshop (fora do HUB) não gera segundo POST.
+- [x] 429/5xx voltam o job para `pending`; 4xx encerram.
 
 ## Riscos conhecidos (não resolver nesta entrega)
 
@@ -1738,3 +1738,9 @@ git commit -m "test(nuvemshop): contrato de publicacao com variacoes e imagens"
 3. **Mais de 3 eixos**: falha explícita; não publica torto.
 4. **Reordenação de imagem em anúncio existente**: `position` é append; reordenar exige `PUT /images/{id}`.
 5. **Campos de ficha técnica** (GTIN, voltagem livre) não têm campo na API `2025-03`; continuam apenas no mapa da categoria. Não invente `metafields` nesta entrega.
+
+## Adendo — 13/11/2026
+
+Todas as tarefas deste plano foram concluídas e estão em `main` (`82ba787` → `75f7365`), com `npm test` em 55 suítes / 222 testes aprovados.
+
+O N+1 na busca de SKUs foi aceito como risco conhecido para o Go-Live. A solução definitiva (GET em lote) fica para o P1.

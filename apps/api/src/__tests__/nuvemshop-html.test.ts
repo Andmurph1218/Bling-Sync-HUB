@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { plainTextToHtml, toNuvemshopHtml } from '../connectors/strategy/nuvemshop-html.js';
+import { plainTextToHtml, toNuvemshopHtml } from '../connectors/nuvemshop/nuvemshop-html.js';
 
 describe('toNuvemshopHtml', () => {
   it('converte texto puro com parágrafo em <p>', () => {

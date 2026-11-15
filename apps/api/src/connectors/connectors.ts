@@ -7,7 +7,7 @@ import { query } from '../db/pool.js';
 import { classifyApiHttpError } from '../contracts/mappers.js';
 import { ErpCallLane, ScheduledLimiter, rateLimiter } from './rate-limit-port.js';
 import { OAuthRefreshFn, OAuthTokenManager } from './oauth-token-manager.js';
-import { withNuvemshopLimit } from './strategy/nuvemshop-http.js';
+import { withNuvemshopLimit } from './nuvemshop/nuvemshop-http.js';
 
 export interface HttpTransportRequest {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';

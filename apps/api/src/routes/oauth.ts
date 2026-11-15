@@ -6,7 +6,7 @@ import { query } from '../db/pool.js';
 import { OAuthTokenManager } from '../connectors/oauth-token-manager.js';
 import { loadConnectors } from '../connectors/load.js';
 import { acquireErpRequestSlot, notifyErpRateLimitPenalty } from '../connectors/rate-limit-port.js';
-import { nuvemshopFetch } from '../connectors/strategy/nuvemshop-http.js';
+import { nuvemshopFetch } from '../connectors/nuvemshop/nuvemshop-http.js';
 import { getPublicBaseUrl as readPublicBaseUrl } from '../config/public-url.js';
 import { loadAppCredentials } from '../connectors/app-credentials.js';
 
@@ -620,7 +620,7 @@ oauthRouter.get(
         expiresAt,
       });
       if (storeId) {
-        const listing = await import('../connectors/strategy/nuvemshop-listing.js');
+        const listing = await import('../connectors/nuvemshop/nuvemshop-listing.js');
         await listing.rememberNuvemshopStoreId(storeId);
       }
 

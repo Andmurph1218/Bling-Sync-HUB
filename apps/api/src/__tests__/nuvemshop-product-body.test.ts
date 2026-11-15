@@ -4,11 +4,11 @@ import {
   NUVEMSHOP_MAX_IMAGES,
   NuvemshopPublishError,
   syncNuvemshopImages,
-} from '../connectors/strategy/nuvemshop-publish.js';
+} from '../connectors/nuvemshop/nuvemshop-publish.js';
 import {
   resetNuvemshopRateLimitForTests,
   setNuvemshopFetchForTests,
-} from '../connectors/strategy/nuvemshop-http.js';
+} from '../connectors/nuvemshop/nuvemshop-http.js';
 import { ListingDraft } from '../connectors/strategy/types.js';
 
 function draft(overrides: Partial<ListingDraft> = {}): ListingDraft {

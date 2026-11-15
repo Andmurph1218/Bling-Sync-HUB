@@ -1,8 +1,8 @@
 import { query } from '../../db/pool.js';
 import { OAuthTokenManager } from '../oauth-token-manager.js';
 import { nuvemshopFetch } from './nuvemshop-http.js';
-import { collectListingSignals, ListingSignal } from './listing-signals.js';
-import { MarketplaceListing, MasterProduct } from './types.js';
+import { collectListingSignals, ListingSignal } from '../strategy/listing-signals.js';
+import { MarketplaceListing, MasterProduct } from '../strategy/types.js';
 
 interface NuvemshopVariant {
   sku?: string | null;

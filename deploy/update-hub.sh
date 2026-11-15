@@ -8,6 +8,8 @@ cp -a /tmp/bling-new/Bling-Sync-HUB/. "$APP/"
 cd "$APP"
 # Cópia anterior deixou um conector duplicado. O tsc compila tudo em src.
 rm -f apps/api/src/connectors/strategy/bling-erp.ts
+# A Nuvemshop saiu de connectors/strategy para connectors/nuvemshop; o cp acima não apaga os antigos.
+rm -f apps/api/src/connectors/strategy/nuvemshop-*.ts
 # NODE_ENV=production no .env não pode vazar para o npm: isso omite devDependencies
 # e o build/migration ficam sem tsc e tsx.
 env -u NODE_ENV npm ci

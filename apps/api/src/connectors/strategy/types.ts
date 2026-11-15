@@ -217,6 +217,21 @@ export interface MarketplaceListing {
   signals?: Array<'sku' | 'ean' | 'title'>;
 }
 
+/** Falha de escrita no canal com o status HTTP. O núcleo decide o retry sem conhecer o canal. */
+export class ChannelPublishError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = 'ChannelPublishError';
+  }
+}
+
+/** Só 429 e 5xx voltam para a fila. 400 e o restante encerram o job. */
+export function isRetryablePublishError(error: unknown): boolean {
+  return error instanceof ChannelPublishError && (error.status === 429 || error.status >= 500);
+}
+
+export type ListingBatchReader = (product: MasterProduct) => MarketplaceListing | null;
+
 /** Contrato do marketplace. A publicação do P2 chama estes métodos, não a classe HTTP do canal. */
 export interface MarketplaceConnector {
   readonly id: string;
@@ -226,4 +241,8 @@ export interface MarketplaceConnector {
   createListing(draft: ListingDraft): Promise<ListingResult>;
   updateStock(update: StockUpdate): Promise<StockUpdateResult>;
   receiveWebhook(event: IncomingWebhook): Promise<WebhookReceipt>;
+  /** Draft próprio do canal, lido do modelo do HUB na hora do envio. Sem ele, a fila usa o preview genérico. */
+  buildListingDraft?(productId: string): Promise<ListingDraft | null>;
+  /** Índice do catálogo do canal carregado de uma vez para a reconciliação. null = usar leitura individual. */
+  createBatchReader?(): Promise<ListingBatchReader | null>;
 }

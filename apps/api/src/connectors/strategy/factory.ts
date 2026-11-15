@@ -1,6 +1,7 @@
 import { IntegrationCategory, IntegrationStatus, TokenSnapshot } from './types.js';
 import { ShopeeConnector } from '../shopee/index.js';
-import { MercadoLivreMarketplaceConnector, NuvemshopMarketplaceConnector } from './marketplaces.js';
+import { NuvemshopMarketplaceConnector } from '../nuvemshop/connector.js';
+import { MercadoLivreMarketplaceConnector } from './marketplaces.js';
 import { UnavailableMarketplaceConnector } from './unavailable.js';
 import { ErpConnector, MarketplaceConnector } from './types.js';
 
