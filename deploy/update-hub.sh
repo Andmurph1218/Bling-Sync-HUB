@@ -10,6 +10,11 @@ cd "$APP"
 rm -f apps/api/src/connectors/strategy/bling-erp.ts
 # A Nuvemshop saiu de connectors/strategy para connectors/nuvemshop; o cp acima não apaga os antigos.
 rm -f apps/api/src/connectors/strategy/nuvemshop-*.ts
+# docs/ é espelhado: cp -a não apaga, então documento removido do repositório ficaria no servidor.
+if [ -d /tmp/bling-new/Bling-Sync-HUB/docs ]; then
+  rm -rf docs
+  cp -a /tmp/bling-new/Bling-Sync-HUB/docs ./docs
+fi
 # NODE_ENV=production no .env não pode vazar para o npm: isso omite devDependencies
 # e o build/migration ficam sem tsc e tsx.
 env -u NODE_ENV npm ci

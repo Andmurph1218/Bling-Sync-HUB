@@ -68,6 +68,7 @@ A lista completa de dívidas, com evidência por arquivo, está na [revisão 3 d
 - [Auditoria de Go-Live](auditorias/auditoria-go-live.md) — auditorias de 11/11, 12/11 e revisão 3 de 13/11. **Concluída.**
 - [Auditoria Delta de 13/11](auditorias/auditoria-delta-go-live-2026-11-13.md) — os 4 P0 que antecederam o go-live. **Concluída.**
 - [Plano P0-D4](historico/2026-11-13-p0-d4-nuvemshop-publish.md) — plano de execução da publicação completa na Nuvemshop. **Concluído.**
+- [Revisão do Plano Mestre](historico/revisao-plano-mestre-2026-10-22.md) — revisão de 22/10 que unificou as contradições do briefing. **Concluída.**
 
 ---
 
