@@ -125,7 +125,8 @@ export async function enqueueOrPromotePushJob(input: {
     }
     await client.query(
       `INSERT INTO publish_queue (product_id, channel, payload_json, error_message)
-       VALUES ($1, $2, $3::jsonb, $4)`,
+       VALUES ($1, $2, $3::jsonb, $4)
+       ON CONFLICT DO NOTHING`,
       [
         input.masterProductId,
         input.platform,

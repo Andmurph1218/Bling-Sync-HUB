@@ -75,6 +75,14 @@ function problemContext(payload: BatchPayload): ReprocessContext {
       await recalculateCompleteness([productId]);
     },
     republish: async (publishQueueId) => {
+      // O item vem do painel como 'failed'. O worker só reivindica 'pending',
+      // então reabrimos o job antes de chamar o processador.
+      await query(
+        `UPDATE publish_queue
+         SET status = 'pending', error_message = NULL, updated_at = now()
+         WHERE id = $1 AND status = 'failed'`,
+        [publishQueueId]
+      );
       await processPublishQueueItem(publishQueueId);
     },
     replayWebhook: async (webhookEventId) => {
