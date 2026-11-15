@@ -615,4 +615,208 @@ describe('P2 — fila de publicação', () => {
       await setPublishingPaused(false);
     }
   });
+
+  it('publica produto variável com HTML, categoria, marca, atributos e imagens na ordem', async () => {
+    const category = await query<{ id: string }>(
+      `INSERT INTO hub_categories (name) VALUES ('Nuvemshop Variável') RETURNING id`
+    );
+    const categoryId = category.rows[0]!.id;
+    const product = await query<{ id: string }>(
+      `INSERT INTO master_products (
+         erp_id, erp_sku, name, brand, description, bling_tipo, product_format,
+         hub_category_id, ncm_status, ncm_fiscal_risk
+       ) VALUES ('ns-var', 'NS-VAR', 'Camiseta Dry Fit', 'JHS', $2, 'P', 'V', $1, 'valid', false)
+       RETURNING id`,
+      [categoryId, 'Linha 1\n\nLinha 2']
+    );
+    const productId = product.rows[0]!.id;
+
+    const axes = await query<{ id: string; canonical_name: string }>(
+      `SELECT id, canonical_name FROM attribute_axes WHERE canonical_name IN ('cor', 'tamanho')`
+    );
+    for (const axis of axes.rows) {
+      await query(
+        `INSERT INTO product_axes (master_product_id, axis_id, sort_order) VALUES ($1, $2, $3)`,
+        [productId, axis.id, axis.canonical_name === 'cor' ? 1 : 2]
+      );
+    }
+
+    const first = await query<{ id: string }>(
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, stock, catalog_stock)
+       VALUES ($1, 'NS-AZ-M', false, 'S', 49.9, 3, 3) RETURNING id`,
+      [productId]
+    );
+    const second = await query<{ id: string }>(
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, stock, catalog_stock)
+       VALUES ($1, 'NS-PT-G', false, 'S', 54.9, 4, 4) RETURNING id`,
+      [productId]
+    );
+    const axisId = new Map(axes.rows.map((axis) => [axis.canonical_name, axis.id]));
+    const entries: Array<[string, string, string]> = [
+      [first.rows[0]!.id, axisId.get('cor')!, 'Azul'],
+      [first.rows[0]!.id, axisId.get('tamanho')!, 'M'],
+      [second.rows[0]!.id, axisId.get('cor')!, 'Preto'],
+      [second.rows[0]!.id, axisId.get('tamanho')!, 'G'],
+    ];
+    for (const [variantId, axis, value] of entries) {
+      await query(
+        `INSERT INTO variant_attributes (variant_id, axis_id, canonical_value, sort_order) VALUES ($1, $2, $3, 0)`,
+        [variantId, axis, value]
+      );
+    }
+    await query(
+      `INSERT INTO stock_warehouses (bling_warehouse_id, name, role, include_in_push)
+       VALUES ('DEP-VAR', 'Loja Variável', 'seller', true)`
+    );
+    for (const variantId of [first.rows[0]!.id, second.rows[0]!.id]) {
+      await query(
+        `INSERT INTO variant_stock_balances (variant_id, bling_warehouse_id, saldo_fisico, saldo_virtual)
+         VALUES ($1, 'DEP-VAR', 3, 3)`,
+        [variantId]
+      );
+    }
+    await query(
+      `INSERT INTO product_images (
+         master_product_id, source_url, url_normalized, source_platform,
+         sha256_hash, format, is_cover_eligible, position_ns
+       ) VALUES
+         ($1, 'https://bling.test/sec.jpg', 'https://bling.test/sec.jpg', 'bling', NULL, 'jpeg', false, 2),
+         ($1, 'https://bling.test/capa.jpg', 'https://bling.test/capa.jpg', 'bling', $2, 'jpeg', true, 1)`,
+      [productId, 'b'.repeat(64)]
+    );
+
+    await request(app)
+      .put(`/api/catalog/categories/${categoryId}/channels/nuvemshop`)
+      .set('Cookie', cookie)
+      .send({
+        channelCategoryId: '123456',
+        channelCategoryName: 'Camisetas',
+        attributes: [
+          { channelAttributeId: 'BRAND', channelAttributeName: 'Marca', required: true, mode: 'fixed', fixedValue: 'JHS' },
+        ],
+      });
+
+    const previousBase = process.env.PUBLIC_BASE_URL;
+    const previousStore = process.env.NUVEMSHOP_STORE_ID;
+    process.env.PUBLIC_BASE_URL = 'https://hub.test';
+    process.env.NUVEMSHOP_STORE_ID = '998877';
+    process.env.LIVE_PUBLISH_ALLOWLIST = 'NS-VAR';
+    resetNuvemshopRateLimitForTests();
+    await new OAuthTokenManager().upsertToken({
+      provider: 'nuvemshop',
+      accessToken: 'token-de-teste',
+      refreshToken: null,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    });
+
+    const productPosts: Array<Record<string, unknown>> = [];
+    const imagePosts: Array<{ src: string; position: number }> = [];
+    let createdProductId: number | null = null;
+    let imageAttempts = 0;
+
+    setNuvemshopFetchForTests(async (url, init) => {
+      const json = (status: number, body: unknown) => new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json', 'x-rate-limit-remaining': '20' },
+      });
+
+      if (init?.method === 'POST' && url.includes('/images')) {
+        imageAttempts += 1;
+        // A capa entra; a segunda imagem falha para forçar retry parcial.
+        if (imageAttempts === 2) return json(503, { message: 'indisponível' });
+        const body = JSON.parse(String(init.body)) as { src: string; position: number };
+        imagePosts.push(body);
+        return json(201, { id: imagePosts.length, src: body.src });
+      }
+      if (init?.method === 'POST') {
+        productPosts.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        createdProductId = 88422;
+        return json(201, { id: createdProductId });
+      }
+      if (url.includes('/products/') && url.includes('/images')) {
+        return json(200, imagePosts.map((post) => ({ src: post.src })));
+      }
+      if (url.includes('/products/sku/')) {
+        if (createdProductId === null) return json(404, {});
+        const sku = decodeURIComponent(url.split('/products/sku/')[1]!.split('?')[0]!);
+        return json(200, { product_id: createdProductId, sku, price: '49.90', stock: 3 });
+      }
+      return json(200, []);
+    });
+
+    const enqueue = async () => {
+      await query(
+        `UPDATE publish_queue SET status = 'failed'
+         WHERE product_id = $1 AND channel = 'nuvemshop' AND status IN ('pending', 'processing')`,
+        [productId]
+      );
+      const inserted = await query<{ id: string }>(
+        `INSERT INTO publish_queue (product_id, channel, payload_json)
+         VALUES ($1, 'nuvemshop', '{}') RETURNING id`,
+        [productId]
+      );
+      return inserted.rows[0]!.id;
+    };
+
+    try {
+      const retryId = await enqueue();
+      await expect(processPublishQueueItem(retryId, { live: true })).rejects.toBeInstanceOf(NuvemshopPublishError);
+      expect(productPosts).toHaveLength(1);
+      expect(await query<{ status: string }>(`SELECT status FROM publish_queue WHERE id = $1`, [retryId]))
+        .toMatchObject({ rows: [{ status: 'pending' }] });
+      expect(imagePosts).toEqual([
+        { src: `https://hub.test/api/media/${'b'.repeat(64)}.jpg`, position: 1 },
+      ]);
+
+      const createdId = await enqueue();
+      await processPublishQueueItem(createdId, { live: true });
+
+      // Retry não repete o POST do produto: o lookup por SKU achou 88422.
+      expect(productPosts).toHaveLength(1);
+      const body = productPosts[0] as {
+        name: { pt: string };
+        description: { pt: string };
+        categories: number[];
+        brand: string;
+        attributes: Array<{ pt: string }>;
+        variants: Array<{ sku: string; price: string; stock: number; values: Array<{ pt: string }> }>;
+      };
+      expect(body.name).toEqual({ pt: 'Camiseta Dry Fit' });
+      expect(body.description).toEqual({ pt: '<p>Linha 1</p><p>Linha 2</p>' });
+      expect(body.categories).toEqual([123456]);
+      expect(body.brand).toBe('JHS');
+      expect(body.attributes).toEqual([{ pt: 'Cor' }, { pt: 'Tamanho' }]);
+      expect(body.variants).toHaveLength(2);
+      expect(body.variants.find((variant) => variant.sku === 'NS-AZ-M')).toMatchObject({
+        price: '49.90',
+        stock: 3,
+        values: [{ pt: 'Azul' }, { pt: 'M' }],
+      });
+      expect(body.variants.find((variant) => variant.sku === 'NS-PT-G')).toMatchObject({
+        price: '54.90',
+        stock: 4,
+        values: [{ pt: 'Preto' }, { pt: 'G' }],
+      });
+
+      // O retry reconciliou: a capa já estava no anúncio e só a secundária subiu, na posição 2.
+      expect(imagePosts).toEqual([
+        { src: `https://hub.test/api/media/${'b'.repeat(64)}.jpg`, position: 1 },
+        { src: 'https://bling.test/sec.jpg', position: 2 },
+      ]);
+
+      const link = await query<{ listing_id: string }>(
+        `SELECT listing_id FROM channel_listing_links WHERE product_id = $1 AND channel = 'nuvemshop'`,
+        [productId]
+      );
+      expect(link.rows).toEqual([{ listing_id: '88422' }]);
+    } finally {
+      setNuvemshopFetchForTests(null);
+      resetNuvemshopRateLimitForTests();
+      if (previousBase === undefined) delete process.env.PUBLIC_BASE_URL;
+      else process.env.PUBLIC_BASE_URL = previousBase;
+      if (previousStore === undefined) delete process.env.NUVEMSHOP_STORE_ID;
+      else process.env.NUVEMSHOP_STORE_ID = previousStore;
+      delete process.env.LIVE_PUBLISH_ALLOWLIST;
+    }
+  });
 });
