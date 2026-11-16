@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { requireAuth, requirePermission, requireRole } from '../auth/middleware.js';
 import { query, withTransaction } from '../db/pool.js';
 import { lookupChannelAttributeSpecs } from '../catalog/channel-attributes.js';
-import { listCatalog, CatalogTab } from '../catalog/list.js';
+import { listCatalog, parseCatalogSort, CatalogTab } from '../catalog/list.js';
 import { listProblems } from '../catalog/problems.js';
 import {
   buildProblemsCsv,
@@ -342,6 +342,7 @@ catalogRouter.get('/api/catalog/products', requireAuth, async (req: Request, res
   try {
     const page = Number(req.query.page ?? 1);
     const pageSize = Number(req.query.pageSize ?? 50);
+    const { sortBy, sortOrder } = parseCatalogSort(req.query.sortBy, req.query.sortOrder);
     const listed = await listCatalog({
       tab: parseTab(req.query.status),
       sku: String(req.query.sku ?? ''),
@@ -350,8 +351,10 @@ catalogRouter.get('/api/catalog/products', requireAuth, async (req: Request, res
       page: Number.isFinite(page) ? page : 1,
       pageSize: Number.isFinite(pageSize) ? pageSize : 50,
       gap: String(req.query.pendencia ?? '') || undefined,
+      sortBy,
+      sortOrder,
     });
-    res.status(200).json(listed);
+    res.status(200).json({ ...listed, sortBy, sortOrder });
   } catch (error) {
     next(error);
   }

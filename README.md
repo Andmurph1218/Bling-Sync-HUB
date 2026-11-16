@@ -8,7 +8,7 @@ O ERP instalado é o **Bling**. Os canais com código são **Nuvemshop** (ativo)
 
 - **Painel:** https://hub.jhshopping.com.br
 - **Estado:** V2 concluída, piloto de publicação em andamento (`ENABLE_LIVE_PUBLISHING=false`)
-- **Produção:** commit `c88539c`, 35 migrations aplicadas, 56 suítes / 232 testes
+- **Produção:** 36 migrations aplicadas, 57 suítes / 242 testes
 
 ## Documentação
 
@@ -123,6 +123,7 @@ Migrations recentes:
 |---|---|
 | `1729080000034_image-queue-erp-source` | Amplia o `CHECK` de `image_processing_queue.source_platform` para aceitar `'erp'`. Sem ela o Full Sync não enfileira a imagem do ERP e o produto fica sem capa |
 | `1729080000035_publish-queue-open-unique` | Índice único parcial `publish_queue (product_id, channel) WHERE status IN ('pending', 'processing')`: um job aberto por produto e canal. Falha se a base já tiver dois jobs abertos para o mesmo par; confira antes do deploy |
+| `1729080000036_catalog-sort-indexes` | Índices da ordenação do catálogo: `lower(name)`, `lower(erp_sku)` e a escolha da variante exibida (`master_product_id, is_default DESC, updated_at DESC`) |
 
 O build da API grava `apps/api/dist/db/migrations/package.json` com `{"type":"commonjs"}`. O `tsc` emite essas migrations como CommonJS, e esse arquivo faz o Node tratá-las assim. Não crie esse arquivo à mão no servidor.
 
@@ -156,7 +157,7 @@ Critérios de sucesso na saída: `Migrations complete!`, `env_preserved`, `/heal
 ### Pós-deploy
 
 ```bash
-psql "$DATABASE_URL" -tAc "select count(*), max(name) from pgmigrations;"   # 35 migrations
+psql "$DATABASE_URL" -tAc "select count(*), max(name) from pgmigrations;"   # 36 migrations
 curl -fsS https://hub.jhshopping.com.br/health
 journalctl -u bling-hub-api -p err --since "-5min"
 ```

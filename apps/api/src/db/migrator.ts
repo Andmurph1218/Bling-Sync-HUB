@@ -34,6 +34,7 @@ import * as m032 from './migrations/1729080000032_dead-letters.js';
 import * as m033 from './migrations/1729080000033_snapshot-upsert.js';
 import * as m034 from './migrations/1729080000034_image-queue-erp-source.js';
 import * as m035 from './migrations/1729080000035_publish-queue-open-unique.js';
+import * as m036 from './migrations/1729080000036_catalog-sort-indexes.js';
 
 export interface MigrationStep {
   id: number;
@@ -78,6 +79,7 @@ export const ALL_MIGRATIONS: MigrationStep[] = [
   { id: 33, name: '1729080000033_snapshot-upsert', upSql: m033.UP_SQL, downSql: m033.DOWN_SQL },
   { id: 34, name: '1729080000034_image-queue-erp-source', upSql: m034.UP_SQL, downSql: m034.DOWN_SQL },
   { id: 35, name: '1729080000035_publish-queue-open-unique', upSql: m035.UP_SQL, downSql: m035.DOWN_SQL },
+  { id: 36, name: '1729080000036_catalog-sort-indexes', upSql: m036.UP_SQL, downSql: m036.DOWN_SQL },
 ];
 
 /**
@@ -127,7 +129,8 @@ export async function runAllMigrationsUp(options?: {
           .replace(/-- mem-skip-start[\s\S]*?-- mem-skip-end/g, '')
       : mig.upSql;
 
-    await query(sqlToRun);
+    // Migration só de índice pode ficar vazia depois do strip: pg-mem não recebe nada.
+    if (sqlToRun.trim()) await query(sqlToRun);
     if (mig.id === 1 && !options?.stripPartitionClauseForMemDb) {
       await query(`
         CREATE OR REPLACE FUNCTION forbid_control_changes_mutation()
@@ -204,7 +207,10 @@ export async function runAllMigrationsDown(options?: {
       const { downSql } = m012.buildMonthlyPartitionsSql();
       await query(downSql);
     }
-    await query(mig.downSql);
+    const downSql = options?.stripPartitionClauseForMemDb
+      ? mig.downSql.replace(/-- mem-skip-start[\s\S]*?-- mem-skip-end/g, '')
+      : mig.downSql;
+    if (downSql.trim()) await query(downSql);
     await query(`DELETE FROM pgmigrations WHERE name = $1`, [mig.name]);
     reverted.push(mig.name);
   }

@@ -26,6 +26,28 @@ export type CatalogTab =
   | 'arquivados'
   | 'ready';
 
+/** Colunas ordenáveis da listagem. Valor fora da lista cai na ordenação padrão. */
+export const CATALOG_SORT_COLUMNS = ['name', 'sku', 'price', 'stock', 'completeness', 'type'] as const;
+
+export type CatalogSortBy = (typeof CATALOG_SORT_COLUMNS)[number];
+
+export type CatalogSortOrder = 'asc' | 'desc';
+
+/**
+ * Lê `sortBy`/`sortOrder` da query. A coluna só passa pela allowlist: o texto do
+ * cliente nunca chega ao `ORDER BY`. Ordem inválida vira `desc`.
+ */
+export function parseCatalogSort(
+  sortBy: unknown,
+  sortOrder: unknown
+): { sortBy: CatalogSortBy | null; sortOrder: CatalogSortOrder } {
+  const column = String(sortBy ?? '').trim().toLowerCase();
+  return {
+    sortBy: (CATALOG_SORT_COLUMNS as readonly string[]).includes(column) ? (column as CatalogSortBy) : null,
+    sortOrder: String(sortOrder ?? '').trim().toLowerCase() === 'asc' ? 'asc' : 'desc',
+  };
+}
+
 export interface CatalogListItem {
   id: string;
   erpId: string;
@@ -123,6 +145,7 @@ function rememberLink(
 
 interface VariantRow {
   master_product_id: string;
+  erp_sku: string;
   is_default: boolean;
   updated_at: Date | string | null;
   price: string | null;
@@ -246,6 +269,104 @@ function tabSql(tab: CatalogTab): string {
   return NOT_ARCHIVED;
 }
 
+/**
+ * Variante que a linha exibe, com a mesma ordem de `pickDisplayVariants`:
+ * padrão primeiro, depois a que tem preço, depois a mais recente.
+ */
+const DISPLAY_VARIANT_JOIN = `LEFT JOIN LATERAL (
+  SELECT pv.price, pv.catalog_stock, pv.stock, pv.ean, pv.ean_status
+  FROM product_variants pv
+  WHERE pv.master_product_id = mp.id
+  ORDER BY pv.is_default DESC, (COALESCE(pv.price, 0) > 0) DESC, pv.updated_at DESC NULLS LAST, pv.erp_sku ASC
+  LIMIT 1
+) dv ON true`;
+
+/**
+ * Categorias verdes no canal: existem mapas de atributo e nenhum obrigatório ficou
+ * sem modo ou origem. Mesma regra de `isChannelMappingGreen`, mas sem correlação por
+ * linha, para o `ORDER BY` de completude aproveitar um único subplano.
+ */
+function channelGreenSql(platform: CatalogChannel): string {
+  return `mp.hub_category_id IN (
+    SELECT cm.hub_category_id
+    FROM channel_category_maps cm
+    WHERE cm.platform = '${platform}'
+      AND EXISTS (
+        SELECT 1
+        FROM channel_attribute_maps am
+        WHERE am.channel_category_map_id = cm.id
+          AND am.channel_attribute_id IS NOT NULL
+          AND am.mode IS NOT NULL
+          AND am.channel_attribute_name IS NOT NULL
+          AND am.required IS NOT NULL
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM channel_attribute_maps am
+        WHERE am.channel_category_map_id = cm.id
+          AND am.required = true
+          AND NOT (
+            (am.mode = 'fixed' AND COALESCE(am.fixed_value, '') <> '')
+            OR (am.mode = 'dynamic' AND COALESCE(am.source_field, '') <> '')
+            OR am.mode = 'manual'
+          )
+      )
+  )`;
+}
+
+const CHANNEL_GREEN_ALL = ACTIVE_CATALOG_CHANNELS.map(channelGreenSql).join(' AND ');
+
+const EAN_REQUIRED_CATEGORY = `mp.hub_category_id IN (
+  SELECT cm.hub_category_id
+  FROM channel_attribute_maps am
+  INNER JOIN channel_category_maps cm ON cm.id = am.channel_category_map_id
+  WHERE am.required = true
+    AND (am.channel_attribute_id IN ('GTIN', 'EAN', 'GTIN14') OR am.source_field = 'ean')
+)`;
+
+const DUPLICATE_EAN_DISPLAY = `(dv.ean IS NOT NULL AND dv.ean <> '' AND dv.ean IN (
+  SELECT ean
+  FROM product_variants
+  WHERE ean IS NOT NULL AND ean <> ''
+  GROUP BY ean
+  HAVING count(DISTINCT master_product_id) > 1
+))`;
+
+/**
+ * Quantos dos 9 itens do checklist de catálogo estão ok. O percentual exibido é
+ * `round(ok / 9 * 100)`, então ordenar por esta contagem ordena pelo percentual.
+ */
+const COMPLETENESS_OK_SQL = `(
+  CASE WHEN NOT (${BLANK_SKU}) THEN 1 ELSE 0 END +
+  CASE WHEN NOT (${NO_COVER}) THEN 1 ELSE 0 END +
+  CASE WHEN NOT (${NO_CATEGORY}) THEN 1 ELSE 0 END +
+  CASE WHEN ${CHANNEL_GREEN_ALL} THEN 1 ELSE 0 END +
+  CASE WHEN ${CHANNEL_GREEN_ALL} THEN 1 ELSE 0 END +
+  CASE WHEN NOT (${EAN_REQUIRED_CATEGORY}) OR dv.ean_status = 'valid' THEN 1 ELSE 0 END +
+  CASE WHEN NOT (${BAD_NCM}) THEN 1 ELSE 0 END +
+  CASE WHEN dv.price IS NOT NULL AND dv.price > 0 THEN 1 ELSE 0 END +
+  CASE WHEN NOT (${DUPLICATE_EAN_DISPLAY}) THEN 1 ELSE 0 END
+)`;
+
+/** `ORDER BY` da listagem. Sem `sortBy`, mantém o padrão por última atualização. */
+export function catalogOrderSql(sortBy: CatalogSortBy | null, sortOrder: CatalogSortOrder): string {
+  if (!sortBy) return 'mp.updated_at DESC, mp.erp_sku ASC';
+  const direction = sortOrder === 'asc' ? 'ASC' : 'DESC';
+  const expression: Record<CatalogSortBy, string> = {
+    name: "lower(COALESCE(mp.name, ''))",
+    sku: "lower(COALESCE(mp.erp_sku, ''))",
+    price: 'dv.price',
+    stock: 'COALESCE(dv.catalog_stock, dv.stock)',
+    type: 'mp.product_format',
+    completeness: COMPLETENESS_OK_SQL,
+  };
+  return `${expression[sortBy]} ${direction} NULLS LAST, mp.erp_sku ASC`;
+}
+
+export function needsDisplayVariant(sortBy: CatalogSortBy | null): boolean {
+  return sortBy === 'price' || sortBy === 'stock' || sortBy === 'completeness';
+}
+
 function channelBadge(
   platform: CatalogChannel,
   links: Array<{ platform: CatalogChannel; sync_status: string }>,
@@ -283,6 +404,8 @@ export async function listCatalog(input: {
   gap?: string;
   collectGapSamples?: boolean;
   all?: boolean;
+  sortBy?: CatalogSortBy | null;
+  sortOrder?: CatalogSortOrder;
 }): Promise<{
   items: CatalogListItem[];
   total: number;
@@ -330,14 +453,24 @@ export async function listCatalog(input: {
   const offset = input.all ? 0 : (page - 1) * pageSize;
   const limit = input.all ? Math.max(total, 1) : pageSize;
 
+  const sortBy = input.sortBy ?? null;
+  const sortOrder = input.sortOrder ?? 'desc';
+  const usesDisplayVariant = needsDisplayVariant(sortBy);
+  const displayJoin = usesDisplayVariant ? DISPLAY_VARIANT_JOIN : '';
+  // Só ordena as variantes quando a ordem da linha depende delas: a ordenação extra
+  // custa caro na listagem grande e não muda o que a tabela mostra.
+  const variantOrder = usesDisplayVariant
+    ? ' ORDER BY master_product_id, is_default DESC, (COALESCE(price, 0) > 0) DESC, updated_at DESC NULLS LAST, erp_sku ASC'
+    : '';
   const productRows = await query<Pick<FlagRow, 'id' | 'erp_id' | 'erp_sku' | 'name' | 'brand' | 'product_format'
     | 'ncm_status' | 'ncm_fiscal_risk' | 'hub_category_id' | 'archived_at'>>(
     `SELECT
        mp.id, mp.erp_id, mp.erp_sku, mp.name, mp.brand, mp.product_format,
        mp.ncm_status, mp.ncm_fiscal_risk, mp.hub_category_id, mp.archived_at
      FROM master_products mp
+     ${displayJoin}
      WHERE ${where}
-     ORDER BY mp.updated_at DESC, mp.erp_sku ASC
+     ORDER BY ${catalogOrderSql(sortBy, sortOrder)}
      LIMIT ${limit} OFFSET ${offset}`,
     params
   );
@@ -346,12 +479,12 @@ export async function listCatalog(input: {
   const placeholders = ids.map((_, index) => `$${index + 1}`).join(', ');
   const variantRows = ids.length
     ? await query<VariantRow>(
-        `SELECT master_product_id, is_default, updated_at,
+        `SELECT master_product_id, is_default, updated_at, erp_sku,
                 price::text AS price, promotional_price::text AS promotional_price,
                 catalog_stock::text AS stock, stock::text AS publishable_stock,
                 ean, ean_status
          FROM product_variants
-         WHERE master_product_id IN (${placeholders})`,
+         WHERE master_product_id IN (${placeholders})${variantOrder}`,
         ids
       )
     : { rows: [] as VariantRow[] };

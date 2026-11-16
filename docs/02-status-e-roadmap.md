@@ -23,7 +23,7 @@ Documentos irmãos: [01-arquitetura.md](01-arquitetura.md) (arquitetura e regras
 | Indicador | Valor |
 |---|---|
 | Produção | `https://hub.jhshopping.com.br` (DigitalOcean Droplet, Caddy + systemd) |
-| Migrations aplicadas | **35** (última: `0035_publish-queue-open-unique`) |
+| Migrations aplicadas | **36** (última: `0036_catalog-sort-indexes`) |
 | Testes da API | **56 suítes / 232 testes** aprovados; `typecheck` e `build` limpos |
 | Modo de publicação | `ENABLE_LIVE_PUBLISHING=false`, `LIVE_PUBLISH_ALLOWLIST` vazia |
 | Canal ativo | Nuvemshop (loja `6667412`), isolada em `connectors/nuvemshop` |
@@ -32,7 +32,7 @@ Documentos irmãos: [01-arquitetura.md](01-arquitetura.md) (arquitetura e regras
 
 ### 2.2 O que está no ar
 
-- **Catálogo** (`/catalogo`): espelho normalizado com produtos-pai, variações agrupadas, ficha única, planilhas e cadastro rápido (`+ Produto`) integrado ao Bling.
+- **Catálogo** (`/catalogo`): espelho normalizado com produtos-pai, variações agrupadas, ficha única, planilhas e cadastro rápido (`+ Produto`) integrado ao Bling. Ordenação por nome, SKU, tipo, estoque, preço e completude, com a coluna ativa no cabeçalho e a ordem guardada na URL (`?sortBy=price&sortOrder=desc`).
 - **Sync do Bling**: catálogo ativo paginado, retomada automática após reinício, cota global de 3 req/s no Redis com pausa em 80% da cota diária.
 - **Enriquecimento**: imagens no IQRE (dedup, direitos, capa ≥ 500×500) e NCM em aprovação fiscal de duas etapas.
 - **Reconciliação**: vínculo por dois sinais, `sugerido` para revisão em `/vinculos`, retrato em `marketplace_listings_snapshot` e alertas em `/problemas`.

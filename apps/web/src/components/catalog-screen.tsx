@@ -2,8 +2,8 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
-import { AlertTriangle, ImageOff, MoreVertical, PackageOpen, Pencil, Play, Plus, Search, SlidersHorizontal } from 'lucide-react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ImageOff, MoreVertical, PackageOpen, Pencil, Play, Plus, Search, SlidersHorizontal } from 'lucide-react';
 import { ApiError, apiFetch, API_BASE_URL } from '../utils/api-client';
 import { EmptySkuNotice, isBlankSku } from './empty-sku-notice';
 import { buildBlingProductUrl } from '../utils/matching-signals';
@@ -14,6 +14,52 @@ import { MERCADO_LIVRE_ACTIVE } from '../config/channels';
 import useSWR from 'swr';
 
 type CatalogTab = 'todos' | 'publicados' | 'completude' | 'rejeitados' | 'arquivados' | 'ready';
+type SortColumn = 'name' | 'sku' | 'price' | 'stock' | 'completeness' | 'type';
+type SortOrder = 'asc' | 'desc';
+
+const SORT_COLUMNS: SortColumn[] = ['name', 'sku', 'price', 'stock', 'completeness', 'type'];
+
+function readSort(search: { get: (key: string) => string | null }): { sortBy: SortColumn | null; sortOrder: SortOrder } {
+  const column = search.get('sortBy') ?? '';
+  return {
+    sortBy: SORT_COLUMNS.includes(column as SortColumn) ? (column as SortColumn) : null,
+    sortOrder: search.get('sortOrder') === 'asc' ? 'asc' : 'desc',
+  };
+}
+
+/** Cabeçalho ordenável: mesma densidade da tabela, acento só na coluna ativa. */
+function SortHeader({
+  label,
+  column,
+  sortBy,
+  sortOrder,
+  onSort,
+}: {
+  label: string;
+  column: SortColumn;
+  sortBy: SortColumn | null;
+  sortOrder: SortOrder;
+  onSort: (column: SortColumn) => void;
+}) {
+  const active = sortBy === column;
+  const Icon = !active ? ArrowUpDown : sortOrder === 'asc' ? ArrowUp : ArrowDown;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(column)}
+      aria-label={`Ordenar por ${label}`}
+      className="group -mx-2 -my-1.5 flex w-full items-center gap-1 px-2 py-1.5 text-left uppercase tracking-wider transition-colors hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-copper/50"
+    >
+      <span className={active ? 'text-text-primary' : undefined}>{label}</span>
+      <Icon
+        size={12}
+        strokeWidth={2.5}
+        aria-hidden
+        className={active ? 'text-accent-copper' : 'text-text-muted/40 group-hover:text-text-muted'}
+      />
+    </button>
+  );
+}
 type TopView = 'produtos' | 'envio' | 'importacoes' | 'exportacoes';
 
 interface ExistsProduct {
@@ -234,6 +280,9 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
   const { hasRole } = useCurrentRole();
   const isAdmin = hasRole('admin');
   const search = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const { sortBy, sortOrder } = readSort(search);
   const initialTab = lockedTab ?? (search.get('status') === 'completude' ? 'completude' : search.get('status') === 'ready' ? 'ready' : 'todos');
   const [tab, setTab] = useState<CatalogTab>(initialTab);
   const [gap, setGap] = useState(search.get('pendencia') ?? '');
@@ -294,6 +343,8 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
         page: String(page),
         pageSize: '50',
         pendencia: gap,
+        sortBy: sortBy ?? '',
+        sortOrder,
       });
       const payload = await apiFetch<CatalogPayload>(`/api/catalog/products?${params.toString()}`);
       setData(payload);
@@ -306,7 +357,20 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
     } finally {
       if (!quiet) setLoading(false);
     }
-  }, [applied.brand, applied.name, applied.sku, gap, page, tab]);
+  }, [applied.brand, applied.name, applied.sku, gap, page, sortBy, sortOrder, tab]);
+
+  /** Coluna nova entra em desc; a mesma coluna inverte. A URL é a fonte da verdade. */
+  const applySort = useCallback(
+    (column: SortColumn) => {
+      const nextOrder: SortOrder = sortBy === column ? (sortOrder === 'asc' ? 'desc' : 'asc') : 'desc';
+      const params = new URLSearchParams(search.toString());
+      params.set('sortBy', column);
+      params.set('sortOrder', nextOrder);
+      setPage(1);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    },
+    [pathname, router, search, sortBy, sortOrder]
+  );
 
   useEffect(() => {
     void load();
@@ -758,13 +822,23 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                         />
                       </th>
                       <th className="px-2 py-1.5">Imagem</th>
-                      <th className="px-2 py-1.5">Nome</th>
-                      <th className="px-2 py-1.5">Tipo</th>
-                      <th className="px-2 py-1.5">Estoque</th>
-                      <th className="px-2 py-1.5">Preço</th>
+                      <th className="px-2 py-1.5" aria-sort={sortBy === 'name' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                        <SortHeader label="Nome" column="name" sortBy={sortBy} sortOrder={sortOrder} onSort={applySort} />
+                      </th>
+                      <th className="px-2 py-1.5" aria-sort={sortBy === 'type' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                        <SortHeader label="Tipo" column="type" sortBy={sortBy} sortOrder={sortOrder} onSort={applySort} />
+                      </th>
+                      <th className="px-2 py-1.5" aria-sort={sortBy === 'stock' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                        <SortHeader label="Estoque" column="stock" sortBy={sortBy} sortOrder={sortOrder} onSort={applySort} />
+                      </th>
+                      <th className="px-2 py-1.5" aria-sort={sortBy === 'price' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                        <SortHeader label="Preço" column="price" sortBy={sortBy} sortOrder={sortOrder} onSort={applySort} />
+                      </th>
                       <th className="px-2 py-1.5">Promo</th>
                       <th className="px-2 py-1.5">Integrado</th>
-                      <th className="px-2 py-1.5">Completude</th>
+                      <th className="px-2 py-1.5" aria-sort={sortBy === 'completeness' ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                        <SortHeader label="Completude" column="completeness" sortBy={sortBy} sortOrder={sortOrder} onSort={applySort} />
+                      </th>
                       <th className="px-2 py-1.5">Ações</th>
                     </tr>
                   </thead>

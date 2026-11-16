@@ -1,7 +1,7 @@
 # 01 — Arquitetura e Regras
 
 **Documento canônico de arquitetura do JH Sync Hub.**  
-Atualizado em 15/11/2026, commit `c88539c`, produção em `https://hub.jhshopping.com.br` com 35 migrations aplicadas.
+Atualizado em 16/11/2026, produção em `https://hub.jhshopping.com.br` com 36 migrations aplicadas.
 
 Este arquivo tem três partes:
 
