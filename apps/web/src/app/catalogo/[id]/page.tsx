@@ -14,6 +14,7 @@ import {
   Send,
   History,
   Database,
+  RefreshCw,
 } from 'lucide-react';
 import { buildBlingProductUrl } from '../../../utils/matching-signals';
 import { translateBlockerToPlainPortuguese } from '../../../utils/operational-state';
@@ -21,6 +22,7 @@ import { apiFetch, ApiError } from '../../../utils/api-client';
 import { EmptySkuNotice, isBlankSku } from '../../../components/empty-sku-notice';
 import { MERCADO_LIVRE_ACTIVE } from '../../../config/channels';
 import { AllClearRow, BlockerRow, ChecklistBadge, ReadinessHeroCard } from '../../../components/product-readiness';
+import { Toaster, ToastMessage } from '../../../components/toaster';
 
 interface PushAttemptRow {
   id: string;
@@ -194,7 +196,18 @@ function FichaUnicaProdutoPage({
   const [importNotice, setImportNotice] = useState<string | null>(null);
   const [places, setPlaces] = useState<Array<{ locationType: string; storeId: string; quantity: number; label: string; readOnly: boolean }>>([]);
   const [categories, setCategories] = useState<HubCategoryOption[]>([]);
+  const [recalculating, setRecalculating] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const erpId = params.id;
+
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = window.setInterval(() => {
+      setCooldown((value) => (value <= 1 ? 0 : value - 1));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [cooldown]);
 
   useEffect(() => {
     if (activeTab !== 'canais' || !sheet?.item.id) return;
@@ -261,6 +274,44 @@ function FichaUnicaProdutoPage({
   const nsIntegration = activeIntegrations.find((channel) => channel.platform === 'nuvemshop');
   const mlIntegration = activeIntegrations.find((channel) => channel.platform === 'mercadolivre');
 
+  /**
+   * Recalcula só no banco: a rota chama o CRE e o checklist local. Depois de
+   * responder, o botão fica 5 s bloqueado para o operador não repetir a leitura.
+   */
+  async function recalculateReadiness(): Promise<void> {
+    if (recalculating || cooldown > 0) return;
+    const previous = nsIntegration?.percent ?? sheet?.item.checklist.percent ?? null;
+    setRecalculating(true);
+    try {
+      const payload = await apiFetch<{
+        item: CatalogSheet['item'];
+        readiness: ProductDetailPayload['readiness'];
+      }>(`/api/catalog/products/${prod.id}/recalculate-readiness`, { method: 'POST' });
+      const next = payload.item.integrations?.find((channel) => channel.platform === 'nuvemshop')?.percent ?? null;
+      setSheet((current) => (current ? { ...current, item: payload.item } : current));
+      setDetail((current) => (current ? { ...current, readiness: payload.readiness } : current));
+      if (previous !== null && next !== null && next > previous) {
+        setToasts((prev) => [
+          ...prev,
+          { id: `${Date.now()}-${prev.length}`, variant: 'success', title: `Prontidão atualizada! Nova nota: ${next}%` },
+        ]);
+      } else {
+        setToasts((prev) => [
+          ...prev,
+          { id: `${Date.now()}-${prev.length}`, variant: 'neutral', title: 'Prontidão verificada. Nenhuma alteração detectada.' },
+        ]);
+      }
+    } catch {
+      setToasts((prev) => [
+        ...prev,
+        { id: `${Date.now()}-${prev.length}`, variant: 'warning', title: 'Não foi possível recalcular a prontidão.' },
+      ]);
+    } finally {
+      setRecalculating(false);
+      setCooldown(5);
+    }
+  }
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
       <div className="mb-4">
@@ -312,6 +363,16 @@ function FichaUnicaProdutoPage({
             <span>Abrir no Bling</span>
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
+          <button
+            type="button"
+            onClick={() => void recalculateReadiness()}
+            disabled={recalculating || cooldown > 0}
+            aria-busy={recalculating}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border-color bg-bg-surface px-3.5 py-2 text-xs font-semibold text-text-primary transition hover:border-accent-copper/60 hover:text-accent-copper disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${recalculating ? 'animate-spin' : ''}`} aria-hidden />
+            {recalculating ? 'Recalculando...' : cooldown > 0 ? `Aguarde ${cooldown}s` : 'Atualizar Prontidão'}
+          </button>
           {isBlankSku(prod?.erp_sku) ? (
             <span
               className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-semibold text-rose-200"
@@ -881,6 +942,10 @@ function FichaUnicaProdutoPage({
           </div>
         )}
       </section>
+      <Toaster
+        toasts={toasts}
+        onDismiss={(id) => setToasts((prev) => prev.filter((toast) => toast.id !== id))}
+      />
     </main>
   );
 }

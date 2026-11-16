@@ -28,6 +28,7 @@ import {
   suggestStudioMappings,
 } from '../catalog/mapping-studio.js';
 import { buildPublishPreview, recalculateCompleteness, PublishChannel } from '../catalog/publish-preview.js';
+import { calculateProductReadinessCre } from '../engines/cre.js';
 import { enqueueReadyProducts, isLivePublishingEnabled } from '../queues/publish-queue.js';
 import { loadConnectors } from '../connectors/load.js';
 import { buildCatalogWorkbook, buildImportTemplateCsv } from '../catalog/spreadsheet.js';
@@ -568,6 +569,71 @@ catalogRouter.post(
       }
       const items = await recalculateCompleteness(parsed.data.ids);
       res.status(200).json({ items, published: false });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * Recalcula a prontidão do produto só com o banco local: CRE grava as notas em
+ * channel_readiness_scores e o checklist é lido do catálogo. Nenhuma chamada ao
+ * Bling ou à Nuvemshop e nenhum job na fila — a ação é do operador, não do sync.
+ */
+catalogRouter.post(
+  '/api/catalog/products/:id/recalculate-readiness',
+  requireRole('operator', 'admin'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const found = await query<{ id: string; erp_id: string }>(
+        `SELECT id, erp_id FROM master_products WHERE erp_id = $1 OR id::text = $1 LIMIT 1`,
+        [req.params.id]
+      );
+      const product = found.rows[0];
+      if (!product) {
+        res.status(404).json({ error: 'not_found' });
+        return;
+      }
+
+      await calculateProductReadinessCre(product.id);
+
+      const [listed, scores] = await Promise.all([
+        listCatalog({
+          tab: 'todos',
+          sku: '',
+          name: '',
+          brand: '',
+          page: 1,
+          pageSize: 1,
+          erpId: product.erp_id,
+        }),
+        query<{
+          variant_id: string;
+          score_bling: number;
+          score_ml: number;
+          score_ns: number;
+          publishable_bling: boolean;
+          publishable_ml: boolean;
+          publishable_ns: boolean;
+          blockers: string[];
+          top_improvements: unknown;
+        }>(
+          `SELECT variant_id, score_bling, score_ml, score_ns,
+                  publishable_bling, publishable_ml, publishable_ns,
+                  blockers, top_improvements
+           FROM channel_readiness_scores
+           WHERE master_product_id = $1
+           ORDER BY calculated_at DESC`,
+          [product.id]
+        ),
+      ]);
+
+      const item = listed.items[0];
+      if (!item) {
+        res.status(404).json({ error: 'not_found' });
+        return;
+      }
+      res.status(200).json({ item, readiness: scores.rows });
     } catch (error) {
       next(error);
     }
