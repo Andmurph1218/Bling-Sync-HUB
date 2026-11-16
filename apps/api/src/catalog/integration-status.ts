@@ -13,6 +13,8 @@ export interface ChannelBlocker {
   title: string;
   fixHref: string;
   where: 'erp' | 'hub';
+  /** Item do checklist que impede o envio. Aviso (false) não bloqueia. */
+  blocks: boolean;
 }
 
 export interface ChannelIntegrationView {
@@ -36,7 +38,10 @@ const LABEL: Record<IntegrationVisual, string> = {
 function bottleneckTitle(code: string, fallback: string, percent: number): string {
   if (code === 'ncm') return 'Falta preencher NCM no ERP';
   if (code === 'cover') return `Falta imagem com fundo branco (completude ${percent}%)`;
-  if (code === 'hub_category' || code === 'channel_category') return 'Falta vincular categoria no HUB';
+  if (code === 'hub_category') return 'Falta vincular categoria no HUB';
+  // Categoria do canal é outro passo (mapa em /atributos); sem título próprio, a
+  // ficha repetia a mesma frase duas vezes.
+  if (code === 'channel_category') return 'Categoria do canal não mapeada';
   if (code === 'ean') return 'Aguardando aprovação de EAN';
   if (code === 'sku') return 'Sem SKU no ERP';
   return fallback;
@@ -57,12 +62,22 @@ export function describeChannelIntegration(input: {
   checklist: ChecklistResult;
 }): ChannelIntegrationView {
   const failing = input.checklist.items.filter((item) => !item.ok);
-  const blockers = failing.map((item) => ({
-    code: item.code,
-    title: bottleneckTitle(item.code, item.title, input.checklist.percent),
-    fixHref: item.fixHref,
-    where: fixPlace(item.code),
-  }));
+  // Um título por pendência: códigos diferentes que explicam a mesma coisa não
+  // aparecem duas vezes na ficha.
+  const seenTitles = new Set<string>();
+  const blockers = failing
+    .map((item) => ({
+      code: item.code,
+      title: bottleneckTitle(item.code, item.title, input.checklist.percent),
+      fixHref: item.fixHref,
+      where: fixPlace(item.code),
+      blocks: item.blocks,
+    }))
+    .filter((blocker) => {
+      if (seenTitles.has(blocker.title)) return false;
+      seenTitles.add(blocker.title);
+      return true;
+    });
   const critical = blockers.filter((item) => item.code === 'sku' || item.code === 'ncm');
   const linked = isChannelLinked(input.linkStatus);
   const ncmBlocked = failing.some((item) => item.code === 'ncm' || item.code === 'ncm_approval');

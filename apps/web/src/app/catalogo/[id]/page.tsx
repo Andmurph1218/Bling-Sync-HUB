@@ -20,6 +20,7 @@ import { translateBlockerToPlainPortuguese } from '../../../utils/operational-st
 import { apiFetch, ApiError } from '../../../utils/api-client';
 import { EmptySkuNotice, isBlankSku } from '../../../components/empty-sku-notice';
 import { MERCADO_LIVRE_ACTIVE } from '../../../config/channels';
+import { AllClearRow, BlockerRow, ChecklistBadge, ReadinessHeroCard } from '../../../components/product-readiness';
 
 interface PushAttemptRow {
   id: string;
@@ -35,6 +36,15 @@ interface PushAttemptRow {
 
 type ProductTab = 'geral' | 'variacoes' | 'imagens' | 'atributos' | 'canais' | 'fiscal';
 
+const CHANNEL_NAME: Record<string, string> = {
+  nuvemshop: 'Nuvemshop',
+  mercadolivre: 'Mercado Livre',
+};
+
+function channelName(platform: string): string {
+  return CHANNEL_NAME[platform] ?? platform;
+}
+
 const TABS: Array<{ id: ProductTab; label: string }> = [
   { id: 'geral', label: 'Geral' },
   { id: 'variacoes', label: 'Variações' },
@@ -49,13 +59,13 @@ interface CatalogSheet {
     id: string;
     name: string | null;
     brand: string | null;
-    checklist: { percent: number; items: Array<{ code: string; ok: boolean; title: string; fixHref: string }> };
+    checklist: { percent: number; items: Array<{ code: string; ok: boolean; blocks?: boolean; title: string; fixHref: string }> };
     integrations?: Array<{
       platform: string;
       label: string;
       percent: number;
       ready: boolean;
-      blockers: Array<{ code: string; title: string; fixHref: string; where: 'erp' | 'hub' }>;
+      blockers: Array<{ code: string; title: string; fixHref: string; where: 'erp' | 'hub'; blocks: boolean }>;
     }>;
   };
   images: Array<{ url_normalized: string; is_cover_eligible: boolean; rights_status: string; position_ml: number | null; position_ns: number | null }>;
@@ -245,6 +255,11 @@ function FichaUnicaProdutoPage({
   const prod = detail.product;
   const mainVar = detail.variants[0];
   const mainReadiness = detail.readiness[0];
+  const activeIntegrations = (sheet?.item.integrations ?? []).filter(
+    (channel) => MERCADO_LIVRE_ACTIVE || channel.platform !== 'mercadolivre'
+  );
+  const nsIntegration = activeIntegrations.find((channel) => channel.platform === 'nuvemshop');
+  const mlIntegration = activeIntegrations.find((channel) => channel.platform === 'mercadolivre');
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -259,7 +274,7 @@ function FichaUnicaProdutoPage({
       </div>
 
       {/* Cabeçalho da Ficha Única */}
-      <header className="flex flex-col justify-between gap-4 rounded-xl border border-border-color bg-bg-surface/60 p-6 lg:flex-row lg:items-center">
+      <header className="flex flex-col justify-between gap-4 rounded-2xl border border-border-color bg-bg-surface p-6 lg:flex-row lg:items-center">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 font-mono text-xs font-semibold text-emerald-300">
@@ -318,125 +333,151 @@ function FichaUnicaProdutoPage({
       </header>
 
       {/* Navegação das 7 Abas */}
-      <div className="mt-6 flex flex-wrap gap-1.5 border-b border-border-color pb-3">
+      <nav aria-label="Seções da ficha" className="mt-6 flex flex-wrap gap-1 border-b border-border-color">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             type="button"
+            aria-current={activeTab === tab.id ? 'page' : undefined}
             onClick={() => setActiveTab(tab.id)}
-            className={`rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
+            className={`-mb-px rounded-t-lg border-b-2 px-3.5 pb-2.5 pt-2 text-xs font-semibold transition ${
               activeTab === tab.id
-                ? 'border border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
-                : 'border border-transparent bg-bg-surface/60 text-text-muted hover:bg-bg-surface hover:text-text-primary'
+                ? 'border-accent-copper text-text-primary'
+                : 'border-transparent text-text-muted hover:border-border-color hover:text-text-primary'
             }`}
           >
             {tab.label}
           </button>
         ))}
-      </div>
+      </nav>
 
       {/* Conteúdo da Aba Selecionada */}
       <section className="mt-6">
         {activeTab === 'geral' && (
           <div className="space-y-6">
-            <div className={`grid gap-4 ${MERCADO_LIVRE_ACTIVE ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
-              <div className="rounded-xl border border-emerald-500/30 bg-bg-surface/60 p-5">
-                <span className="text-xs font-semibold uppercase text-emerald-400">
-                  Bling ERP v3 (Soberano)
-                </span>
-                <p className="mt-2 text-2xl font-bold text-text-primary">
-                  Nota {mainReadiness?.score_bling ?? '—'} / 100
-                </p>
-                <p className="mt-1 text-xs text-text-muted">
-                  Estoque seller publicado:{' '}
-                  <strong>
-                    {mainVar?.stock !== null && mainVar?.stock !== undefined
-                      ? Math.floor(Number(mainVar.stock))
-                      : 'Aguardando leitura'}{' '}
-                    un.
-                  </strong>{' '}
-                  (Depósito Geral 14886768228).
-                </p>
-              </div>
+            <div className={`grid gap-4 ${MERCADO_LIVRE_ACTIVE ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
+              <ReadinessHeroCard
+                title="Bling ERP v3 · soberano"
+                subtitle={mainReadiness?.publishable_bling ? 'Cadastro completo' : 'Cadastro com pendência'}
+                score={mainReadiness?.score_bling}
+                pendingCount={mainReadiness?.blockers.length}
+                meta={
+                  <>
+                    Estoque seller publicado:{' '}
+                    <strong className="tabular-nums text-text-primary">
+                      {mainVar?.stock !== null && mainVar?.stock !== undefined
+                        ? Math.floor(Number(mainVar.stock))
+                        : 'aguardando leitura'}{' '}
+                      un.
+                    </strong>{' '}
+                    · Depósito Geral 14886768228
+                  </>
+                }
+              />
 
               {MERCADO_LIVRE_ACTIVE && (
-              <div className="rounded-xl border border-amber-500/30 bg-bg-surface/60 p-5">
-                <span className="text-xs font-semibold uppercase text-amber-400">
-                  Mercado Livre (JHS SHOPPING)
-                </span>
-                <p className="mt-2 text-2xl font-bold text-amber-300">
-                  Nota {mainReadiness?.score_ml ?? '—'} / 100
-                </p>
-                <p className="mt-1 text-xs text-text-muted">
-                  {mainReadiness?.publishable_ml
-                    ? 'Apto para publicar conteúdo no Mercado Livre.'
-                    : 'Pendente de categoria verificada ou expansão de descrição técnica.'}
-                </p>
-              </div>
+                <ReadinessHeroCard
+                  title="Mercado Livre · JHS SHOPPING"
+                  subtitle={mainReadiness?.publishable_ml ? 'Apto para publicar' : 'Conteúdo em preparação'}
+                  score={mainReadiness?.score_ml}
+                  pendingCount={mlIntegration?.blockers.length}
+                  meta={
+                    mainReadiness?.publishable_ml
+                      ? 'Categoria verificada e descrição técnica no mínimo.'
+                      : 'Pendente de categoria verificada ou expansão da descrição técnica.'
+                  }
+                />
               )}
 
-              <div className="rounded-xl border border-amber-500/30 bg-bg-surface/60 p-5">
-                <span className="text-xs font-semibold uppercase text-amber-400">
-                  Nuvemshop (Loja 6667412)
-                </span>
-                <p className="mt-2 text-2xl font-bold text-amber-300">
-                  Nota {mainReadiness?.score_ns ?? '—'} / 100
-                </p>
-                <p className="mt-1 text-xs text-text-muted">
-                  {mainReadiness?.publishable_ns
-                    ? 'Apto para publicar conteúdo na Nuvemshop.'
-                    : 'Pendente de enriquecimento de SEO (keywords, meta_description e seo_slug).'}
-                </p>
-              </div>
+              <ReadinessHeroCard
+                title="Nuvemshop · loja 6667412"
+                subtitle={nsIntegration?.label ?? 'Sem leitura do canal'}
+                score={mainReadiness?.score_ns}
+                pendingCount={nsIntegration?.blockers.length}
+                meta={
+                  nsIntegration
+                    ? `${nsIntegration.percent}% do checklist do HUB neste canal.`
+                    : 'A prontidão do canal aparece depois da leitura do catálogo.'
+                }
+              />
             </div>
 
-            <section className="rounded-xl border border-border-color bg-bg-surface/50 p-5">
-              <h2 className="text-sm font-bold text-text-primary">Prontidão para Canais</h2>
-              <p className="mt-1 text-xs text-text-muted">Só entram os canais ativos. O Mercado Livre permanece desligado.</p>
-              <div className="mt-4 space-y-4">
-                {(sheet?.item.integrations ?? []).filter((channel) => MERCADO_LIVRE_ACTIVE || channel.platform !== 'mercadolivre').map((channel) => (
-                  <div key={channel.platform}>
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold">{channel.platform === 'nuvemshop' ? 'Nuvemshop' : channel.platform}</span>
-                      <span className={channel.label === 'Vinculado com Pendência' ? 'font-semibold text-amber-800 dark:text-amber-200' : 'text-text-muted'}>{channel.label}</span>
-                      <span>{channel.percent}% pronto</span>
+            <section className="rounded-2xl border border-border-color bg-bg-surface p-5">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-sm font-bold text-text-primary">Prontidão para Canais</h2>
+                <span className="text-[11px] text-text-muted">Só entram os canais ativos</span>
+              </div>
+              <p className="mt-1 text-xs text-text-muted">
+                Cada pendência aparece uma vez, com o ícone do estado e a ação ao lado. Bloqueio impede o envio; aviso pede revisão.
+              </p>
+
+              <div className="mt-5 space-y-6">
+                {activeIntegrations.map((channel) => (
+                  <div key={channel.platform} className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-text-primary">{channelName(channel.platform)}</span>
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium ${
+                            channel.label === 'Conectado'
+                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                              : channel.label === 'Vinculado com Pendência'
+                                ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-200'
+                                : channel.label === 'Bloqueado'
+                                  ? 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+                                  : 'border-border-color bg-bg-base text-text-muted'
+                          }`}
+                        >
+                          {channel.label}
+                        </span>
+                      </div>
+                      <span className="text-xs tabular-nums text-text-muted">{channel.percent}% do checklist</span>
                     </div>
-                    <div className="mt-1 h-2 overflow-hidden rounded-full bg-bg-base">
-                      <div className="h-full bg-emerald-600" style={{ width: `${channel.percent}%` }} />
+                    <div className="h-1.5 overflow-hidden rounded-full bg-bg-base">
+                      <div
+                        className={`h-full rounded-full transition-[width] duration-500 ${
+                          channel.percent >= 100 ? 'bg-emerald-500' : channel.percent >= 50 ? 'bg-amber-500' : 'bg-rose-500'
+                        }`}
+                        style={{ width: `${Math.max(channel.percent, 2)}%` }}
+                      />
                     </div>
-                    {channel.blockers.length > 0 && (
-                      <ul className="mt-2 space-y-1">
-                        {channel.blockers.map((blocker) => (
-                          <li key={blocker.code} className="text-xs text-rose-700 dark:text-rose-300">
-                            {blocker.title}
-                            {blocker.where === 'erp' ? (
-                              <a href={buildBlingProductUrl(prod.erp_id)} target="_blank" rel="noreferrer" className="ml-2 font-semibold underline">Corrigir no ERP</a>
-                            ) : (
-                              <Link href={blocker.fixHref} className="ml-2 font-semibold underline">Resolver no HUB</Link>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                    <ul className="space-y-2">
+                      {channel.blockers.length > 0 ? (
+                        channel.blockers.map((blocker) => (
+                          <BlockerRow
+                            key={`${channel.platform}-${blocker.code}`}
+                            title={blocker.title}
+                            blocks={blocker.blocks}
+                            where={blocker.where}
+                            fixHref={blocker.fixHref}
+                            erpUrl={buildBlingProductUrl(prod.erp_id)}
+                          />
+                        ))
+                      ) : (
+                        <AllClearRow text="Nenhuma pendência neste canal. O checklist está completo." />
+                      )}
+                    </ul>
                   </div>
                 ))}
-                {(sheet?.item.integrations ?? []).length === 0 && (
+                {activeIntegrations.length === 0 && (
                   <p className="text-xs text-text-muted">A prontidão aparece depois da leitura do catálogo.</p>
                 )}
               </div>
             </section>
 
-            <section className="rounded-xl border border-border-color bg-bg-surface/50 p-5">
+            <section className="rounded-2xl border border-border-color bg-bg-surface p-5">
               <h2 className="text-sm font-bold text-text-primary">Anúncio lido do canal</h2>
               <p className="mt-1 text-xs text-text-muted">Retrato da última reconciliação. Preço e estoque do ERP não mudam.</p>
               {importNotice && <p className="mt-2 text-xs text-text-muted" role="status">{importNotice}</p>}
               {channelSnapshots.length === 0 && <p className="mt-3 text-xs text-text-muted">Nenhum anúncio reconciliado para este produto.</p>}
               <div className="mt-3 space-y-3">
                 {channelSnapshots.map((snapshot) => (
-                  <article key={snapshot.marketplace} className="rounded-lg border border-border-color p-3">
-                    <p className="text-xs font-semibold uppercase text-text-muted">{snapshot.marketplace === 'mercadolivre' ? 'Mercado Livre' : 'Nuvemshop'} · {snapshot.externalId}</p>
+                  <article key={snapshot.marketplace} className="rounded-xl border border-border-color bg-bg-base/60 p-3.5">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                      {channelName(snapshot.marketplace)} · {snapshot.externalId}
+                    </p>
                     <p className="mt-1 text-sm text-text-primary">{snapshot.title ?? 'Sem título'}</p>
-                    <p className="mt-1 text-xs text-text-muted">
+                    <p className="mt-1 text-xs tabular-nums text-text-muted">
                       Preço no canal: {snapshot.price ?? '—'} · Estoque no canal: {snapshot.stock ?? '—'} · {snapshot.status ?? 'Sem status'}
                     </p>
                     {(sheet?.images.length ?? 0) === 0 && snapshot.images[0] && (
@@ -449,7 +490,7 @@ function FichaUnicaProdutoPage({
                           }).then(() => setImportNotice('Imagem importada para o HUB. O ERP não foi alterado.'))
                             .catch(() => setImportNotice('Não foi possível importar a imagem.'));
                         }}
-                        className="mt-2 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white"
+                        className="mt-2 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-600"
                       >
                         Importar Imagem do Canal
                       </button>
@@ -460,14 +501,14 @@ function FichaUnicaProdutoPage({
             </section>
 
             {places.length > 0 && (
-              <section className="rounded-xl border border-border-color bg-bg-surface/50 p-5">
+              <section className="rounded-2xl border border-border-color bg-bg-surface p-5">
                 <h2 className="text-sm font-bold text-text-primary">Depósitos do anúncio</h2>
                 <p className="mt-1 text-xs text-text-muted">O Mercado Livre aceita mais de um centro. Full continua somente leitura.</p>
                 <ul className="mt-3 space-y-2">
                   {places.map((place) => (
-                    <li key={`${place.locationType}-${place.storeId}`} className="flex items-center justify-between text-sm">
+                    <li key={`${place.locationType}-${place.storeId}`} className="flex items-center justify-between gap-3 rounded-xl border border-border-color bg-bg-base/60 px-3 py-2 text-sm">
                       <span className="text-text-primary">{place.label}{place.storeId ? ` · ${place.storeId}` : ''}</span>
-                      <span className="text-text-muted">{place.quantity} un.{place.readOnly ? ' · sem edição' : ''}</span>
+                      <span className="tabular-nums text-text-muted">{place.quantity} un.{place.readOnly ? ' · sem edição' : ''}</span>
                     </li>
                   ))}
                 </ul>
@@ -475,19 +516,14 @@ function FichaUnicaProdutoPage({
             )}
 
             {mainReadiness?.blockers && mainReadiness.blockers.length > 0 && (
-              <div className="rounded-xl border border-border-color bg-bg-surface/50 p-5">
-                <h2 className="text-sm font-bold text-text-primary">
-                  Requisitos Pendentes Explicados para o Operador
-                </h2>
+              <section className="rounded-2xl border border-border-color bg-bg-surface p-5">
+                <h2 className="text-sm font-bold text-text-primary">Requisitos Pendentes Explicados para o Operador</h2>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   {mainReadiness.blockers.map((b) => {
                     const tr = translateBlockerToPlainPortuguese(b);
                     return (
-                      <div
-                        key={b}
-                        className="rounded-lg border border-border-color bg-bg-base p-3.5 text-xs"
-                      >
-                        <p className="font-semibold text-amber-300">{tr.title}</p>
+                      <div key={b} className="rounded-xl border border-border-color bg-bg-base/60 p-3.5 text-xs">
+                        <p className="font-semibold text-amber-700 dark:text-amber-300">{tr.title}</p>
                         <p className="mt-1 text-text-muted">
                           <strong>Próximo passo:</strong> {tr.nextStep}
                         </p>
@@ -495,97 +531,107 @@ function FichaUnicaProdutoPage({
                     );
                   })}
                 </div>
-              </div>
+              </section>
             )}
-          </div>
-        )}
 
-        {activeTab === 'geral' && (
-          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6">
-            <div className="flex items-center gap-2 text-sm font-bold text-text-primary">
-              <Database className="h-4 w-4 text-emerald-400" />
-              <h2>Campos Protegidos (Grupo A — Soberania Absoluta do Bling)</h2>
-            </div>
-            <p className="mt-1 text-xs text-text-muted">
-              Estes valores jamais são sobrescritos por dados vindos do Mercado Livre ou da Nuvemshop.
-            </p>
+            <section className="rounded-2xl border border-border-color bg-bg-surface p-5">
+              <div className="flex items-center gap-2 text-sm font-bold text-text-primary">
+                <Database className="h-4 w-4 text-emerald-500 dark:text-emerald-400" />
+                <h2>Campos Protegidos (Grupo A — Soberania Absoluta do Bling)</h2>
+              </div>
+              <p className="mt-1 text-xs text-text-muted">
+                Estes valores jamais são sobrescritos por dados vindos do Mercado Livre ou da Nuvemshop.
+              </p>
 
-            <p className="mt-1 text-xs text-text-muted">
-              Nome do ERP, somente leitura: <strong className="text-text-primary">{prod.name ?? 'Sem nome'}</strong>
-              {' '}· Marca: {prod.brand || sheet?.item.brand || 'Sem marca'}
-            </p>
-            <label className="mt-3 block text-xs text-text-muted">
-              Categoria do catálogo
-              <select
-                value={sheet?.category?.id ?? ''}
-                onChange={(event) => {
-                  const hubCategoryId = event.target.value || null;
-                  void apiFetch(`/api/catalog/products/${prod.id}/category`, {
-                    method: 'PUT',
-                    json: { hubCategoryId },
-                  }).then(() => {
-                    const selected = categories.find((category) => category.id === hubCategoryId) ?? null;
-                    setSheet((current) => current ? { ...current, category: selected } : current);
-                  });
-                }}
-                className="mt-1 rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-xs text-text-primary"
-              >
-                <option value="">Sem categoria</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>{category.name}</option>
-                ))}
-              </select>
-            </label>
-            {sheet && (
-              <ul className="mt-4 space-y-1 text-xs">
-                {sheet.item.checklist.items.map((item) => (
-                  <li key={item.code} className={item.ok ? 'text-emerald-300' : 'text-amber-200'}>
-                    {item.title}
-                    {!item.ok && (
-                      <Link href={item.fixHref} className="ml-2 underline">Corrigir</Link>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="mt-4 grid gap-3 sm:grid-cols-4">
-              <div className="rounded-lg border border-border-color bg-bg-base p-4">
-                <span className="text-[11px] uppercase text-text-muted">Preço de Cadastro</span>
-                <p className="mt-1 font-mono text-base font-bold text-text-primary">
-                  {mainVar?.price ? `R$ ${mainVar.price}` : 'Sem preço'}
-                </p>
-                <span className="text-[11px] text-emerald-400">Origem: Bling v3</span>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-border-color bg-bg-base/60 p-3.5">
+                  <span className="text-[11px] uppercase tracking-wider text-text-muted">Nome do ERP</span>
+                  <p className="mt-1 text-sm font-semibold text-text-primary">{prod.name ?? 'Sem nome'}</p>
+                </div>
+                <div className="rounded-xl border border-border-color bg-bg-base/60 p-3.5">
+                  <span className="text-[11px] uppercase tracking-wider text-text-muted">Marca</span>
+                  <p className="mt-1 text-sm font-semibold text-text-primary">{prod.brand || sheet?.item.brand || 'Sem marca'}</p>
+                </div>
               </div>
-              <div className="rounded-lg border border-border-color bg-bg-base p-4">
-                <span className="text-[11px] uppercase text-text-muted">Preço de Custo</span>
-                <p className="mt-1 font-mono text-base font-bold text-text-primary">
-                  {mainVar?.cost_price ? `R$ ${mainVar.cost_price}` : 'Custo ausente'}
-                </p>
-                <span className="text-[11px] text-text-muted">Nunca presumido como zero</span>
+
+              <label className="mt-4 block max-w-sm text-[11px] uppercase tracking-wider text-text-muted">
+                Categoria do catálogo
+                <select
+                  value={sheet?.category?.id ?? ''}
+                  onChange={(event) => {
+                    const hubCategoryId = event.target.value || null;
+                    void apiFetch(`/api/catalog/products/${prod.id}/category`, {
+                      method: 'PUT',
+                      json: { hubCategoryId },
+                    }).then(() => {
+                      const selected = categories.find((category) => category.id === hubCategoryId) ?? null;
+                      setSheet((current) => current ? { ...current, category: selected } : current);
+                    });
+                  }}
+                  className="mt-1 block w-full rounded-lg border border-border-color bg-bg-base px-2.5 py-2 text-xs normal-case tracking-normal text-text-primary"
+                >
+                  <option value="">Sem categoria</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id}>{category.name}</option>
+                  ))}
+                </select>
+              </label>
+
+              {sheet && (
+                <div className="mt-5">
+                  <p className="text-[11px] uppercase tracking-wider text-text-muted">Checklist do catálogo</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {sheet.item.checklist.items.map((item) => (
+                      <ChecklistBadge
+                        key={item.code}
+                        title={item.title}
+                        ok={item.ok}
+                        blocks={item.blocks ?? true}
+                        fixHref={item.ok ? undefined : item.fixHref}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="flex h-full flex-col justify-between rounded-xl border border-border-color bg-bg-base/60 p-4">
+                  <span className="text-[11px] uppercase tracking-wider text-text-muted">Preço de Cadastro</span>
+                  <p className="mt-1 font-mono text-base font-bold tabular-nums text-text-primary">
+                    {mainVar?.price ? `R$ ${mainVar.price}` : 'Sem preço'}
+                  </p>
+                  <span className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">Origem: Bling v3</span>
+                </div>
+                <div className="flex h-full flex-col justify-between rounded-xl border border-border-color bg-bg-base/60 p-4">
+                  <span className="text-[11px] uppercase tracking-wider text-text-muted">Preço de Custo</span>
+                  <p className="mt-1 font-mono text-base font-bold tabular-nums text-text-primary">
+                    {mainVar?.cost_price ? `R$ ${mainVar.cost_price}` : 'Custo ausente'}
+                  </p>
+                  <span className="mt-1 text-[11px] text-text-muted">Nunca presumido como zero</span>
+                </div>
+                <div className="flex h-full flex-col justify-between rounded-xl border border-border-color bg-bg-base/60 p-4">
+                  <span className="text-[11px] uppercase tracking-wider text-text-muted">Estoque Publicável (Seller)</span>
+                  <p className="mt-1 font-mono text-base font-bold tabular-nums text-text-primary">
+                    {mainVar?.stock !== null && mainVar?.stock !== undefined
+                      ? `${Math.floor(Number(mainVar.stock))} un.`
+                      : 'Aguardando leitura'}
+                  </p>
+                  <span className="mt-1 text-[11px] text-text-muted">Soma apenas depósitos seller</span>
+                </div>
+                <div className="flex h-full flex-col justify-between rounded-xl border border-border-color bg-bg-base/60 p-4">
+                  <span className="text-[11px] uppercase tracking-wider text-text-muted">Marca / Formato</span>
+                  <p className="mt-1 text-sm font-bold text-text-primary">
+                    {prod?.brand || 'Sem marca'} · Formato {prod?.product_format ?? 'S'}
+                  </p>
+                  <span className="mt-1 text-[11px] text-text-muted">Unidade: {prod?.unit ?? 'UN'}</span>
+                </div>
               </div>
-              <div className="rounded-lg border border-border-color bg-bg-base p-4">
-                <span className="text-[11px] uppercase text-text-muted">Estoque Publicável (Seller)</span>
-                <p className="mt-1 font-mono text-base font-bold text-emerald-400">
-                  {mainVar?.stock !== null && mainVar?.stock !== undefined
-                    ? Math.floor(Number(mainVar.stock))
-                      : 'Aguardando leitura'}{' '}
-                  un.
-                </p>
-                <span className="text-[11px] text-text-muted">Soma apenas depósitos seller</span>
-              </div>
-              <div className="rounded-lg border border-border-color bg-bg-base p-4">
-                <span className="text-[11px] uppercase text-text-muted">Marca / Formato</span>
-                <p className="mt-1 text-sm font-bold text-text-primary">
-                  {prod?.brand || 'Sem marca'} · Formato {prod?.product_format ?? 'S'}
-                </p>
-                <span className="text-[11px] text-text-muted">Unidade: {prod?.unit ?? 'UN'}</span>
-              </div>
-            </div>
+            </section>
           </div>
         )}
 
         {activeTab === 'imagens' && (
-          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6">
+          <div className="rounded-2xl border border-border-color bg-bg-surface p-5">
             <div className="flex items-center gap-2 text-sm font-bold text-text-primary">
               <FileText className="h-4 w-4 text-sky-400" />
               <h2>Comparação de Conteúdo por Fonte (Bling vs Marketplaces)</h2>
@@ -677,7 +723,7 @@ function FichaUnicaProdutoPage({
         )}
 
         {activeTab === 'variacoes' && (
-          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6">
+          <div className="rounded-2xl border border-border-color bg-bg-surface p-5">
             <div className="flex items-center gap-2 text-sm font-bold text-text-primary">
               <Layers className="h-4 w-4 text-emerald-400" />
               <h2>Variações e Saldos por Depósito (`variant_stock_balances`)</h2>
@@ -702,7 +748,7 @@ function FichaUnicaProdutoPage({
         )}
 
         {activeTab === 'atributos' && (
-          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6 text-sm text-text-primary">
+          <div className="rounded-2xl border border-border-color bg-bg-surface p-5 text-sm text-text-primary">
             <h2 className="font-bold text-text-primary">Atributos usados no mapeamento</h2>
             <p className="mt-2 text-xs text-text-muted">
               Marca: {prod.brand || 'sem marca'}. Os mapas por categoria ficam em Atributos.
@@ -714,7 +760,7 @@ function FichaUnicaProdutoPage({
         )}
 
         {activeTab === 'fiscal' && (
-          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6 space-y-4">
+          <div className="rounded-2xl border border-border-color bg-bg-surface p-5 space-y-4">
             <div className="flex items-center gap-2 text-sm font-bold text-text-primary">
               <Lock className="h-4 w-4 text-amber-400" />
               <h2>Conformidade Fiscal (EAN, NCM, CEST e Origem)</h2>
@@ -757,7 +803,7 @@ function FichaUnicaProdutoPage({
         )}
 
         {activeTab === 'canais' && (
-          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6">
+          <div className="rounded-2xl border border-border-color bg-bg-surface p-5">
             <h2 className="text-sm font-bold text-text-primary">
               Estado de publicação por passo
             </h2>
@@ -802,7 +848,7 @@ function FichaUnicaProdutoPage({
         )}
 
         {activeTab === 'canais' && detail.qualityHistory.length > 0 && (
-          <div className="rounded-xl border border-border-color bg-bg-surface/50 p-6">
+          <div className="rounded-2xl border border-border-color bg-bg-surface p-5">
             <div className="flex items-center gap-2 text-sm font-bold text-text-primary">
               <History className="h-4 w-4 text-text-muted" />
               <h2>Histórico Auditado de Alterações</h2>

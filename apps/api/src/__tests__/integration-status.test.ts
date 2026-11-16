@@ -47,6 +47,20 @@ describe('status de integração por canal', () => {
     expect(view.blockers.some((item) => item.where === 'hub')).toBe(true);
   });
 
+  it('lista cada pendência uma vez e separa categoria do HUB da categoria do canal', () => {
+    const view = describeChannelIntegration({
+      platform: 'nuvemshop',
+      linkStatus: null,
+      sendRequested: false,
+      checklist: checklist({ hubCategoryId: null, mappedPlatforms: [], greenPlatforms: [] }),
+    });
+    const titles = view.blockers.map((item) => item.title);
+    expect(new Set(titles).size).toBe(titles.length);
+    expect(titles).toContain('Falta vincular categoria no HUB');
+    expect(titles).toContain('Categoria do canal não mapeada');
+    expect(view.blockers.every((item) => typeof item.blocks === 'boolean')).toBe(true);
+  });
+
   it('bloqueia SKU vazio e NCM inválido', () => {
     const view = describeChannelIntegration({
       platform: 'nuvemshop',
