@@ -618,12 +618,13 @@ catalogRouter.post(
           blockers: string[];
           top_improvements: unknown;
         }>(
-          `SELECT variant_id, score_bling, score_ml, score_ns,
-                  publishable_bling, publishable_ml, publishable_ns,
-                  blockers, top_improvements
-           FROM channel_readiness_scores
-           WHERE master_product_id = $1
-           ORDER BY calculated_at DESC`,
+          `SELECT s.variant_id, s.score_bling, s.score_ml, s.score_ns,
+                  s.publishable_bling, s.publishable_ml, s.publishable_ns,
+                  s.blockers, s.top_improvements
+           FROM channel_readiness_scores s
+           INNER JOIN product_variants pv ON pv.id = s.variant_id
+           WHERE s.master_product_id = $1
+           ORDER BY pv.is_default DESC, pv.erp_sku ASC`,
           [product.id]
         ),
       ]);
