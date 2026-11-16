@@ -1,18 +1,9 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Toaster, ToastMessage } from '../components/toaster';
 import Link from 'next/link';
-import {
-  Boxes,
-  Check,
-  ChevronDown,
-  RefreshCw,
-  Share2,
-  Shield,
-  Star,
-  Users,
-} from 'lucide-react';
+import { Activity, Boxes, Gauge, Link2, ListChecks, RefreshCw, Share2, Shield, Sparkles } from 'lucide-react';
 import {
   fetchOperationalState,
   OperationalStatePayload,
@@ -22,6 +13,54 @@ import { apiFetch } from '../utils/api-client';
 import { useCurrentRole } from '../components/app-shell';
 import { CatalogCycle } from '../components/home/onboarding-funnel';
 import { BrandLogo } from '../components/brand-logo';
+import {
+  ActionTopic,
+  ActionTopicList,
+  activityView,
+  CockpitCard,
+  CoverageFunnel,
+  formatCount,
+  FunnelStage,
+  healthToneOf,
+  resultBadge,
+  TONE_BAR,
+  TONE_TEXT,
+} from '../components/home/cockpit';
+
+/** Botão de ação rápida: ícone + verbo, com dica do que a ação faz. */
+function QuickAction({
+  icon,
+  label,
+  hint,
+  busy,
+  primary,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  hint: string;
+  busy: boolean;
+  primary?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      aria-busy={busy}
+      title={hint}
+      className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold transition active:scale-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-copper/60 disabled:cursor-progress disabled:opacity-70 ${
+        primary
+          ? 'bg-emerald-700 text-white hover:bg-emerald-600 dark:bg-[#d97324] dark:hover:bg-[#e2843a]'
+          : 'border border-border-color bg-bg-surface text-text-primary hover:border-accent-copper/50'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
 
 interface CatalogHome {
   cards: {
@@ -42,7 +81,7 @@ interface CatalogHome {
     statusLabel: string;
     linkedCount: number;
   }>;
-  gaps: { missingSku: number; missingCategory: number; missingCover: number };
+  gaps: { missingSku: number; missingCategory: number; missingCover: number; missingNcm?: number };
   lastSyncOk: string | null;
   lastSyncError: string | null;
   lastBlingSync?: string | null;
@@ -59,72 +98,6 @@ interface CatalogHome {
     upserted: number;
   };
   channels: Array<{ provider: string; expires_at: string; has_refresh: boolean }>;
-}
-
-function formatCount(value: number): string {
-  return value.toLocaleString('pt-BR');
-}
-
-const EVENT_LABEL: Record<string, string> = {
-  'product.created': 'Produto Criado',
-  'product.updated': 'Produto Atualizado',
-  'product.deleted': 'Produto Removido',
-  'stock.created': 'Estoque Atualizado',
-  'stock.updated': 'Estoque Atualizado',
-  'product/created': 'Produto Criado',
-  'product/updated': 'Produto Atualizado',
-  'product/deleted': 'Produto Removido',
-};
-
-function formatEvent(eventType: string): string {
-  return EVENT_LABEL[eventType] ?? EVENT_LABEL[eventType.toLowerCase()] ?? eventType.replace(/[._]/g, ' ');
-}
-
-function activityBadge(status: string, reason: string | null): { label: string; className: string } {
-  const normalized = status.toLowerCase();
-  const detail = (reason ?? '').toLowerCase();
-  const ignored = normalized === 'ignored'
-    || detail.includes('identical')
-    || detail.includes('identico')
-    || detail.includes('idêntico');
-  if (ignored) {
-    return {
-      label: 'Atualização Ignorada (sem alteração)',
-      className: 'border-border-color bg-bg-base text-text-muted dark:border-white/10 dark:bg-white/[0.04]',
-    };
-  }
-  if (normalized === 'processed' || normalized === 'processado' || normalized === 'completed') {
-    return {
-      label: 'Sucesso',
-      className: 'border-emerald-600/30 bg-emerald-500/15 text-emerald-800 dark:border-[#3ecf74]/30 dark:bg-[#3ecf74]/12 dark:text-[#66e094]',
-    };
-  }
-  if (normalized === 'failed' || normalized === 'error' || normalized === 'erro') {
-    return {
-      label: 'Falha',
-      className: 'border-rose-600/30 bg-rose-500/15 text-rose-800 dark:text-rose-200',
-    };
-  }
-  return { label: status, className: 'border-border-color bg-bg-base text-text-muted' };
-}
-
-function healthTone(score: number): { bar: string; meta: string } {
-  if (score > 80) {
-    return {
-      bar: 'bg-emerald-600 dark:bg-[#3ecf74]',
-      meta: 'text-emerald-800 dark:text-[#52dc86]',
-    };
-  }
-  if (score > 50) {
-    return {
-      bar: 'bg-amber-500 dark:bg-[#f09a42]',
-      meta: 'text-amber-800 dark:text-[#f2a65a]',
-    };
-  }
-  return {
-    bar: 'bg-rose-600 dark:bg-[#d97324]',
-    meta: 'text-rose-800 dark:text-[#f2a65a]',
-  };
 }
 
 export default function HomePage() {
@@ -149,9 +122,7 @@ export default function HomePage() {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [syncStarting, setSyncStarting] = useState(false);
   const [enrichmentLive, setEnrichmentLive] = useState(false);
-  const [syncMenuOpen, setSyncMenuOpen] = useState(false);
   const [duplicateCount, setDuplicateCount] = useState(0);
-  const syncMenuRef = useRef<HTMLDivElement>(null);
 
   const pullSyncStatus = async () => {
     try {
@@ -212,22 +183,6 @@ export default function HomePage() {
     return () => window.clearInterval(timer);
   }, []);
 
-  useEffect(() => {
-    if (!syncMenuOpen) return;
-    const onPointer = (event: MouseEvent) => {
-      if (!syncMenuRef.current?.contains(event.target as Node)) setSyncMenuOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSyncMenuOpen(false);
-    };
-    document.addEventListener('mousedown', onPointer);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onPointer);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [syncMenuOpen]);
-
   const startEnrichment = async () => {
     setEnriching(true);
     try {
@@ -238,7 +193,6 @@ export default function HomePage() {
         { id, variant: 'success', title: 'Enriquecimento iniciado em background' },
       ]);
       setEnrichmentLive(true);
-      setSyncMenuOpen(false);
     } catch {
       const id = `toast-${Date.now()}`;
       setToasts((current) => [
@@ -256,7 +210,6 @@ export default function HomePage() {
     try {
       await apiFetch('/api/admin/reconcile-now', { method: 'POST' });
       setSyncNotice('Reconciliação iniciada. O HUB busca o anúncio pelo SKU e grava o vínculo.');
-      setSyncMenuOpen(false);
     } catch {
       setSyncNotice('Não foi possível iniciar a reconciliação.');
     } finally {
@@ -270,7 +223,6 @@ export default function HomePage() {
     try {
       await apiFetch('/api/admin/sync-full', { method: 'POST' });
       setSyncNotice('Sincronização do ERP iniciada. A tela continua livre.');
-      setSyncMenuOpen(false);
       await pullSyncStatus();
     } catch {
       setSyncNotice('Não foi possível iniciar a sincronização.');
@@ -284,13 +236,8 @@ export default function HomePage() {
   const totalVariants = catalogHome?.totalVariants ?? 0;
   const readyToPublish = catalogHome?.readiness?.readyToPublish ?? catalogHome?.cards.ready.value ?? 0;
   const averageScore = catalogHome?.readiness?.averageScore ?? catalogHome?.completenessPct ?? 0;
-  const tone = healthTone(averageScore);
   const awaitingNcm = catalogHome?.fiscal?.awaitingNcm ?? state?.kpis.actionPendings.breakdown.ncmPendingFirst ?? 0;
-  const awaitingEan = catalogHome?.fiscal?.awaitingEan ?? state?.kpis.actionPendings.breakdown.eanPending ?? 0;
-  const fiscalConflicts = catalogHome?.fiscal?.conflicts ?? state?.kpis.actionPendings.breakdown.eanDuplicates ?? 0;
-  const fiscalProducts = awaitingNcm + awaitingEan;
   const incomplete = catalogHome?.cards.incomplete.value ?? state?.contentIncompleteCount ?? 0;
-  const pendingActions = fiscalProducts + fiscalConflicts + incomplete + duplicateCount;
   const nuvemshopPublished = catalogHome?.linkedNuvemshop ?? 0;
   const mercadoLivrePublished = catalogHome?.linkedMercadoLivre ?? 0;
   const nuvemshopTokenConnected = Boolean(
@@ -318,7 +265,6 @@ export default function HomePage() {
   ];
   const syncState = syncStatus?.status ?? 'idle';
   const syncRunning = syncState === 'processing' || syncStarting;
-  const syncBusy = syncRunning || reconciling || enriching;
 
   const missingSku = catalogHome?.gaps.missingSku ?? state?.emptySkuCount ?? 0;
   const missingCover = catalogHome?.gaps.missingCover ?? 0;
@@ -326,18 +272,34 @@ export default function HomePage() {
   const withSku = Math.max(0, products - missingSku);
   const withCover = Math.max(0, products - missingCover);
   const withCategory = Math.max(0, products - missingCategory);
-  const ncmValid = Math.max(0, products - awaitingNcm - fiscalConflicts);
 
-  const stageBars = [
-    { label: 'Catálogo', value: products, highlight: false },
-    { label: 'Com SKU', value: withSku, highlight: false },
-    { label: 'Com Capa', value: withCover, highlight: false },
-    { label: 'Nuvemshop', value: nuvemshopPublished, highlight: true },
-    { label: 'NCM OK', value: ncmValid, highlight: false },
-    { label: 'Categoria', value: withCategory, highlight: false },
-    { label: 'Prontos', value: readyToPublish, highlight: false },
+  const missingNcm = catalogHome?.gaps.missingNcm ?? awaitingNcm;
+  const readyCatalog = catalogHome?.cards.ready.value ?? readyToPublish;
+  const withNcm = Math.max(0, products - missingNcm);
+  const healthTone = healthToneOf(averageScore);
+
+  const actionTopics: ActionTopic[] = [
+    { key: 'duplicate', label: 'Duplicidades', count: duplicateCount, href: '/problemas?filtro=duplicidades', severity: 'block' },
+    { key: 'sku', label: 'Sem SKU', count: missingSku, href: '/catalogo?pendencia=sku', severity: 'block' },
+    { key: 'ncm', label: 'Sem NCM válido', count: missingNcm, href: '/catalogo?pendencia=ncm', severity: 'block' },
+    { key: 'incomplete', label: 'Incompletos', count: incomplete, href: '/completude', severity: 'warn' },
   ];
-  const maxStageValue = Math.max(1, ...stageBars.map((b) => b.value));
+
+  const funnelStages: FunnelStage[] = [
+    { key: 'sku', label: 'Com SKU válido', value: withSku, href: '/catalogo?pendencia=sku', missingLabel: 'sem SKU' },
+    { key: 'cover', label: 'Com imagem de capa', value: withCover, href: '/catalogo?pendencia=cover', missingLabel: 'sem capa' },
+    { key: 'ncm', label: 'Com NCM válido', value: withNcm, href: '/catalogo?pendencia=ncm', missingLabel: 'sem NCM válido' },
+    { key: 'category', label: 'Com categoria mapeada', value: withCategory, href: '/catalogo?pendencia=hub_category', missingLabel: 'sem categoria' },
+    { key: 'ready', label: 'Prontos para publicar', value: readyCatalog, href: '/catalogo?status=ready', final: true },
+  ];
+
+  const failedToday = catalogHome?.cards.publicationsToday.failed ?? 0;
+  const nuvemshopHealthy = nuvemshopTokenConnected && failedToday === 0;
+  const nuvemshopHealthNote = !nuvemshopTokenConnected
+    ? 'Token da loja não conectado'
+    : failedToday > 0
+      ? `${formatCount(failedToday)} envio${failedToday > 1 ? 's' : ''} com erro hoje`
+      : 'Conectada, sem erros de envio hoje';
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-7">
@@ -366,62 +328,40 @@ export default function HomePage() {
           )}
 
           {hasRole('admin') && (
-            <div className="relative" ref={syncMenuRef}>
-              <button
-                type="button"
-                aria-expanded={syncMenuOpen}
-                aria-haspopup="menu"
-                aria-busy={syncBusy}
-                onClick={() => setSyncMenuOpen((open) => !open)}
-                className="inline-flex items-center gap-2 rounded-full bg-emerald-700 px-4 py-2 text-xs font-semibold text-white transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:focus-visible:ring-[#d97324]"
-              >
-                Sincronização
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-150 ${syncMenuOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
-              </button>
-              {syncMenuOpen && (
-                <div role="menu" className="absolute right-0 z-20 mt-2 w-80 rounded-2xl border border-border-color bg-bg-surface p-2 shadow-[0_18px_40px_-16px_rgba(0,0,0,0.65)]">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={syncRunning}
-                    onClick={() => void startSync()}
-                    className="block w-full rounded-xl px-3 py-2.5 text-left transition hover:bg-bg-base dark:hover:bg-white/[0.05] disabled:opacity-60"
-                  >
-                    <span className="block text-sm font-semibold text-text-primary">{syncRunning ? 'Sincronizando o ERP...' : 'Sync Completo ERP (Bling)'}</span>
-                    <span className="mt-0.5 block text-xs text-text-muted">Lê preço, estoque e cadastro ativo do Bling.</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={reconciling}
-                    onClick={() => void startReconcile()}
-                    className="mt-1 block w-full rounded-xl px-3 py-2.5 text-left transition hover:bg-bg-base dark:hover:bg-white/[0.05] disabled:opacity-60"
-                  >
-                    <span className="block text-sm font-semibold text-text-primary">{reconciling ? 'Buscando vínculos...' : 'Reconciliação de Vínculos (Marketplaces)'}</span>
-                    <span className="mt-0.5 block text-xs text-text-muted">Encontra o anúncio pelo SKU e grava o vínculo.</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    disabled={enriching}
-                    onClick={() => void startEnrichment()}
-                    className="mt-1 block w-full rounded-xl px-3 py-2.5 text-left transition hover:bg-bg-base dark:hover:bg-white/[0.05] disabled:opacity-60"
-                  >
-                    <span className="block text-sm font-semibold text-text-primary">{enriching ? 'Enriquecendo...' : 'Enriquecimento em Massa (Imagens/NCM)'}</span>
-                    <span className="mt-0.5 block text-xs text-text-muted">Copia imagem e NCM do ERP para o HUB.</span>
-                  </button>
-                </div>
-              )}
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Ações rápidas">
+              <QuickAction
+                icon={<RefreshCw className={`h-3.5 w-3.5 ${syncRunning ? 'animate-spin' : ''}`} aria-hidden />}
+                label={syncRunning ? 'Sincronizando...' : 'Sincronizar Bling'}
+                hint="Lê cadastro, preço e estoque ativos do Bling"
+                busy={syncRunning}
+                primary
+                onClick={() => void startSync()}
+              />
+              <QuickAction
+                icon={<Sparkles className={`h-3.5 w-3.5 ${enriching ? 'animate-pulse' : ''}`} aria-hidden />}
+                label={enriching ? 'Enriquecendo...' : 'Enriquecer Catálogo'}
+                hint="Copia imagens e NCM do ERP para o HUB"
+                busy={enriching}
+                onClick={() => void startEnrichment()}
+              />
+              <QuickAction
+                icon={<Link2 className={`h-3.5 w-3.5 ${reconciling ? 'animate-pulse' : ''}`} aria-hidden />}
+                label={reconciling ? 'Reconciliando...' : 'Reconciliar Vínculos'}
+                hint="Encontra o anúncio pelo SKU e grava o vínculo"
+                busy={reconciling}
+                onClick={() => void startReconcile()}
+              />
             </div>
           )}
 
           <button
             type="button"
             onClick={() => void loadState()}
-            className="craft-pill inline-flex items-center gap-1.5 rounded-full border border-border-color bg-bg-surface px-3.5 py-2 text-xs font-semibold text-text-primary transition active:scale-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:focus-visible:ring-[#d97324]"
+            aria-label="Recarregar os números da tela"
+            title="Recarregar os números da tela"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border-color bg-bg-surface text-text-muted transition hover:text-text-primary active:scale-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-copper/60"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span>Atualizar</span>
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden />
           </button>
         </div>
       </header>
@@ -473,86 +413,93 @@ export default function HomePage() {
         {catalogHomeError && <p className="mb-3 text-sm text-rose-700 dark:text-rose-200" role="alert">{catalogHomeError}</p>}
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Link
-            href="/problemas"
-            className="group rounded-2xl border border-border-color bg-bg-surface p-5 transition hover:border-border-color/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:focus-visible:ring-[#d97324]"
+          <CockpitCard
+            label="Ações necessárias"
+            icon={<ListChecks className="h-3.5 w-3.5 text-accent-copper" aria-hidden />}
+            aside={
+              <span className="text-[11px] font-semibold tabular-nums text-text-muted">
+                {formatCount(actionTopics.reduce((sum, topic) => sum + topic.count, 0))}
+              </span>
+            }
           >
-            <div className="flex items-start justify-between gap-2">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-amber-600/30 bg-amber-500/10 text-amber-800 dark:border-[#d97324]/35 dark:bg-[#d97324]/12 dark:text-[#f29a4b]">
-                <Check className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <span className="text-xs font-medium text-text-muted">
-                {duplicateCount > 0 ? `${formatCount(duplicateCount)} duplicidades` : 'Resolver pendências'}
-              </span>
-            </div>
-            <p className="mt-5 text-[32px] font-bold leading-none tracking-tight tabular-nums text-text-primary">
-              {formatCount(pendingActions)}
-            </p>
-            <p className="mt-2 text-xs text-text-muted">Ações necessárias (fiscais e cadastro)</p>
-          </Link>
+            <ActionTopicList topics={actionTopics} />
+          </CockpitCard>
 
-          <Link
-            href="/catalogo"
-            className="group rounded-2xl border border-border-color bg-bg-surface p-5 transition hover:border-border-color/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:focus-visible:ring-[#d97324]"
+          <CockpitCard
+            label="Total no catálogo"
+            icon={<Boxes className="h-3.5 w-3.5 text-sky-700 dark:text-[#6db2f2]" aria-hidden />}
           >
-            <div className="flex items-start justify-between gap-2">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-sky-600/30 bg-sky-500/10 text-sky-800 dark:border-[#5ea4e6]/30 dark:bg-[#5ea4e6]/12 dark:text-[#6db2f2]">
-                <Boxes className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <span className="text-xs font-medium text-emerald-800 dark:text-[#52dc86]">
-                +{formatCount(readyToPublish)} prontos p/ venda
-              </span>
+            <Link href="/catalogo" className="group rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-copper/60">
+              <p className="text-[32px] font-bold leading-none tracking-tight tabular-nums text-text-primary">
+                {formatCount(products)}
+              </p>
+              <p className="mt-2 text-xs text-text-muted">produtos ativos</p>
+            </Link>
+            <div className="mt-auto border-t border-border-color/60 pt-3 dark:border-white/[0.07]">
+              <p className="text-xs text-text-muted">
+                <span className="font-semibold tabular-nums text-text-primary">{formatCount(totalVariants)}</span> variações (SKUs)
+              </p>
             </div>
-            <p className="mt-5 text-[32px] font-bold leading-none tracking-tight tabular-nums text-text-primary">
-              {formatCount(products)}
-            </p>
-            <p className="mt-2 text-xs text-text-muted">
-              {totalVariants > products
-                ? `Total no catálogo (${formatCount(totalVariants)} SKUs c/ variações)`
-                : 'Total de produtos no catálogo'}
-            </p>
-          </Link>
+          </CockpitCard>
 
-          <Link
-            href="/completude"
-            className="group rounded-2xl border border-border-color bg-bg-surface p-5 transition hover:border-border-color/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 dark:focus-visible:ring-[#d97324]"
+          <CockpitCard
+            label="Saúde e completude"
+            icon={<Gauge className={`h-3.5 w-3.5 ${TONE_TEXT[healthTone]}`} aria-hidden />}
+            aside={<span className="text-[11px] text-text-muted">meta 80%</span>}
           >
-            <div className="flex items-start justify-between gap-2">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-emerald-600/30 bg-emerald-500/10 text-emerald-800 dark:border-[#3ecf74]/30 dark:bg-[#3ecf74]/12 dark:text-[#4dd882]">
-                <Star className="h-4 w-4" aria-hidden="true" />
-              </span>
-              <span className={`text-xs font-medium ${tone.meta}`}>
-                Meta operacional 80%
-              </span>
-            </div>
-            <p className="mt-5 text-[32px] font-bold leading-none tracking-tight tabular-nums text-text-primary">
-              {averageScore}%
-            </p>
-            <p className="mt-2 text-xs text-text-muted">Saúde e completude do catálogo</p>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-bg-base dark:bg-white/[0.07]" role="meter" aria-valuenow={averageScore} aria-valuemin={0} aria-valuemax={100} aria-label="Média de completude">
-              <div className={`h-full rounded-full ${tone.bar}`} style={{ width: `${Math.max(4, Math.min(100, averageScore))}%` }} />
-            </div>
-          </Link>
+            <Link href="/completude" className="rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-copper/60">
+              <p className={`text-[32px] font-bold leading-none tracking-tight tabular-nums ${TONE_TEXT[healthTone]}`}>
+                {averageScore}%
+              </p>
+              <div
+                className="mt-3 h-2 overflow-hidden rounded-full bg-bg-base dark:bg-white/[0.07]"
+                role="meter"
+                aria-valuenow={averageScore}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Saúde média do catálogo"
+              >
+                <div
+                  className={`h-full rounded-full transition-[width] duration-500 ease-out ${TONE_BAR[healthTone]}`}
+                  style={{ width: `${Math.max(2, Math.min(100, averageScore))}%` }}
+                />
+              </div>
+            </Link>
+            <Link
+              href="/catalogo?status=ready"
+              className="mt-auto pt-3 text-xs font-semibold text-emerald-700 hover:underline dark:text-[#52dc86]"
+            >
+              {formatCount(readyCatalog)} produtos prontos para venda
+            </Link>
+          </CockpitCard>
 
-          <div className="rounded-2xl border border-border-color bg-bg-surface p-5">
-            <div className="flex items-start justify-between gap-2">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-amber-600/30 bg-amber-500/10 text-amber-800 dark:border-[#d97324]/35 dark:bg-[#d97324]/12 dark:text-[#f29a4b]">
-                <Share2 className="h-4 w-4" aria-hidden="true" />
+          <CockpitCard
+            label="Nuvemshop"
+            icon={<Share2 className="h-3.5 w-3.5 text-accent-copper" aria-hidden />}
+            aside={
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                  nuvemshopHealthy
+                    ? 'border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:border-[#3ecf74]/30 dark:bg-[#3ecf74]/12 dark:text-[#66e094]'
+                    : 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-200'
+                }`}
+                title={nuvemshopHealthNote}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${nuvemshopHealthy ? 'bg-emerald-500' : 'bg-amber-500'}`} aria-hidden />
+                {nuvemshopHealthy ? 'Saudável' : 'Atenção'}
               </span>
-              <span className={`text-xs font-medium ${nuvemshopTokenConnected ? 'text-emerald-800 dark:text-[#52dc86]' : 'text-text-muted'}`}>
-                {nuvemshopTokenConnected ? 'Nuvemshop conectada' : 'Sem canal ativo'}
-              </span>
-            </div>
-            <p className="mt-5 text-[32px] font-bold leading-none tracking-tight tabular-nums text-text-primary">
-              {formatCount(nuvemshopPublished)}
+            }
+          >
+            <Link href="/canais" className="rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-copper/60">
+              <p className="text-[32px] font-bold leading-none tracking-tight tabular-nums text-text-primary">
+                {formatCount(nuvemshopPublished)}
+              </p>
+              <p className="mt-2 text-xs text-text-muted">anúncios vinculados</p>
+            </Link>
+            <p className="mt-auto border-t border-border-color/60 pt-3 text-xs text-text-muted dark:border-white/[0.07]">
+              {nuvemshopHealthNote}
             </p>
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <p className="text-xs text-text-muted">Anúncios vinculados</p>
-              <Link href="/canais" className="text-xs font-semibold text-text-primary underline">
-                Canais
-              </Link>
-            </div>
-          </div>
+          </CockpitCard>
         </div>
 
         {syncNotice && <p className="mt-3 text-xs text-text-muted" role="status">{syncNotice}</p>}
@@ -562,40 +509,14 @@ export default function HomePage() {
         <div className="rounded-2xl border border-border-color bg-bg-surface p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-base font-bold tracking-tight text-text-primary">Cobertura por etapa do catálogo</h2>
+              <h2 className="text-base font-bold tracking-tight text-text-primary">Cobertura do catálogo</h2>
               <p className="mt-0.5 text-xs text-text-muted">
-                {formatCount(products)} produtos monitorados · destaque em vínculos Nuvemshop ({formatCount(nuvemshopPublished)})
+                Cada etapa contra o total. A barra vermelha é onde o catálogo mais perde produtos.
               </p>
             </div>
           </div>
-
-          <div className="mt-6 grid h-44 grid-cols-7 items-end gap-2.5 border-b border-dashed border-border-color/50 pb-2 pt-4 dark:border-white/10">
-            {stageBars.map((bar) => {
-              const heightPct = Math.max(10, Math.round((bar.value / maxStageValue) * 100));
-              return (
-                <div key={bar.label} className="flex h-full flex-col items-center justify-end gap-2">
-                  <span className="text-[10px] font-semibold tabular-nums text-text-muted">
-                    {formatCount(bar.value)}
-                  </span>
-                  <div
-                    className={`w-full max-w-[44px] rounded-t-xl transition-all ${
-                      bar.highlight
-                        ? 'bg-emerald-700 dark:bg-[#d97324] shadow-[0_6px_18px_-6px_rgba(217,115,36,0.65)]'
-                        : 'bg-emerald-900/20 dark:bg-[#f5dbb6]'
-                    }`}
-                    style={{ height: `${heightPct}%` }}
-                    title={`${bar.label}: ${formatCount(bar.value)}`}
-                  />
-                </div>
-              );
-            })}
-          </div>
-          <div className="mt-2.5 grid grid-cols-7 gap-2 text-center">
-            {stageBars.map((bar) => (
-              <span key={bar.label} className="truncate text-[11px] font-medium text-text-muted">
-                {bar.label}
-              </span>
-            ))}
+          <div className="mt-5">
+            <CoverageFunnel total={products} stages={funnelStages} />
           </div>
         </div>
 
@@ -670,7 +591,7 @@ export default function HomePage() {
         <section className="mt-6 rounded-2xl border border-border-color bg-bg-surface p-6">
           <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
             <div className="flex items-center gap-2">
-              <Users className="h-4 w-4 text-text-muted dark:text-[#f29a4b]" aria-hidden="true" />
+              <Activity className="h-4 w-4 text-accent-copper" aria-hidden="true" />
               <h2 className="text-base font-bold tracking-tight text-text-primary">Atividade recente</h2>
             </div>
             <Link href="/auditoria" className="text-xs text-text-muted underline hover:text-text-primary">Ver auditoria</Link>
@@ -694,26 +615,35 @@ export default function HomePage() {
                     </td>
                   </tr>
                 )}
-                {state.recentWebhooks.map((wh) => (
+                {state.recentWebhooks.map((wh) => {
+                  const badge = resultBadge(wh.status, wh.ignore_reason);
+                  const view = activityView(wh.event_type, badge.failed);
+                  const EventIcon = view.icon;
+                  const BadgeIcon = badge.icon;
+                  return (
                   <tr key={wh.id}>
-                    <td className="py-2.5 pr-4 font-semibold uppercase text-text-primary">{wh.source}</td>
-                    <td className="py-2.5 px-4 text-text-primary">{formatEvent(wh.event_type)}</td>
+                    <td className="py-2.5 pr-4 text-[11px] font-semibold uppercase tracking-wider text-text-muted">{wh.source}</td>
+                    <td className="py-2.5 px-4">
+                      <span className="inline-flex items-center gap-2 text-text-primary">
+                        <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg border border-border-color/70 bg-bg-base dark:border-white/[0.08] dark:bg-white/[0.04]">
+                          <EventIcon className={`h-3.5 w-3.5 ${view.iconClass}`} aria-hidden />
+                        </span>
+                        {view.label}
+                      </span>
+                    </td>
                     <td className="py-2.5 px-4 font-mono tabular-nums text-text-primary">{wh.resource_id}</td>
                     <td className="py-2.5 px-4">
-                      {(() => {
-                        const badge = activityBadge(wh.status, wh.ignore_reason);
-                        return (
-                          <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${badge.className}`}>
-                            {badge.label}
-                          </span>
-                        );
-                      })()}
+                      <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${badge.className}`}>
+                        <BadgeIcon className="h-3 w-3" aria-hidden />
+                        {badge.label}
+                      </span>
                     </td>
                     <td className="py-2.5 pl-4 text-right tabular-nums text-text-muted">
                       {wh.processed_at ? new Date(wh.processed_at).toLocaleString('pt-BR') : 'Na fila'}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
