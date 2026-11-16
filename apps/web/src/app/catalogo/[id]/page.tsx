@@ -14,7 +14,10 @@ import {
   Send,
   History,
   Database,
+  Download,
   RefreshCw,
+  Settings2,
+  Zap,
 } from 'lucide-react';
 import { buildBlingProductUrl } from '../../../utils/matching-signals';
 import { translateBlockerToPlainPortuguese } from '../../../utils/operational-state';
@@ -196,10 +199,27 @@ function FichaUnicaProdutoPage({
   const [importNotice, setImportNotice] = useState<string | null>(null);
   const [places, setPlaces] = useState<Array<{ locationType: string; storeId: string; quantity: number; label: string; readOnly: boolean }>>([]);
   const [categories, setCategories] = useState<HubCategoryOption[]>([]);
-  const [recalculating, setRecalculating] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'local' | 'erp' | null>(null);
   const [cooldown, setCooldown] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const erpId = params.id;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    const onPointer = (event: MouseEvent) => {
+      if (!(event.target as HTMLElement | null)?.closest('[data-readiness-menu]')) setMenuOpen(false);
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onPointer);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onPointer);
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -275,39 +295,71 @@ function FichaUnicaProdutoPage({
   const mlIntegration = activeIntegrations.find((channel) => channel.platform === 'mercadolivre');
 
   /**
-   * Recalcula só no banco: a rota chama o CRE e o checklist local. Depois de
-   * responder, o botão fica 5 s bloqueado para o operador não repetir a leitura.
+   * `local` relê só o banco do HUB. `erp` busca o produto no Bling (1 requisição,
+   * mais uma por variação filha) e depois recalcula. Nos dois casos o botão fica
+   * 5 s bloqueado para o operador não repetir a leitura.
    */
-  async function recalculateReadiness(): Promise<void> {
-    if (recalculating || cooldown > 0) return;
+  async function runRecalculate(mode: 'local' | 'erp'): Promise<void> {
+    if (pendingAction || cooldown > 0) return;
     const previous = nsIntegration?.percent ?? sheet?.item.checklist.percent ?? null;
-    setRecalculating(true);
+    const loadingToastId = `${Date.now()}-erp`;
+    setPendingAction(mode);
+    if (mode === 'erp') {
+      setToasts((prev) => [
+        ...prev,
+        { id: loadingToastId, variant: 'neutral', title: 'Buscando dados no Bling...' },
+      ]);
+    }
     try {
       const payload = await apiFetch<{
         item: CatalogSheet['item'];
         readiness: ProductDetailPayload['readiness'];
-      }>(`/api/catalog/products/${prod.id}/recalculate-readiness`, { method: 'POST' });
+        notes?: string[];
+      }>(
+        `/api/catalog/products/${prod.id}/${mode === 'erp' ? 'sync-and-recalculate' : 'recalculate-readiness'}`,
+        { method: 'POST' }
+      );
       const next = payload.item.integrations?.find((channel) => channel.platform === 'nuvemshop')?.percent ?? null;
       setSheet((current) => (current ? { ...current, item: payload.item } : current));
       setDetail((current) => (current ? { ...current, readiness: payload.readiness } : current));
-      if (previous !== null && next !== null && next > previous) {
+      setToasts((prev) => prev.filter((toast) => toast.id !== loadingToastId));
+
+      const note = payload.notes?.[0];
+      const id = `${Date.now()}-${mode}`;
+      if (mode === 'erp') {
         setToasts((prev) => [
           ...prev,
-          { id: `${Date.now()}-${prev.length}`, variant: 'success', title: `Prontidão atualizada! Nova nota: ${next}%` },
+          {
+            id,
+            variant: 'success',
+            title: 'Prontidão atualizada com dados do ERP!',
+            description: note ?? (next !== null ? `Nova nota: ${next}%` : undefined),
+          },
+        ]);
+      } else if (previous !== null && next !== null && next > previous) {
+        setToasts((prev) => [
+          ...prev,
+          { id, variant: 'success', title: `Prontidão atualizada! Nova nota: ${next}%` },
         ]);
       } else {
         setToasts((prev) => [
           ...prev,
-          { id: `${Date.now()}-${prev.length}`, variant: 'neutral', title: 'Prontidão verificada. Nenhuma alteração detectada.' },
+          { id, variant: 'neutral', title: 'Prontidão verificada. Nenhuma alteração detectada.' },
         ]);
       }
-    } catch {
+    } catch (error) {
+      setToasts((prev) => prev.filter((toast) => toast.id !== loadingToastId));
       setToasts((prev) => [
         ...prev,
-        { id: `${Date.now()}-${prev.length}`, variant: 'warning', title: 'Não foi possível recalcular a prontidão.' },
+        {
+          id: `${Date.now()}-erro`,
+          variant: 'warning',
+          title: 'Não foi possível recalcular a prontidão.',
+          description: error instanceof ApiError ? error.message : undefined,
+        },
       ]);
     } finally {
-      setRecalculating(false);
+      setPendingAction(null);
       setCooldown(5);
     }
   }
@@ -363,16 +415,72 @@ function FichaUnicaProdutoPage({
             <span>Abrir no Bling</span>
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
-          <button
-            type="button"
-            onClick={() => void recalculateReadiness()}
-            disabled={recalculating || cooldown > 0}
-            aria-busy={recalculating}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border-color bg-bg-surface px-3.5 py-2 text-xs font-semibold text-text-primary transition hover:border-accent-copper/60 hover:text-accent-copper disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${recalculating ? 'animate-spin' : ''}`} aria-hidden />
-            {recalculating ? 'Recalculando...' : cooldown > 0 ? `Aguarde ${cooldown}s` : 'Atualizar Prontidão'}
-          </button>
+          <div className="relative flex items-stretch" data-readiness-menu>
+            <button
+              type="button"
+              onClick={() => void runRecalculate('local')}
+              disabled={pendingAction !== null || cooldown > 0}
+              aria-busy={pendingAction !== null}
+              className="inline-flex items-center gap-1.5 rounded-l-lg border border-border-color bg-bg-surface px-3.5 py-2 text-xs font-semibold text-text-primary transition hover:border-accent-copper/60 hover:text-accent-copper disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${pendingAction !== null ? 'animate-spin' : ''}`} aria-hidden />
+              {pendingAction === 'erp'
+                ? 'Buscando no ERP...'
+                : pendingAction === 'local'
+                  ? 'Recalculando...'
+                  : cooldown > 0
+                    ? `Aguarde ${cooldown}s`
+                    : 'Atualizar Prontidão'}
+            </button>
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-label="Opções de recálculo da prontidão"
+              onClick={() => setMenuOpen((open) => !open)}
+              disabled={pendingAction !== null || cooldown > 0}
+              className="inline-flex items-center rounded-r-lg border border-l-0 border-border-color bg-bg-surface px-2 text-text-muted transition hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Settings2 className="h-3.5 w-3.5" aria-hidden />
+            </button>
+            {menuOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-20 mt-1.5 w-72 rounded-xl border border-border-color bg-bg-surface p-1.5 shadow-xl"
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    void runRecalculate('local');
+                  }}
+                  className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-bg-base"
+                >
+                  <Zap className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden />
+                  <span>
+                    <span className="block text-xs font-semibold text-text-primary">Apenas recalcular</span>
+                    <span className="block text-[11px] text-text-muted">Rápido: lê o banco do HUB, sem chamar o Bling.</span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    void runRecalculate('erp');
+                  }}
+                  className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-bg-base"
+                >
+                  <Download className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent-copper" aria-hidden />
+                  <span>
+                    <span className="block text-xs font-semibold text-text-primary">Puxar do ERP e recalcular</span>
+                    <span className="block text-[11px] text-text-muted">Busca este produto no Bling (1 requisição) e atualiza.</span>
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
           {isBlankSku(prod?.erp_sku) ? (
             <span
               className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-xs font-semibold text-rose-200"

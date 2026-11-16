@@ -29,6 +29,7 @@ import {
 } from '../catalog/mapping-studio.js';
 import { buildPublishPreview, recalculateCompleteness, PublishChannel } from '../catalog/publish-preview.js';
 import { calculateProductReadinessCre } from '../engines/cre.js';
+import { ErpProductUnavailableError, findProductForRefresh, ProductNotInErpError, refreshProductFromErp } from '../catalog/product-refresh.js';
 import { enqueueReadyProducts, isLivePublishingEnabled } from '../queues/publish-queue.js';
 import { loadConnectors } from '../connectors/load.js';
 import { buildCatalogWorkbook, buildImportTemplateCsv } from '../catalog/spreadsheet.js';
@@ -580,61 +581,107 @@ catalogRouter.post(
  * channel_readiness_scores e o checklist é lido do catálogo. Nenhuma chamada ao
  * Bling ou à Nuvemshop e nenhum job na fila — a ação é do operador, não do sync.
  */
+type ReadinessRow = {
+  variant_id: string;
+  score_bling: number;
+  score_ml: number;
+  score_ns: number;
+  publishable_bling: boolean;
+  publishable_ml: boolean;
+  publishable_ns: boolean;
+  blockers: string[];
+  top_improvements: unknown;
+};
+
+/** Item do catálogo + notas da variante exibida. Usado pelos dois recálculos. */
+async function respondWithReadiness(
+  res: Response,
+  product: { id: string; erp_id: string },
+  notes: string[] = []
+): Promise<void> {
+  const [listed, scores] = await Promise.all([
+    listCatalog({
+      tab: 'todos',
+      sku: '',
+      name: '',
+      brand: '',
+      page: 1,
+      pageSize: 1,
+      erpId: product.erp_id,
+    }),
+    query<ReadinessRow>(
+      `SELECT s.variant_id, s.score_bling, s.score_ml, s.score_ns,
+              s.publishable_bling, s.publishable_ml, s.publishable_ns,
+              s.blockers, s.top_improvements
+       FROM channel_readiness_scores s
+       INNER JOIN product_variants pv ON pv.id = s.variant_id
+       WHERE s.master_product_id = $1
+       ORDER BY pv.is_default DESC, pv.erp_sku ASC`,
+      [product.id]
+    ),
+  ]);
+
+  const item = listed.items[0];
+  if (!item) {
+    res.status(404).json({ error: 'not_found' });
+    return;
+  }
+  res.status(200).json({ item, readiness: scores.rows, notes });
+}
+
+/**
+ * Recalcula a prontidão só com o banco local: CRE grava as notas em
+ * channel_readiness_scores e o checklist é lido do catálogo. Nenhuma chamada ao
+ * Bling ou à Nuvemshop e nenhum job na fila — a ação é do operador, não do sync.
+ */
 catalogRouter.post(
   '/api/catalog/products/:id/recalculate-readiness',
   requireRole('operator', 'admin'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const found = await query<{ id: string; erp_id: string }>(
-        `SELECT id, erp_id FROM master_products WHERE erp_id = $1 OR id::text = $1 LIMIT 1`,
-        [req.params.id]
-      );
-      const product = found.rows[0];
+      const product = await findProductForRefresh(req.params.id);
       if (!product) {
         res.status(404).json({ error: 'not_found' });
         return;
       }
-
       await calculateProductReadinessCre(product.id);
+      await respondWithReadiness(res, product);
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
-      const [listed, scores] = await Promise.all([
-        listCatalog({
-          tab: 'todos',
-          sku: '',
-          name: '',
-          brand: '',
-          page: 1,
-          pageSize: 1,
-          erpId: product.erp_id,
-        }),
-        query<{
-          variant_id: string;
-          score_bling: number;
-          score_ml: number;
-          score_ns: number;
-          publishable_bling: boolean;
-          publishable_ml: boolean;
-          publishable_ns: boolean;
-          blockers: string[];
-          top_improvements: unknown;
-        }>(
-          `SELECT s.variant_id, s.score_bling, s.score_ml, s.score_ns,
-                  s.publishable_bling, s.publishable_ml, s.publishable_ns,
-                  s.blockers, s.top_improvements
-           FROM channel_readiness_scores s
-           INNER JOIN product_variants pv ON pv.id = s.variant_id
-           WHERE s.master_product_id = $1
-           ORDER BY pv.is_default DESC, pv.erp_sku ASC`,
-          [product.id]
-        ),
-      ]);
-
-      const item = listed.items[0];
-      if (!item) {
+/**
+ * Puxa UM produto do ERP e recalcula. O custo é uma requisição para o produto
+ * (mais uma por variação filha, quando o pai não traz a grade), protegida pelo
+ * rate limit global do Bling. Sem Full Sync e sem job de fila de publicação.
+ */
+catalogRouter.post(
+  '/api/catalog/products/:id/sync-and-recalculate',
+  requireRole('operator', 'admin'),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const product = await findProductForRefresh(req.params.id);
+      if (!product) {
         res.status(404).json({ error: 'not_found' });
         return;
       }
-      res.status(200).json({ item, readiness: scores.rows });
+      let notes: string[] = [];
+      try {
+        notes = (await refreshProductFromErp(product.erp_id)).notes;
+      } catch (error) {
+        if (error instanceof ProductNotInErpError) {
+          res.status(404).json({ error: 'erp_not_found', message: error.message });
+          return;
+        }
+        if (error instanceof ErpProductUnavailableError) {
+          res.status(502).json({ error: 'erp_unavailable', message: error.message });
+          return;
+        }
+        throw error;
+      }
+      await respondWithReadiness(res, product, notes);
     } catch (error) {
       next(error);
     }

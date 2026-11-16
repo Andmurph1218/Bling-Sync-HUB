@@ -86,7 +86,7 @@ function note(report: FullSyncReport, message: string, countsAsFailure: boolean)
   if (report.errors.length < MAX_ERRORS) report.errors.push(message.slice(0, 240));
 }
 
-function asProduct(raw: unknown): InboundProduct | null {
+export function asProduct(raw: unknown): InboundProduct | null {
   if (!raw || typeof raw !== 'object' || !('id' in raw)) return null;
   const payload = raw as InboundProduct;
   if (payload.codigo == null || String(payload.codigo).trim() === '') {
@@ -106,7 +106,7 @@ async function defaultAlreadyImported(externalId: string): Promise<boolean> {
   return Boolean(found.rows[0]);
 }
 
-async function hydrateVariations(erp: ErpConnector, payload: InboundProduct): Promise<void> {
+export async function hydrateVariations(erp: ErpConnector, payload: InboundProduct): Promise<void> {
   if (payload.formato !== 'V' || (payload.variacoes ?? []).length > 0 || !erp.listChildIds) return;
   const childIds = await erp.listChildIds(String(payload.id));
   const variations: InboundVariant[] = [];
@@ -147,7 +147,7 @@ async function hydrateVariations(erp: ErpConnector, payload: InboundProduct): Pr
   if (variations.length === 0) payload.formato = 'S';
 }
 
-function imageCandidates(payload: InboundProduct): EnqueueImageCandidate[] {
+export function imageCandidates(payload: InboundProduct): EnqueueImageCandidate[] {
   const midia = (payload as {
     midia?: { imagens?: { externas?: Array<{ link?: string }>; internas?: Array<{ link?: string }> } };
   }).midia;
@@ -190,7 +190,7 @@ async function recordSyncFailure(externalId: string, error: unknown): Promise<vo
   }
 }
 
-async function stockForBatch(
+export async function stockForBatch(
   erp: ErpConnector,
   batch: InboundProduct[]
 ): Promise<Map<string, InboundStockBalance>> {
@@ -211,7 +211,7 @@ async function stockForBatch(
   return balances;
 }
 
-function stockBySku(payload: InboundProduct, balances: Map<string, InboundStockBalance>): Record<string, InboundStockBalance> {
+export function stockBySku(payload: InboundProduct, balances: Map<string, InboundStockBalance>): Record<string, InboundStockBalance> {
   const mapped: Record<string, InboundStockBalance> = {};
   const attached = (payload as { estoqueSaldos?: unknown }).estoqueSaldos;
   if (Array.isArray(attached)) {

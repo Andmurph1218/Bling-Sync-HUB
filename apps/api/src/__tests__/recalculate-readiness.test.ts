@@ -7,6 +7,44 @@ import { createUser } from '../auth/service.js';
 import { DbPoolLike, query, setPool } from '../db/pool.js';
 import { runAllMigrationsUp } from '../db/migrator.js';
 import { setRedis } from '../lib/redis.js';
+import { registerErpConnector } from '../connectors/strategy/factory.js';
+import { ErpConnector } from '../connectors/strategy/types.js';
+
+/** ERP de teste: devolve o payload que o operador acabou de mudar no Bling. */
+function fakeErp(state: { payload: Record<string, unknown> | null; calls: number; error?: string }): ErpConnector {
+  return {
+    id: 'fake-erp',
+    async pullCatalogProduct() {
+      state.calls += 1;
+      if (state.error) throw new Error(state.error);
+      return state.payload;
+    },
+    async listChildIds() {
+      return [];
+    },
+    async pullStockBalances() {
+      return [];
+    },
+    async syncProduct() {
+      throw new Error('não usado');
+    },
+    async getStock() {
+      throw new Error('não usado');
+    },
+    async getPrice() {
+      throw new Error('não usado');
+    },
+    async listCatalogPage() {
+      throw new Error('não usado');
+    },
+    async fetchProductEnrichmentData() {
+      throw new Error('não usado');
+    },
+    async createProduct() {
+      throw new Error('não usado');
+    },
+  };
+}
 
 describe('recalcular prontidão do produto', () => {
   const app = createApp();
@@ -76,6 +114,7 @@ describe('recalcular prontidão do produto', () => {
   });
 
   afterAll(async () => {
+    delete process.env.ACTIVE_ERP;
     if (poolInstance) await poolInstance.end();
     setPool(null);
   });
@@ -126,6 +165,108 @@ describe('recalcular prontidão do produto', () => {
       .post('/api/catalog/products/nao-existe/recalculate-readiness')
       .set('Cookie', cookie);
     expect(res.status).toBe(404);
+  });
+
+  it('puxa o produto do ERP, aplica o NCM novo e recalcula', async () => {
+    const created = await query<{ id: string }>(
+      `INSERT INTO master_products (erp_id, erp_sku, name, brand, bling_tipo, product_format, ncm_status)
+       VALUES ('REC-ERP', 'REC-ERP', 'Produto sem NCM', 'JHS', 'P', 'S', 'invalid')
+       RETURNING id`
+    );
+    const id = created.rows[0]!.id;
+    await query(
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, stock, catalog_stock)
+       VALUES ($1, 'REC-ERP', true, 'S', 10, 1, 1)`,
+      [id]
+    );
+    const state = {
+      calls: 0,
+      payload: {
+        id: 'REC-ERP',
+        codigo: 'REC-ERP',
+        nome: 'Produto sem NCM',
+        tipo: 'P',
+        situacao: 'A',
+        formato: 'S',
+        preco: 10,
+        tributacao: { ncm: '6109.10.00' },
+      } as Record<string, unknown> | null,
+    };
+    registerErpConnector('fake-erp', () => fakeErp(state));
+    process.env.ACTIVE_ERP = 'fake-erp';
+
+    const res = await request(app)
+      .post(`/api/catalog/products/${id}/sync-and-recalculate`)
+      .set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(state.calls).toBe(1);
+    expect(res.body.item.checklist.items.find((item: { code: string }) => item.code === 'ncm')?.ok).toBe(true);
+
+    const stored = await query<{ ncm: string }>(`SELECT ncm FROM master_products WHERE id = $1`, [id]);
+    expect(stored.rows[0]!.ncm).toBe('61091000');
+  });
+
+  it('avisa quando o ERP está com outro NCM e o HUB mantém o aprovado', async () => {
+    const created = await query<{ id: string }>(
+      `INSERT INTO master_products (erp_id, erp_sku, name, brand, bling_tipo, product_format, ncm, ncm_status)
+       VALUES ('REC-NCM', 'REC-NCM', 'Produto com NCM', 'JHS', 'P', 'S', '61091000', 'valid')
+       RETURNING id`
+    );
+    const id = created.rows[0]!.id;
+    await query(
+      `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, stock, catalog_stock)
+       VALUES ($1, 'REC-NCM', true, 'S', 20, 1, 1)`,
+      [id]
+    );
+
+    const state = {
+      calls: 0,
+      payload: {
+        id: 'REC-NCM',
+        codigo: 'REC-NCM',
+        nome: 'Produto com NCM',
+        tipo: 'P',
+        situacao: 'A',
+        formato: 'S',
+        preco: 20,
+        tributacao: { ncm: '9999.99.99' },
+      } as Record<string, unknown> | null,
+    };
+    registerErpConnector('fake-erp', () => fakeErp(state));
+    process.env.ACTIVE_ERP = 'fake-erp';
+
+    const res = await request(app)
+      .post(`/api/catalog/products/${id}/sync-and-recalculate`)
+      .set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.notes.join(' ')).toContain('mantém');
+
+    const stored = await query<{ ncm: string }>(`SELECT ncm FROM master_products WHERE id = $1`, [id]);
+    expect(stored.rows[0]!.ncm).toBe('61091000');
+  });
+
+  it('devolve 404 quando o ERP não tem o produto', async () => {
+    const state = { calls: 0, payload: null };
+    registerErpConnector('fake-erp', () => fakeErp(state));
+    process.env.ACTIVE_ERP = 'fake-erp';
+
+    const res = await request(app)
+      .post(`/api/catalog/products/${productId}/sync-and-recalculate`)
+      .set('Cookie', cookie);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('erp_not_found');
+  });
+
+  it('devolve 502 quando o ERP falha', async () => {
+    const state = { calls: 0, payload: null, error: 'Bling respondeu 503' };
+    registerErpConnector('fake-erp', () => fakeErp(state));
+    process.env.ACTIVE_ERP = 'fake-erp';
+
+    const res = await request(app)
+      .post(`/api/catalog/products/${productId}/sync-and-recalculate`)
+      .set('Cookie', cookie);
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe('erp_unavailable');
   });
 
   it('exige sessão', async () => {
