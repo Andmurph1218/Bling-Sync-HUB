@@ -78,12 +78,13 @@ describe('P1 — atributos e completude', () => {
     expect(materialized.attributes).toEqual([]);
   });
 
-  it('produto ativo sem categoria aparece como sem categoria', () => {
+  it('categoria HUB sem vínculo importado não libera o produto', () => {
     const checklist = evaluateCatalogChecklist({
       erpId: '1',
       sku: 'SKU-1',
       hasCoverImage: true,
-      hubCategoryId: null,
+      hubCategoryId: 'legacy-hub-category',
+      erpCategoryMapped: false,
       mappedPlatforms: [],
       greenPlatforms: [],
       eanStatus: 'valid',
@@ -93,7 +94,7 @@ describe('P1 — atributos e completude', () => {
       price: 10,
       hasDuplicateCandidate: false,
     });
-    expect(checklist.items.find((item) => item.code === 'hub_category')?.title).toBe('Sem categoria');
+    expect(checklist.items.find((item) => item.code === 'hub_category')?.title).toBe('Sem vínculo de categoria no ERP');
     expect(checklist.ready).toBe(false);
   });
 });

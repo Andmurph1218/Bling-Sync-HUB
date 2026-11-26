@@ -2,6 +2,7 @@ import { AttributeMapInput, materializeChannelAttributes } from '../../catalog/c
 import { isBlankSku } from '../../catalog/blank-sku.js';
 import { getPublicBaseUrl } from '../../config/public-url.js';
 import { query } from '../../db/pool.js';
+import { resolveProductCategory } from '../../services/category-resolver.service.js';
 import { mediaRelativePath } from '../../routes/media.js';
 import { ListingDraft, ListingDraftAttribute } from '../strategy/types.js';
 import { toNuvemshopHtml } from './nuvemshop-html.js';
@@ -143,20 +144,11 @@ export async function buildNuvemshopDraft(productId: string): Promise<ListingDra
     }));
   }
 
-  const categoryRes = product.hub_category_id
-    ? await query<{ channel_category_id: string }>(
-        `SELECT channel_category_id
-         FROM channel_category_maps
-         WHERE hub_category_id = $1 AND platform = 'nuvemshop'
-         LIMIT 1`,
-        [product.hub_category_id]
-      )
-    : { rows: [] as Array<{ channel_category_id: string }> };
-  const categoryRaw = (categoryRes.rows[0]?.channel_category_id ?? '').trim();
+  const categoryRaw = (await resolveProductCategory(productId, 'nuvemshop') ?? '').trim();
   const categoryId = Number(categoryRaw);
   if (!Number.isInteger(categoryId) || categoryId <= 0) {
     throw new Error(
-      `Categoria da Nuvemshop inválida para o produto ${masterSku}: "${categoryRaw}". Mapeie um ID numérico em Canais > Categorias.`
+      `Categoria da Nuvemshop inválida para o produto ${masterSku}: "${categoryRaw}". Confira o vínculo no ERP e sincronize em Atributos.`
     );
   }
 

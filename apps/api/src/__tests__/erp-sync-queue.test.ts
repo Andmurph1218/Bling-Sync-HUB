@@ -13,6 +13,7 @@ import { processErpSyncPage, readErpSyncStatus } from '../queues/erp-sync-worker
 function erp(): ErpConnector {
   return {
     id: 'bling',
+    fetchCategoryMappings: async () => [],
     syncProduct: async () => ({ found: false, productId: null, externalId: null, sku: null, name: null }),
     getStock: async () => ({ found: false, quantity: null }),
     getPrice: async () => ({ found: false, price: null }),

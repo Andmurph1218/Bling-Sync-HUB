@@ -46,12 +46,13 @@ describe('enriquecimento do catálogo', () => {
   it('lê imagem, NCM e categoria do produto do Bling', () => {
     const data = readBlingEnrichment({
       tributacao: { ncm: '9405.10.99' },
-      categoria: { descricao: 'Luminárias' },
+      categoria: { id: 901, descricao: 'Luminárias' },
       midia: { imagens: { internas: [{ link: 'https://orgbling.s3.amazonaws.com/capa.jpg' }] } },
       imagemURL: 'https://orgbling.s3.amazonaws.com/capa.jpg',
     });
     expect(data.ncm).toBe('94051099');
     expect(data.category).toBe('Luminárias');
+    expect(data.erpCategoryId).toBe('901');
     expect(data.images).toEqual(['https://orgbling.s3.amazonaws.com/capa.jpg']);
   });
 
@@ -73,6 +74,7 @@ describe('enriquecimento do catálogo', () => {
         images: ['https://orgbling.s3.amazonaws.com/capa.jpg', 'https://orgbling.s3.amazonaws.com/galeria.jpg'],
         ncm: '94051099',
         category: 'Luminárias',
+        erpCategoryId: '901',
       }),
       createProduct: async () => {
         writes += 1;
@@ -120,6 +122,7 @@ describe('enriquecimento do catálogo', () => {
     expect(product.rows[0]?.ncm_status).toBe('pending_approval');
     expect(product.rows[0]?.ncm_fiscal_risk).toBe(true);
     expect(product.rows[0]?.category).toBe('Luminárias');
+    expect((await query<{ erp_category_id: string }>(`SELECT erp_category_id FROM master_products WHERE id = $1`, [productId])).rows[0]?.erp_category_id).toBe('901');
     expect(product.rows[0]?.worst_score).not.toBeNull();
     const suggestion = await query<{ status: string; source_platform: string; proposed_ncm: string }>(
       `SELECT status, source_platform, proposed_ncm FROM ncm_manual_suggestions WHERE master_product_id = $1`,

@@ -6,9 +6,19 @@ import { enqueueEnrichment } from '../queues/enrichment-worker.js';
 import { enqueueErpSync, readErpSyncStatus } from '../queues/erp-sync-worker.js';
 import { reconcileAll, reconcileListings } from '../services/reconciliation.service.js';
 
+import { readCategoryMappingAudit, syncCategoryMappings } from '../services/category-audit.service.js';
+
 export const adminSyncRouter = Router();
 const admin = requireRole('admin');
 const reader = requireRole('admin', 'operator');
+
+adminSyncRouter.get('/api/admin/category-mappings', reader, async (_req: Request, res: Response, next: NextFunction) => {
+  try { res.status(200).json(await readCategoryMappingAudit()); } catch (error) { next(error); }
+});
+
+adminSyncRouter.post('/api/admin/sync-category-mappings', admin, async (_req: Request, res: Response, next: NextFunction) => {
+  try { res.status(200).json(await syncCategoryMappings()); } catch (error) { next(error); }
+});
 
 adminSyncRouter.get('/api/admin/sync-full', admin, (_req: Request, res: Response) => {
   res.status(200).json(getFullSyncStatus());

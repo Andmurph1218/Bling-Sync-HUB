@@ -37,6 +37,7 @@ describe('sync completo do ERP', () => {
     const upserted: string[] = [];
     const erp = {
       id: 'bling',
+      fetchCategoryMappings: async () => [],
       syncProduct: async () => ({ found: false, productId: null, externalId: null, sku: null, name: null }),
       getStock: async () => ({ found: false, quantity: null }),
       getPrice: async () => ({ found: false, price: null }),
@@ -78,6 +79,7 @@ describe('sync completo do ERP', () => {
     const pulled: string[] = [];
     const erp = {
       id: 'bling',
+      fetchCategoryMappings: async () => [],
       syncProduct: async () => ({ found: false, productId: null, externalId: null, sku: null, name: null }),
       getStock: async () => ({ found: false, quantity: null }),
       getPrice: async () => ({ found: false, price: null }),
@@ -119,6 +121,7 @@ describe('sync completo do ERP', () => {
   it('ignora falso filho que pertence a outro pai (ou produto independente sem vínculo) e rebaixa pai órfão para formato S', async () => {
     const erp = {
       id: 'bling',
+      fetchCategoryMappings: async () => [],
       syncProduct: async () => ({ found: false, productId: null, externalId: null, sku: null, name: null }),
       getStock: async () => ({ found: false, quantity: null }),
       getPrice: async () => ({ found: false, price: null }),
@@ -191,6 +194,7 @@ describe('sync completo com mídia do ERP', () => {
   it('enfileira a imagem do produto com source_platform erp e incrementa upserted', async () => {
     const erp = {
       id: 'bling',
+      fetchCategoryMappings: async () => [],
       syncProduct: async () => ({ found: false, productId: null, externalId: null, sku: null, name: null }),
       getStock: async () => ({ found: false, quantity: null }),
       getPrice: async () => ({ found: false, price: null }),

@@ -13,11 +13,13 @@ import {
   CreateProductDTO,
   ERP_POST_TIMEOUT_MESSAGE,
   ErpCatalogPage,
+  ErpCategoryMapping,
   ErpCommerceSnapshot,
   ErpConnector,
   ErpPostTimeoutError,
   ErpPriceSnapshot,
   ErpProductSnapshot,
+  ErpProductEnrichmentData,
   ErpRejectedError,
   ErpStockBalance,
   ErpStockSnapshot,
@@ -26,7 +28,15 @@ import {
 
 const BLING_BASE = 'https://api.bling.com.br/Api/v3';
 
+export interface BlingStoreCategory {
+  id: number | string;
+  loja: { id: number | string };
+  categoriaProduto: { id: number | string };
+  codigo: string;
+}
+
 export interface BlingCatalogReader {
+  categoryPage?(page: number, pageSize: number): Promise<BlingStoreCategory[]>;
   list(page: number, pageSize: number): Promise<ErpCatalogPage>;
   pull(externalId: string): Promise<unknown | null>;
   stock(externalIds: string[]): Promise<ErpStockBalance[]>;
@@ -137,7 +147,7 @@ function linksFrom(value: unknown, links: string[]): void {
 }
 
 /** Lê imagens, NCM e categoria do JSON de GET /produtos/{id}. Não grava nada no Bling. */
-export function readBlingEnrichment(product: unknown): { images: string[]; ncm: string; category: string } {
+export function readBlingEnrichment(product: unknown): ErpProductEnrichmentData {
   if (!product || typeof product !== 'object') return { images: [], ncm: '', category: '' };
   const record = product as {
     imagem?: unknown;
@@ -146,7 +156,7 @@ export function readBlingEnrichment(product: unknown): { images: string[]; ncm: 
     midia?: { imagens?: unknown; video?: unknown };
     tributacao?: { ncm?: unknown };
     ncm?: unknown;
-    categoria?: { descricao?: unknown } | string;
+    categoria?: { id?: number | string; descricao?: unknown } | string;
   };
   const images: string[] = [];
   linksFrom(record.imagemURL, images);
@@ -157,7 +167,9 @@ export function readBlingEnrichment(product: unknown): { images: string[]; ncm: 
   const category = typeof record.categoria === 'string'
     ? record.categoria.trim()
     : textField(record.categoria?.descricao);
-  return { images, ncm, category };
+  const erpCategoryId = typeof record.categoria === 'object' && record.categoria?.id && String(record.categoria.id) !== '0'
+    ? String(record.categoria.id) : null;
+  return { images, ncm, category, ...('categoria' in record ? { erpCategoryId } : {}) };
 }
 
 function blingError(path: string, status: number, data: unknown): Error {
@@ -366,6 +378,14 @@ export class LiveBlingCatalogReader implements BlingCatalogReader {
 
   private async get<T>(path: string): Promise<{ status: number; data: T }> {
     return this.call<T>('GET', path);
+  }
+
+  async categoryPage(page: number, pageSize: number): Promise<BlingStoreCategory[]> {
+    const path = `/categorias/lojas?pagina=${page}&limite=${pageSize}`;
+    const response = await this.get<{ data?: BlingStoreCategory[] }>(path);
+    if (response.status >= 400) throw blingError(path, response.status, response.data);
+    if (!Array.isArray(response.data?.data)) throw new Error('invalid_category_page');
+    return response.data.data;
   }
 
   async list(page: number, pageSize: number): Promise<ErpCatalogPage> {
@@ -592,11 +612,47 @@ export class BlingErpConnector implements ErpConnector {
     return { found: Boolean(found.rows[0]), price: price === null || price === undefined ? null : Number(price) };
   }
 
+  async fetchCategoryMappings(): Promise<ErpCategoryMapping[]> {
+    if (!this.reader.categoryPage) throw new Error('category_reader_unavailable');
+    const stores = await query<{ platform: string; bling_loja_id: string }>(`SELECT platform, bling_loja_id FROM channel_stores`);
+    const byStore = new Map(stores.rows.map((store) => [String(store.bling_loja_id), store.platform]));
+    const mappings: ErpCategoryMapping[] = [];
+    const seen = new Set<string>();
+    for (let page = 1; page <= 1000; page += 1) {
+      const rows = await this.reader.categoryPage(page, 100);
+      const fingerprint = JSON.stringify(rows);
+      if (rows.length && seen.has(fingerprint)) throw new Error('repeated_category_page');
+      seen.add(fingerprint);
+      for (const row of rows) {
+        if (!row?.loja?.id) throw new Error('invalid_category_store');
+        const channelId = byStore.get(String(row.loja.id));
+        if (!channelId) continue;
+        const erpCategoryId = String(row.categoriaProduto?.id ?? '').trim();
+        const channelCategoryId = String(row.codigo ?? '').trim();
+        if (!erpCategoryId || erpCategoryId === '0' || !channelCategoryId) throw new Error('invalid_category_mapping');
+        if (channelId === 'nuvemshop' && !/^[1-9]\d*$/.test(channelCategoryId)) throw new Error('invalid_channel_category_id');
+        mappings.push({ erpCategoryId, channelId, channelCategoryId });
+      }
+      if (rows.length < 100) return mappings;
+    }
+    throw new Error('category_pagination_limit');
+  }
+
+  async readCachedCategoryReferences(): Promise<Array<{ externalId: string; erpCategoryId: string }>> {
+    const products = await query<{ erp_id: string; last_bling_snapshot: { categoria?: { id?: number | string } } | null }>(
+      `SELECT erp_id, last_bling_snapshot FROM master_products WHERE erp_provider = 'bling' AND erp_category_id IS NULL`
+    );
+    return products.rows.flatMap((product) => {
+      const id = product.last_bling_snapshot?.categoria?.id;
+      return id && String(id) !== '0' ? [{ externalId: product.erp_id, erpCategoryId: String(id) }] : [];
+    });
+  }
+
   listCatalogPage(page: number, pageSize: number): Promise<ErpCatalogPage> {
     return this.reader.list(page, pageSize);
   }
 
-  async fetchProductEnrichmentData(erpId: string): Promise<{ images: string[]; ncm: string; category: string }> {
+  async fetchProductEnrichmentData(erpId: string): Promise<ErpProductEnrichmentData> {
     const product = await this.reader.pull(erpId);
     return readBlingEnrichment(product);
   }

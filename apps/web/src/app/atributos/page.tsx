@@ -1,184 +1,132 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { apiFetch } from '../../utils/api-client';
 import { useCurrentRole } from '../../components/app-shell';
-import { MERCADO_LIVRE_ACTIVE } from '../../config/channels';
-import { AttributeMappingTable } from '../../components/mapping/attribute-mapping-table';
-import { CategoryMappingPanel } from '../../components/mapping/category-mapping-panel';
-import { MappingPlatform, MappingStudio } from '../../components/mapping/types';
+import { Button } from '../../components/ui/button';
 
-type StudioTab = 'categories' | 'attributes';
-type ChannelOption = { id: string; name: string };
-type ConnectorAttribute = { id: string; name: string; required: boolean };
-
-const STUDIO_PLATFORMS = new Set<MappingPlatform>(['nuvemshop', 'mercadolivre']);
-
-function isStudioPlatform(value: string): value is MappingPlatform {
-  return STUDIO_PLATFORMS.has(value as MappingPlatform);
+interface CategoryMapping {
+  id: string;
+  erpCategoryId: string;
+  channelId: string;
+  channelCategoryId: string;
+  status: 'connected' | 'divergent';
+  divergences: number;
 }
+interface CategoryAudit {
+  provider: string;
+  lastSyncedAt: string | null;
+  divergences: number;
+  mappings: CategoryMapping[];
+}
+
+const channelName = (id: string) => ({ nuvemshop: 'Nuvemshop', mercadolivre: 'Mercado Livre' }[id] ?? id);
 
 export default function AtributosPage() {
   const { hasRole } = useCurrentRole();
-  const canWrite = hasRole('operator', 'admin');
-  const [tab, setTab] = useState<StudioTab>('categories');
-  const [platform, setPlatform] = useState<string>('nuvemshop');
-  const [channels, setChannels] = useState<ChannelOption[]>([{ id: 'nuvemshop', name: 'Nuvemshop' }]);
-  const [studio, setStudio] = useState<MappingStudio | null>(null);
+  const canSync = hasRole('admin');
+  const [audit, setAudit] = useState<CategoryAudit | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [categoryId, setCategoryId] = useState('');
-  const [connectorAttributes, setConnectorAttributes] = useState<ConnectorAttribute[] | null>(null);
-
-  useEffect(() => {
-    void apiFetch<{ apps: Array<{ id: string; name: string; category: string; implemented: boolean }> }>('/api/integrations')
-      .then((payload) => {
-        const next = payload.apps.filter(
-          (app) => app.category === 'marketplaces' && app.implemented && (app.id !== 'mercadolivre' || MERCADO_LIVRE_ACTIVE)
-        );
-        if (next.length > 0) setChannels(next.map((app) => ({ id: app.id, name: app.name })));
-      })
-      .catch(() => undefined);
-  }, []);
-
+  const [notice, setNotice] = useState<string | null>(null);
+  const [channel, setChannel] = useState('all');
   const load = useCallback(async () => {
-    if (!isStudioPlatform(platform)) {
-      setStudio(null);
-      return;
-    }
+    setLoading(true);
     try {
-      setStudio(await apiFetch<MappingStudio>(`/api/catalog/mapping-studio?platform=${platform}`));
+      setAudit(await apiFetch<CategoryAudit>('/api/admin/category-mappings'));
       setError(null);
     } catch {
-      setStudio(null);
-      setError('Não foi possível ler o estúdio de mapeamento.');
+      setError('Não foi possível ler os vínculos. Tente atualizar a auditoria.');
+    } finally {
+      setLoading(false);
     }
-  }, [platform]);
+  }, []);
+  useEffect(() => { void load(); }, [load]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const channelName = channels.find((channel) => channel.id === platform)?.name ?? platform;
-
-  const readConnectorAttributes = async () => {
-    if (!categoryId.trim()) {
-      setError('Informe o ID da categoria neste canal.');
-      return;
-    }
+  const synchronize = async () => {
+    setSyncing(true);
+    setError(null);
+    setNotice(null);
     try {
-      const payload = await apiFetch<{ attributes: ConnectorAttribute[] }>(
-        `/api/marketplace/${platform}/category-attributes?categoryId=${encodeURIComponent(categoryId.trim())}`
-      );
-      setConnectorAttributes(payload.attributes);
-      setError(null);
+      const result = await apiFetch<{ mappings: number }>('/api/admin/sync-category-mappings', { method: 'POST' });
+      setNotice(`${result.mappings.toLocaleString('pt-BR')} ${result.mappings === 1 ? 'vínculo importado' : 'vínculos importados'} do ERP. A reconciliação dos anúncios verifica as divergências.`);
+      await load();
     } catch {
-      setConnectorAttributes(null);
-      setError('Não foi possível ler os atributos deste canal. Confira a credencial e o ID da categoria.');
+      setError('Não foi possível confirmar a sincronização. Os vínculos exibidos foram preservados. Atualize a auditoria e confira a conexão do ERP antes de tentar novamente.');
+    } finally {
+      setSyncing(false);
     }
   };
+  const channels = useMemo(() => [...new Set(audit?.mappings.map((row) => row.channelId) ?? [])], [audit]);
+  const rows = audit?.mappings.filter((row) => channel === 'all' || row.channelId === channel) ?? [];
+  const updatedAt = audit?.lastSyncedAt ? new Date(audit.lastSyncedAt).toLocaleString('pt-BR') : 'Ainda não sincronizado';
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
+    <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <header className="flex flex-col justify-between gap-4 border-b border-border-color pb-6 lg:flex-row lg:items-end">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-text-primary">Data Mapping Studio</h1>
-          <p className="mt-1 max-w-3xl text-sm text-text-muted">
-            Mapeie a categoria do ERP para a categoria do canal e, em seguida, traduza os atributos e os valores.
-            O que você salvar vale para todos os produtos daquela categoria.
+          <h1 className="text-2xl font-bold tracking-tight text-text-primary">Auditoria de categorias</h1>
+          <p className="mt-2 max-w-2xl text-sm text-text-muted">
+            O ERP define as categorias de cada canal. O HUB lê os vínculos e audita os anúncios, sem criar ou editar mapeamentos.
           </p>
         </div>
-        <label className="text-xs text-text-muted">
-          Canal de destino
-          <select
-            value={platform}
-            onChange={(event) => {
-              setPlatform(event.target.value);
-              setConnectorAttributes(null);
-              setError(null);
-            }}
-            className="mt-1 block rounded-lg border border-border-color bg-bg-surface px-2 py-1.5 text-sm text-text-primary"
-          >
-            {channels.map((channel) => (
-              <option key={channel.id} value={channel.id}>{channel.name}</option>
-            ))}
-          </select>
-        </label>
+        <Button variant="primary" disabled={!canSync || syncing || loading} aria-busy={syncing} onClick={() => void synchronize()}>
+          <RefreshCw aria-hidden="true" size={16} className={syncing ? 'animate-spin motion-reduce:animate-none' : ''} />
+          {syncing ? 'Sincronizando com o ERP…' : 'Sincronizar Mapeamentos do ERP'}
+        </Button>
       </header>
-
-      {studio?.channelTreeSource === 'fixture' && (
-        <p className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-100">
-          A árvore de {channelName} é um exemplo, no formato da API do canal. Quando a leitura real estiver ligada, esta tela usa a mesma resposta sem mudar o mapeamento já salvo.
-        </p>
+      {!canSync && <p className="mt-4 text-sm text-text-muted">Somente administradores podem sincronizar. A consulta dos vínculos é somente leitura.</p>}
+      {error && <p role="alert" className="mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-700 dark:text-rose-200">{error}</p>}
+      {notice && <p role="status" className="mt-4 text-sm text-text-primary">{notice}</p>}
+      {Boolean(audit?.divergences) && (
+        <section role="alert" className="mt-6 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-100">
+          <AlertTriangle aria-hidden="true" size={20} className="shrink-0" />
+          <div>
+            <p>{audit!.divergences.toLocaleString('pt-BR')} {audit!.divergences === 1 ? 'anúncio' : 'anúncios'} com categoria diferente da definida pelo ERP na última reconciliação.</p>
+            <Link href="/problemas?filtro=divergencias" className="mt-2 inline-block font-semibold underline underline-offset-4">Ver divergências em Problemas</Link>
+          </div>
+        </section>
       )}
-      {error && <p className="mt-4 text-sm text-rose-600 dark:text-rose-200" role="alert">{error}</p>}
-
-      {isStudioPlatform(platform) && <div className="mt-5 flex gap-1 border-b border-border-color" role="tablist">
-        {([
-          ['categories', 'Mapeamento de Categorias'],
-          ['attributes', 'Mapeamento de Atributos e Valores'],
-        ] as const).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={tab === id}
-            onClick={() => setTab(id)}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm ${
-              tab === id ? 'border-emerald-600 font-semibold text-text-primary' : 'border-transparent text-text-muted hover:text-text-primary'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>}
-
-      <div className="mt-5">
-        {!isStudioPlatform(platform) && (
-          <section className="rounded-xl border border-border-color bg-bg-surface p-4">
-            <h2 className="text-sm font-semibold text-text-primary">Atributos de {channelName}</h2>
-            <p className="mt-1 text-sm text-text-muted">
-              A lista vem do conector, com o ID da categoria no canal. O estúdio de categorias continua na Nuvemshop e no Mercado Livre.
-            </p>
-            <div className="mt-3 flex flex-wrap items-end gap-2">
-              <label className="text-xs text-text-muted">
-                ID da categoria
-                <input
-                  value={categoryId}
-                  onChange={(event) => setCategoryId(event.target.value)}
-                  className="mt-1 block rounded-lg border border-border-color bg-bg-base px-2 py-1.5 text-sm text-text-primary"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() => void readConnectorAttributes()}
-                className="rounded-lg bg-emerald-700 px-3 py-1.5 text-sm font-semibold text-white"
-              >
-                Ler atributos
-              </button>
-            </div>
-            {connectorAttributes && connectorAttributes.length === 0 && (
-              <p className="mt-3 text-sm text-text-muted">Esta categoria não devolveu atributos.</p>
-            )}
-            {connectorAttributes && connectorAttributes.length > 0 && (
-              <ul className="mt-3 divide-y divide-border-color">
-                {connectorAttributes.map((attribute) => (
-                  <li key={attribute.id} className="flex items-center justify-between py-2 text-sm">
-                    <span className="text-text-primary">{attribute.name}</span>
-                    <span className="text-xs text-text-muted">{attribute.required ? 'Obrigatório' : 'Opcional'}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+      <section className="mt-8" aria-labelledby="category-mappings-title" aria-busy={loading}>
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 id="category-mappings-title" className="text-base font-semibold text-text-primary">Vínculos importados do ERP{audit ? ` · ${audit.provider}` : ''}</h2>
+            <p className="mt-1 text-sm text-text-muted">Última sincronização: {updatedAt}</p>
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="text-sm text-text-muted">Canal
+              <select value={channel} onChange={(event) => setChannel(event.target.value)} className="ml-2 rounded-lg border border-border-color bg-bg-surface px-3 py-2 text-sm text-text-primary">
+                <option value="all">Todos os canais</option>
+                {channels.map((id) => <option key={id} value={id}>{channelName(id)}</option>)}
+              </select>
+            </label>
+            <Button disabled={loading || syncing} onClick={() => void load()}>Atualizar auditoria</Button>
+          </div>
+        </div>
+        <p className="mb-4 max-w-3xl text-sm text-text-muted">Conectado confirma o vínculo importado do ERP, não uma verificação ao vivo do canal. Divergente indica um alerta aberto pela reconciliação. Corrija o vínculo no ERP ou a categoria no canal; o HUB não altera esses dados automaticamente.</p>
+        {loading && !audit ? <p role="status" className="py-8 text-sm text-text-muted">Carregando vínculos do ERP…</p> : audit && (
+          <div role="region" aria-label="Vínculos de categorias por canal" tabIndex={0} className="overflow-x-auto rounded-xl border border-border-color bg-bg-surface">
+            <table className="w-full min-w-[600px] text-left text-sm">
+              <caption className="sr-only">Categorias vinculadas no ERP e alertas da última reconciliação dos anúncios</caption>
+              <thead className="border-b border-border-color text-text-muted">
+                <tr><th scope="col" className="px-4 py-3 font-medium">Categoria ERP</th><th scope="col" className="px-4 py-3 font-medium">Canal</th><th scope="col" className="px-4 py-3 font-medium">Categoria no canal</th><th scope="col" className="px-4 py-3 font-medium">Status</th></tr>
+              </thead>
+              <tbody className="divide-y divide-border-color text-text-primary">
+                {rows.map((row) => <tr key={row.id} className="hover:bg-bg-base">
+                  <td className="max-w-xs break-all px-4 py-4 font-mono">{row.erpCategoryId}</td>
+                  <td className="px-4 py-4">{channelName(row.channelId)}</td>
+                  <td className="max-w-xs break-all px-4 py-4 font-mono">{row.channelCategoryId}</td>
+                  <td className="px-4 py-4"><span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${row.status === 'divergent' ? 'bg-rose-500/10 text-rose-700 dark:text-rose-200' : 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-200'}`}>{row.status === 'divergent' ? 'Divergente' : 'Conectado'}</span>{row.divergences > 0 && <span className="ml-2 tabular-nums text-text-muted">{row.divergences} {row.divergences === 1 ? 'anúncio' : 'anúncios'}</span>}</td>
+                </tr>)}
+                {rows.length === 0 && <tr><td colSpan={4} className="px-4 py-8 text-text-muted">Nenhum vínculo encontrado. Vincule as categorias à loja correta no ERP e sincronize os mapeamentos.</td></tr>}
+              </tbody>
+            </table>
+          </div>
         )}
-        {isStudioPlatform(platform) && !studio && !error && <p className="text-sm text-text-muted">Carregando...</p>}
-        {isStudioPlatform(platform) && studio && tab === 'categories' && (
-          <CategoryMappingPanel platform={platform} studio={studio} canWrite={canWrite} onSaved={load} />
-        )}
-        {isStudioPlatform(platform) && studio && tab === 'attributes' && (
-          <AttributeMappingTable platform={platform} categories={studio.erp} fields={studio.fields} canWrite={canWrite} />
-        )}
-      </div>
+      </section>
     </main>
   );
 }

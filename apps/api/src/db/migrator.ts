@@ -35,6 +35,7 @@ import * as m033 from './migrations/1729080000033_snapshot-upsert.js';
 import * as m034 from './migrations/1729080000034_image-queue-erp-source.js';
 import * as m035 from './migrations/1729080000035_publish-queue-open-unique.js';
 import * as m036 from './migrations/1729080000036_catalog-sort-indexes.js';
+import * as m037 from './migrations/1729080000037_erp-category-mappings.js';
 
 export interface MigrationStep {
   id: number;
@@ -80,6 +81,7 @@ export const ALL_MIGRATIONS: MigrationStep[] = [
   { id: 34, name: '1729080000034_image-queue-erp-source', upSql: m034.UP_SQL, downSql: m034.DOWN_SQL },
   { id: 35, name: '1729080000035_publish-queue-open-unique', upSql: m035.UP_SQL, downSql: m035.DOWN_SQL },
   { id: 36, name: '1729080000036_catalog-sort-indexes', upSql: m036.UP_SQL, downSql: m036.DOWN_SQL },
+  { id: 37, name: '1729080000037_erp-category-mappings', upSql: m037.UP_SQL, downSql: m037.DOWN_SQL },
 ];
 
 /**

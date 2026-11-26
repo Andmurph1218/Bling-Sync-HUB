@@ -33,6 +33,14 @@ const home = {
   linkedNuvemshop: 80, channels: [], livePublishing: false,
 };
 
+const categoryAudit = {
+  provider: 'bling', lastSyncedAt: '2026-11-26T07:00:00Z', divergences: 1,
+  mappings: [
+    { id: 'm1', erpCategoryId: '901', channelId: 'nuvemshop', channelCategoryId: '123456', status: 'connected', divergences: 0 },
+    { id: 'm2', erpCategoryId: '902', channelId: 'nuvemshop', channelCategoryId: '654321', status: 'divergent', divergences: 1 },
+  ],
+};
+
 async function fixtures(page: Page, theme: 'light' | 'dark') {
   await page.context().addCookies([{ name: 'bling_hub_sid', value: 'ui-test-only', url: base }]);
   await page.addInitScript((value) => localStorage.setItem('theme', value), theme);
@@ -46,6 +54,8 @@ async function fixtures(page: Page, theme: 'light' | 'dark') {
     else if (path === '/api/duplicates') data = { total: 0, items: [] };
     else if (path === '/api/integrations/channels') data = { catalogMode: { badge: 'Shadow' }, channels: [], warehouses: [] };
     else if (path === '/api/admin/enrich-catalog') data = { started: true };
+    else if (path === '/api/admin/category-mappings') data = categoryAudit;
+    else if (path === '/api/admin/sync-category-mappings') data = { provider: 'bling', mappings: 2 };
     else if (path.startsWith('/api/') || path.startsWith('/auth/')) return route.fulfill({ status: 503, json: { message: 'Indisponível no teste' } });
     else return route.continue();
     return route.fulfill({ json: data });
@@ -94,6 +104,37 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(dialog).toHaveCount(0);
   });
 }
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`auditoria ERP ${theme}: leitura, sincronização e acesso aos problemas`, async ({ page }) => {
+    await fixtures(page, theme);
+    await page.setViewportSize({ width: theme === 'light' ? 390 : 1440, height: 900 });
+    await page.goto(`${base}/atributos`);
+    await expect(page.getByRole('heading', { name: 'Auditoria de categorias' })).toBeVisible({ timeout: 3000 });
+    await expect(page.getByRole('cell', { name: '123456', exact: true })).toBeVisible();
+    await expect(page.getByText('Divergente', { exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Ver divergências em Problemas' })).toHaveAttribute('href', '/problemas?filtro=divergencias');
+    await expect(page.getByText('Data Mapping Studio', { exact: true })).toHaveCount(0);
+    const posted = page.waitForRequest((req) => new URL(req.url()).pathname === '/api/admin/sync-category-mappings' && req.method() === 'POST');
+    await page.getByRole('button', { name: 'Sincronizar Mapeamentos do ERP', exact: true }).click();
+    await posted;
+    await expect(page.getByRole('status').filter({ hasText: '2 vínculos importados' })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+    expect(axe.violations.map((issue) => issue.id)).toEqual([]);
+    await page.screenshot({ path: `test-results/category-audit-${theme}.png`, fullPage: true });
+  });
+}
+
+test('auditoria ERP: erro de sincronização preserva os vínculos visíveis', async ({ page }) => {
+  await fixtures(page, 'light');
+  await page.route('**/api/admin/sync-category-mappings', (route) => route.fulfill({ status: 503, json: { message: 'ERP indisponível' } }));
+  await page.goto(`${base}/atributos`);
+  await expect(page.getByRole('cell', { name: '123456', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Sincronizar Mapeamentos do ERP', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'vínculos exibidos foram preservados' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: '123456', exact: true })).toBeVisible();
+});
 
 test('movimento reduzido: barras instantâneas e toast responsivo', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });

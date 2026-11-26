@@ -71,6 +71,7 @@ export interface MappedMasterProduct {
   description: string | null;
   brand: string | null;
   category: string | null;
+  erp_category_id?: string | null;
   unit: string | null;
   ncm: string | null;
   cest: string | null;

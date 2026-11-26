@@ -15,6 +15,11 @@ import { runAllMigrationsUp } from '../db/migrator.js';
 import { setRedis } from '../lib/redis.js';
 import { CHECKLIST_BLOCKED_MESSAGE, DRY_RUN_LOG, processPublishQueueItem, PublishPausedError, setPublishingPaused } from '../queues/publish-queue.js';
 
+async function importedCategory(productId: string, categoryId: string, channel: string, externalId: string): Promise<void> {
+  await query(`UPDATE master_products SET erp_category_id = $2 WHERE id = $1`, [productId, categoryId]);
+  await query(`INSERT INTO erp_category_mappings (erp_provider, erp_category_id, channel, channel_category_id) VALUES ('bling', $1, $2, $3)`, [categoryId, channel, externalId]);
+}
+
 describe('P2 — fila de publicação', () => {
   const app = createApp();
   let poolInstance: DbPoolLike;
@@ -215,6 +220,7 @@ describe('P2 — fila de publicação', () => {
         ],
       });
 
+    await importedCategory(productId, categoryId, 'mercadolivre', 'MLB999001');
     const before = await query<{ count: number }>(`SELECT count(*)::int AS count FROM publish_queue`);
     const response = await request(app)
       .post(`/api/catalog/${productId}/simulate`)
@@ -294,6 +300,7 @@ describe('P2 — fila de publicação', () => {
         ],
       });
 
+    await importedCategory(productId, categoryId, 'mercadolivre', 'MLB999001');
     const withoutSeller = await request(app)
       .post('/api/catalog/products/send-list')
       .set('Cookie', cookie)
@@ -466,6 +473,7 @@ describe('P2 — fila de publicação', () => {
           { channelAttributeId: 'BRAND', channelAttributeName: 'Marca', required: true, mode: 'fixed', fixedValue: 'JHS' },
         ],
       });
+    await importedCategory(productId, categoryId, 'nuvemshop', '123456');
     await query(
       `UPDATE product_variants SET price = 49.9, stock = 7 WHERE id = $1`,
       [variant.rows[0]!.id]
@@ -696,6 +704,7 @@ describe('P2 — fila de publicação', () => {
         ],
       });
 
+    await importedCategory(productId, categoryId, 'nuvemshop', '123456');
     const previousBase = process.env.PUBLIC_BASE_URL;
     const previousStore = process.env.NUVEMSHOP_STORE_ID;
     process.env.PUBLIC_BASE_URL = 'https://hub.test';

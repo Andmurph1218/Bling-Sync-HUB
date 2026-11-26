@@ -42,6 +42,7 @@ describe('buildNuvemshopDraft', () => {
       `INSERT INTO hub_categories (name) VALUES ('Vestuário') RETURNING id`
     );
     categoryId = category.rows[0]!.id;
+    await query(`INSERT INTO erp_category_mappings (erp_provider, erp_category_id, channel, channel_category_id) VALUES ('bling', $1, 'nuvemshop', '123456')`, [categoryId]);
     const map = await query<{ id: string }>(
       `INSERT INTO channel_category_maps (hub_category_id, platform, channel_category_id, channel_category_name)
        VALUES ($1, 'nuvemshop', '123456', 'Camisetas')
@@ -72,6 +73,7 @@ describe('buildNuvemshopDraft', () => {
       [`erp-${sku}`, sku, 'Linha 1\n\nLinha 2', categoryId]
     );
     const productId = created.rows[0]!.id;
+    await query(`UPDATE master_products SET erp_category_id = $2 WHERE id = $1`, [productId, categoryId]);
 
     const axes = await query<{ id: string; canonical_name: string }>(
       `SELECT id, canonical_name FROM attribute_axes WHERE canonical_name IN ('cor', 'tamanho')`
@@ -164,12 +166,12 @@ describe('buildNuvemshopDraft', () => {
   it('falha quando o ID da categoria não é numérico', async () => {
     const productId = await createVariableProduct('NS-VAR-CAT');
     await query(
-      `UPDATE channel_category_maps SET channel_category_id = 'NS-CAT' WHERE hub_category_id = $1 AND platform = 'nuvemshop'`,
+      `UPDATE erp_category_mappings SET channel_category_id = 'NS-CAT' WHERE erp_category_id = $1 AND channel = 'nuvemshop'`,
       [categoryId]
     );
     await expect(buildNuvemshopDraft(productId)).rejects.toThrow(/Categoria da Nuvemshop inválida/);
     await query(
-      `UPDATE channel_category_maps SET channel_category_id = '123456' WHERE hub_category_id = $1 AND platform = 'nuvemshop'`,
+      `UPDATE erp_category_mappings SET channel_category_id = '123456' WHERE erp_category_id = $1 AND channel = 'nuvemshop'`,
       [categoryId]
     );
   });

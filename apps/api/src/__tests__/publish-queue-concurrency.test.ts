@@ -68,6 +68,7 @@ describe('publicação sem duplicidade (sugerido + lock otimista)', () => {
 
     const category = await query<{ id: string }>(`INSERT INTO hub_categories (name) VALUES ('Duplicidade') RETURNING id`);
     categoryId = category.rows[0]!.id;
+    await query(`INSERT INTO erp_category_mappings (erp_provider, erp_category_id, channel, channel_category_id) VALUES ('bling', $1, 'nuvemshop', '123457')`, [categoryId]);
     const map = await query<{ id: string }>(
       `INSERT INTO channel_category_maps (hub_category_id, platform, channel_category_id, channel_category_name)
        VALUES ($1, 'nuvemshop', '123457', 'Duplicidade')
@@ -141,6 +142,7 @@ describe('publicação sem duplicidade (sugerido + lock otimista)', () => {
       [`dup-${sku}`, sku, `Produto ${sku}`, categoryId]
     );
     const productId = created.rows[0]!.id;
+    await query(`UPDATE master_products SET erp_category_id = $2, hub_category_id = NULL WHERE id = $1`, [productId, categoryId]);
     const variant = await query<{ id: string }>(
       `INSERT INTO product_variants (master_product_id, erp_sku, is_default, product_format, price, stock, catalog_stock)
        VALUES ($1, $2, true, 'S', 49.9, 5, 5)

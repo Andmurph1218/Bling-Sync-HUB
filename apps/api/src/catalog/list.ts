@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PoolClient } from 'pg';
 import { query } from '../db/pool.js';
+import { mappedCategorySql, resolveProductCategories } from '../services/category-resolver.service.js';
 import { getPublicBaseUrl } from '../config/public-url.js';
 import { extFromImageFormat, getMediaStorageDir } from '../routes/media.js';
 import {
@@ -195,7 +196,7 @@ const ACTIVE = `mp.catalog_status = 'active'`;
 const NOT_ARCHIVED = `${ACTIVE} AND mp.archived_at IS NULL`;
 const BLANK_SKU = `(mp.erp_sku IS NULL OR mp.erp_sku = '')`;
 const NO_COVER = `mp.id NOT IN (SELECT master_product_id FROM product_images WHERE is_cover_eligible = true)`;
-const NO_CATEGORY = `mp.hub_category_id IS NULL`;
+const NO_CATEGORY = `NOT (${ACTIVE_CATALOG_CHANNELS.map((channel) => mappedCategorySql('mp', channel)).join(' OR ') || 'false'})`;
 const BAD_NCM = `(mp.ncm_status <> 'valid' OR mp.ncm_fiscal_risk = true)`;
 const BAD_PRICE = `mp.id NOT IN (
   SELECT master_product_id FROM product_variants
@@ -205,11 +206,7 @@ const NO_STOCK = `mp.id NOT IN (
   SELECT master_product_id FROM product_variants
   WHERE is_default = true AND (catalog_stock IS NOT NULL OR stock IS NOT NULL)
 )`;
-const MISSING_CHANNEL = `(
-  mp.hub_category_id IS NULL
-  OR mp.hub_category_id NOT IN (SELECT hub_category_id FROM channel_category_maps WHERE platform = 'mercadolivre')
-  OR mp.hub_category_id NOT IN (SELECT hub_category_id FROM channel_category_maps WHERE platform = 'nuvemshop')
-)`;
+const MISSING_CHANNEL = `(${ACTIVE_CATALOG_CHANNELS.map((channel) => `NOT (${mappedCategorySql('mp', channel)})`).join(' OR ')})`;
 const BAD_EAN = `mp.hub_category_id IN (
   SELECT cm.hub_category_id
   FROM channel_attribute_maps am
@@ -287,7 +284,7 @@ const DISPLAY_VARIANT_JOIN = `LEFT JOIN LATERAL (
  * linha, para o `ORDER BY` de completude aproveitar um único subplano.
  */
 function channelGreenSql(platform: CatalogChannel): string {
-  return `mp.hub_category_id IN (
+  const legacy = `mp.hub_category_id IN (
     SELECT cm.hub_category_id
     FROM channel_category_maps cm
     WHERE cm.platform = '${platform}'
@@ -312,6 +309,17 @@ function channelGreenSql(platform: CatalogChannel): string {
           )
       )
   )`;
+  const attributes = platform === 'nuvemshop'
+    ? `(mp.hub_category_id IS NULL OR mp.hub_category_id NOT IN (
+        SELECT cm.hub_category_id FROM channel_category_maps cm
+        INNER JOIN channel_attribute_maps am ON am.channel_category_map_id = cm.id
+        WHERE cm.platform = '${platform}' AND am.required = true AND NOT (
+          (am.mode = 'fixed' AND COALESCE(am.fixed_value, '') <> '')
+          OR (am.mode = 'dynamic' AND COALESCE(am.source_field, '') <> '') OR am.mode = 'manual'
+        )
+      ))`
+    : legacy;
+  return `(${mappedCategorySql('mp', platform)} AND ${attributes})`;
 }
 
 const CHANNEL_GREEN_ALL = ACTIVE_CATALOG_CHANNELS.map(channelGreenSql).join(' AND ');
@@ -704,6 +712,7 @@ export async function listCatalog(input: {
   const listingByKey = new Map(listings.rows.map((row) => [`${row.product_id}:${row.channel}`, row.listing_id]));
 
   const sellerProducts = await productsWithSellerWarehouse(ids);
+  const categories = await resolveProductCategories(ids, ACTIVE_CATALOG_CHANNELS);
   const categoryNameById = new Map(categoryNames.rows.map((row) => [row.id, row.name]));
   const sendKeys = new Set(sends.rows.map((row) => `${row.master_product_id}:${row.platform}`));
   const activeChannels = MERCADO_LIVRE_ACTIVE
@@ -712,12 +721,11 @@ export async function listCatalog(input: {
 
   const items = pageRows.rows.map((row) => {
     const platforms = row.hub_category_id ? grouped.get(row.hub_category_id) : undefined;
-    const mapped = platforms ? (Array.from(platforms.keys()) as CatalogChannel[]) : [];
-    const green = platforms
-      ? (Array.from(platforms.entries())
-          .filter(([, mapsForPlatform]) => mapsForPlatform.length > 0 && isChannelMappingGreen(mapsForPlatform))
-          .map(([platform]) => platform) as CatalogChannel[])
-      : [];
+    const mapped = ACTIVE_CATALOG_CHANNELS.filter((channel) => categories.get(row.id)?.has(channel));
+    const green = mapped.filter((channel) => {
+      const inputs = platforms?.get(channel) ?? [];
+      return (channel === 'nuvemshop' || inputs.length > 0) && isChannelMappingGreen(inputs);
+    });
     const price = num(row.price);
     const hasCover = eligibleCoverIds.has(row.id);
     const isPublished = publishedIds.has(row.id);
@@ -727,6 +735,7 @@ export async function listCatalog(input: {
       sku: row.erp_sku,
       hasCoverImage: hasCover,
       hubCategoryId: row.hub_category_id,
+      erpCategoryMapped: mapped.length > 0,
       mappedPlatforms: mapped,
       greenPlatforms: green,
       eanStatus: row.ean_status,
@@ -745,6 +754,7 @@ export async function listCatalog(input: {
         sku: row.erp_sku,
         hasCoverImage: hasCover,
         hubCategoryId: row.hub_category_id,
+        erpCategoryMapped: mapped.includes(platform),
         mappedPlatforms: mapped,
         greenPlatforms: green,
         eanStatus: row.ean_status,

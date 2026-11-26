@@ -14,6 +14,7 @@ import { ErpConnector } from '../connectors/strategy/types.js';
 function fakeErp(state: { payload: Record<string, unknown> | null; calls: number; error?: string }): ErpConnector {
   return {
     id: 'fake-erp',
+    fetchCategoryMappings: async () => [],
     async pullCatalogProduct() {
       state.calls += 1;
       if (state.error) throw new Error(state.error);

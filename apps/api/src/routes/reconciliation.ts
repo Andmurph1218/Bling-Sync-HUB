@@ -2,6 +2,7 @@ import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { requireRole } from '../auth/middleware.js';
 import { query } from '../db/pool.js';
+import { activeErpId } from '../connectors/strategy/factory.js';
 
 function asPayload(value: unknown): {
   price: number | null;
@@ -78,6 +79,19 @@ reconciliationRouter.get('/api/divergences', reader, async (_req: Request, res: 
       marketplace: row.marketplace,
       kind: alert.kind,
       message: alert.message,
+    })));
+    const categories = await query<{ id: string; product_id: string; erp_id: string; erp_sku: string; name: string; marketplace: string; bling_value: string; external_value: string }>(
+      `SELECT a.id, a.master_product_id AS product_id, mp.erp_id, mp.erp_sku, mp.name,
+              a.platform AS marketplace, a.bling_value, a.external_value
+       FROM divergence_alerts a INNER JOIN master_products mp ON mp.id = a.master_product_id
+       WHERE a.type = 'category_divergence' AND a.status = 'open' AND mp.erp_provider = $1
+       ORDER BY a.created_at DESC LIMIT 200`,
+      [activeErpId()]
+    );
+    items.push(...categories.rows.map((row) => ({
+      id: row.id, productId: row.product_id, erpId: row.erp_id, sku: row.erp_sku || 'Sem SKU', name: row.name || 'Sem nome',
+      marketplace: row.marketplace, kind: 'category_divergence',
+      message: `Categoria no canal: ${row.external_value || 'sem categoria'}. Esperada pelo ERP: ${row.bling_value}.`,
     })));
     res.status(200).json({ total: items.length, items });
   } catch (error) {

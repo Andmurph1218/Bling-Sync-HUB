@@ -6,6 +6,7 @@ import { PoolClient } from 'pg';
 import { query, withTransaction } from '../db/pool.js';
 import { InboundProduct } from '../connectors/strategy/inbound.js';
 import { loadConnectors } from '../connectors/load.js';
+import { activeErpId } from '../connectors/strategy/factory.js';
 import {
   catalogPriceOrNull,
   computePublishableStockFromBalances,
@@ -102,8 +103,8 @@ export async function upsertCatalogProduct(
       `INSERT INTO master_products (
          erp_id, erp_sku, ncm, cest, tax_origin, unit, requires_cest,
          bling_tipo, product_format, name, description, short_description,
-         brand, category, catalog_status, last_bling_snapshot, last_bling_sync, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, COALESCE($17, now()), now())
+         brand, category, catalog_status, last_bling_snapshot, last_bling_sync, updated_at, erp_category_id, erp_provider
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, COALESCE($17, now()), now(), $19, $20)
        ON CONFLICT (erp_id) DO UPDATE
          SET erp_sku = EXCLUDED.erp_sku,
              ncm = COALESCE(master_products.ncm, EXCLUDED.ncm),
@@ -118,6 +119,8 @@ export async function upsertCatalogProduct(
              short_description = EXCLUDED.short_description,
              brand = EXCLUDED.brand,
              category = EXCLUDED.category,
+             erp_category_id = CASE WHEN $18 THEN master_products.erp_category_id ELSE EXCLUDED.erp_category_id END,
+             erp_provider = EXCLUDED.erp_provider,
              catalog_status = EXCLUDED.catalog_status,
              last_bling_snapshot = CASE WHEN $18 THEN master_products.last_bling_snapshot ELSE EXCLUDED.last_bling_snapshot END,
              last_bling_sync = CASE
@@ -146,6 +149,8 @@ export async function upsertCatalogProduct(
         JSON.stringify(payload),
         changedAt ? changedAt.toISOString() : null,
         stale,
+        p.erp_category_id ?? null,
+        activeErpId(),
       ]
     );
 

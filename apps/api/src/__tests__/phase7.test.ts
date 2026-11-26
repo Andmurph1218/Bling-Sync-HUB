@@ -196,6 +196,8 @@ describe('Fase 7 — Motor de Prontidão CRE (Três Scores por Variante, KPI da 
       [masterId]
     );
 
+    await query(`UPDATE master_products SET erp_category_id = '901' WHERE id = $1`, [masterId]);
+    await query(`INSERT INTO erp_category_mappings (erp_provider, erp_category_id, channel, channel_category_id) VALUES ('bling', '901', 'mercadolivre', 'MLB1592'), ('bling', '901', 'nuvemshop', '123456')`);
     const report = await calculateProductReadinessCre(masterId);
     expect(report.variants).toHaveLength(2);
 

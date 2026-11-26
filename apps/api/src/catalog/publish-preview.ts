@@ -1,5 +1,6 @@
 import { ACTIVE_CATALOG_CHANNELS } from '../config/channels.js';
 import { query } from '../db/pool.js';
+import { resolveProductCategories, resolveProductCategory } from '../services/category-resolver.service.js';
 import { logger } from '../lib/logger.js';
 import {
   AttributeMapInput,
@@ -58,14 +59,7 @@ export async function buildPublishPreview(productId: string, channel: PublishCha
   const product = productRes.rows[0];
   if (!product) return null;
 
-  const category = product.hub_category_id
-    ? await query<{ channel_category_id: string }>(
-        `SELECT channel_category_id
-         FROM channel_category_maps
-         WHERE hub_category_id = $1 AND platform = $2`,
-        [product.hub_category_id, channel]
-      )
-    : { rows: [] as Array<{ channel_category_id: string }> };
+  const category = await resolveProductCategory(productId, channel);
 
   const maps = product.hub_category_id
     ? await query<{
@@ -129,7 +123,7 @@ export async function buildPublishPreview(productId: string, channel: PublishCha
   const stock = product.stock === null ? 0 : Math.max(0, Math.floor(Number(product.stock)));
   const payload: MarketplacePublishBody = {
     title: product.name,
-    category_id: category.rows[0]?.channel_category_id ?? null,
+    category_id: category,
     price: Number.isFinite(price) ? price : 0,
     currency_id: 'BRL',
     available_quantity: stock,
@@ -147,7 +141,7 @@ export async function buildPublishPreview(productId: string, channel: PublishCha
     method: 'POST',
     endpoint: channel === 'mercadolivre' ? '/items' : '/products',
     payload,
-    attributesComplete: mapsInput.length > 0 && materialized.complete && Boolean(payload.category_id),
+    attributesComplete: (channel === 'nuvemshop' || mapsInput.length > 0) && materialized.complete && Boolean(category),
     missingAttributes: materialized.missing,
   };
 }
@@ -362,6 +356,7 @@ export async function checklistForChannels(
     [...productById.values()].map((row) => row.hub_category_id).filter((id): id is string => Boolean(id))
   )];
   const mapsByKey = await cachedCategoryMaps(categoryIds, channels);
+  const categories = await resolveProductCategories(ids, channels);
 
   for (const id of ids) {
     const row = productById.get(id);
@@ -380,7 +375,8 @@ export async function checklistForChannels(
           sourceField: map.source_field,
           valueMaps: [],
         }));
-      const green = maps.length > 0 && mapInputs.length > 0 && isChannelMappingGreen(mapInputs);
+      const mapped = Boolean(categories.get(id)?.get(channel));
+      const green = mapped && (channel === 'nuvemshop' || mapInputs.length > 0) && isChannelMappingGreen(mapInputs);
       const eanRequired = mapInputs.some(
         (map) => map.required && (['GTIN', 'EAN', 'GTIN14'].includes(map.channelAttributeId) || map.sourceField === 'ean')
       );
@@ -389,7 +385,8 @@ export async function checklistForChannels(
         sku: row.erp_sku,
         hasCoverImage: (coverById.get(id) ?? 0) > 0,
         hubCategoryId: row.hub_category_id,
-        mappedPlatforms: green ? [channel] : [],
+        erpCategoryMapped: mapped,
+        mappedPlatforms: mapped ? [channel] : [],
         greenPlatforms: green ? [channel] : [],
         eanStatus: row.ean_status,
         eanRequired,

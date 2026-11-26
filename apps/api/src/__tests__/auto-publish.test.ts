@@ -46,6 +46,8 @@ describe('publicação automática ao completar o canal', () => {
       [categoryId]
     );
     productId = created.rows[0]!.id;
+    await query(`UPDATE master_products SET erp_category_id = $2 WHERE id = $1`, [productId, categoryId]);
+    await query(`INSERT INTO erp_category_mappings (erp_provider, erp_category_id, channel, channel_category_id) VALUES ('bling', $1, 'nuvemshop', '123456')`, [categoryId]);
     const variant = await query<{ id: string }>(
       `INSERT INTO product_variants (master_product_id, erp_sku, is_default, price, stock, ean_status)
        VALUES ($1, 'AUTO-1', true, 0, 4, 'valid')

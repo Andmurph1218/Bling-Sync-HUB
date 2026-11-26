@@ -16,6 +16,8 @@
 
 import { PoolClient } from 'pg';
 import { withTransaction } from '../db/pool.js';
+import { resolveProductCategories, resolveProductCategory } from '../services/category-resolver.service.js';
+
 import {
   evaluateBrandQuality,
   evaluateDescriptionQuality,
@@ -23,6 +25,16 @@ import {
   evaluateNameQuality,
   evaluateWeightQuality,
 } from './cqs.js';
+
+async function verifiedMlCategory(productId: string, categoryId: string | null | undefined, client: PoolClient): Promise<boolean> {
+  if (!categoryId) return false;
+  const verified = await client.query(
+    `SELECT master_product_id FROM product_category_mappings
+     WHERE master_product_id = $1 AND platform = 'mercadolivre' AND channel_category_id = $2 AND is_verified = true`,
+    [productId, categoryId]
+  );
+  return verified.rows.length > 0;
+}
 
 export const CRE_THRESHOLDS = {
   bling: { publishContent: 70, premium: 90 },
@@ -145,19 +157,8 @@ export async function calculateProductReadinessCre(
       [masterProductId]
     );
 
-    const catMapRes = await client.query<{
-      platform: 'mercadolivre' | 'nuvemshop';
-      channel_category_id: string;
-      required_attributes: unknown[];
-      is_verified: boolean;
-    }>(
-      `SELECT platform, channel_category_id, required_attributes, is_verified
-       FROM product_category_mappings
-       WHERE master_product_id = $1`,
-      [masterProductId]
-    );
-
-    const mlCatMap = catMapRes.rows.find((c) => c.platform === 'mercadolivre') ?? null;
+    const categories = (await resolveProductCategories([masterProductId], ['mercadolivre', 'nuvemshop'], client)).get(masterProductId);
+    const mlCategoryVerified = await verifiedMlCategory(masterProductId, categories?.get('mercadolivre'), client);
 
     const overridesRes = await client.query<{
       variant_id: string;
@@ -349,9 +350,8 @@ export async function calculateProductReadinessCre(
       }
 
       let mlAttrPts = 0;
-      const mlCategoryVerified = Boolean(
-        mlCatMap && mlCatMap.is_verified && mlCatMap.channel_category_id
-      );
+      const nsCategoryMapped = Boolean(categories?.get('nuvemshop'));
+      if (!nsCategoryMapped) blockers.push('ns_category_not_mapped');
       if (mlCategoryVerified) {
         mlAttrPts = 20;
       } else {
@@ -534,7 +534,7 @@ export async function calculateProductReadinessCre(
         premium_ml: scoreMl >= CRE_THRESHOLDS.mercadolivre.premium,
         premium_ns: scoreNs >= CRE_THRESHOLDS.nuvemshop.premium,
         can_create_ml: publishableMl && mlCategoryVerified,
-        can_create_ns: publishableNs,
+        can_create_ns: publishableNs && nsCategoryMapped,
         blockers,
         top_improvements: top3Improvements,
       });
@@ -696,14 +696,9 @@ export async function checkStepReadinessGate(input: {
       return { allowed: false, blockReason: 'score', readScoreTable: true };
     }
 
-    if (input.step === 'CREATE' && input.platform === 'mercadolivre') {
-      const catCheck = await client.query<{ is_verified: boolean }>(
-        `SELECT is_verified
-         FROM product_category_mappings
-         WHERE master_product_id = $1 AND platform = 'mercadolivre'`,
-        [v.master_product_id]
-      );
-      if (!catCheck.rows[0]?.is_verified) {
+    if (input.step === 'CREATE') {
+      const categoryId = await resolveProductCategory(v.master_product_id, input.platform, client);
+      if (!categoryId || (input.platform === 'mercadolivre' && !await verifiedMlCategory(v.master_product_id, categoryId, client))) {
         return { allowed: false, blockReason: 'score', readScoreTable: true };
       }
     }

@@ -7,6 +7,8 @@ import { ListingBatchReader, MarketplaceListing, MasterProduct } from '../connec
 import { query } from '../db/pool.js';
 import { enqueueProductImagesForSync, isAllowedImageHost } from '../engines/iqre.js';
 import { logger } from '../lib/logger.js';
+import { resolveProductCategories } from './category-resolver.service.js';
+import { auditListingCategory } from './category-audit.service.js';
 
 const CHANNELS = ['mercadolivre', 'nuvemshop'] as const;
 const READY_LIMIT = 40;
@@ -168,6 +170,7 @@ async function saveSnapshot(
       stock: listing.stock,
       title: listing.title,
       images: listing.images,
+      categoryIds: listing.categoryIds,
       status: listing.status,
       alerts,
     })]
@@ -307,6 +310,7 @@ export async function reconcileListings(
   );
   const imagesByProduct = new Map(covers.rows.map((row) => [row.master_product_id, Number(row.image_count) || 0]));
   const sellerProducts = await productsWithSellerWarehouse(products.rows.map((row) => row.id));
+  const categories = await resolveProductCategories(ids, activeChannels);
   let snapshots = 0;
   let alerts = 0;
   let linked = 0;
@@ -355,6 +359,7 @@ export async function reconcileListings(
         if (refreshed.stock !== null) row.stock = String(refreshed.stock);
       }
       if (await linkIfMissing(row, channel, listing)) linked += 1;
+      if (await auditListingCategory(row.id, channel, listing, categories.get(row.id)?.get(channel) ?? null)) alerts += 1;
       const found = compare(row, channel, listing, sellerProducts.has(row.id));
       await saveSnapshot(row.id, channel, listing, found.map((item) => ({ kind: item.kind, message: item.message })));
       if (channel === 'nuvemshop' && row.image_count === 0 && listing.images.length > 0) {

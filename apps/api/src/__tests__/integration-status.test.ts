@@ -10,6 +10,7 @@ function checklist(overrides: Partial<Parameters<typeof evaluateCatalogChecklist
     sku: 'SKU-1',
     hasCoverImage: true,
     hubCategoryId: 'cat',
+    erpCategoryMapped: true,
     mappedPlatforms: ['nuvemshop'],
     greenPlatforms: ['nuvemshop'],
     eanStatus: 'valid',
@@ -40,7 +41,7 @@ describe('status de integração por canal', () => {
       platform: 'nuvemshop',
       linkStatus: null,
       sendRequested: false,
-      checklist: checklist({ hubCategoryId: null, mappedPlatforms: [], greenPlatforms: [] }),
+      checklist: checklist({ hubCategoryId: null, erpCategoryMapped: false, mappedPlatforms: [], greenPlatforms: [] }),
     });
     expect(view.visual).toBe('pending');
     expect(view.tooltip).toBe('Falta vincular categoria no HUB');
@@ -52,7 +53,7 @@ describe('status de integração por canal', () => {
       platform: 'nuvemshop',
       linkStatus: null,
       sendRequested: false,
-      checklist: checklist({ hubCategoryId: null, mappedPlatforms: [], greenPlatforms: [] }),
+      checklist: checklist({ hubCategoryId: null, erpCategoryMapped: false, mappedPlatforms: [], greenPlatforms: [] }),
     });
     const titles = view.blockers.map((item) => item.title);
     expect(new Set(titles).size).toBe(titles.length);
@@ -89,7 +90,7 @@ describe('status de integração por canal', () => {
       platform: 'nuvemshop',
       linkStatus: 'vinculado',
       sendRequested: false,
-      checklist: checklist({ price: null, hubCategoryId: null, mappedPlatforms: [], greenPlatforms: [], hasCoverImage: false }),
+      checklist: checklist({ price: null, hubCategoryId: null, erpCategoryMapped: false, mappedPlatforms: [], greenPlatforms: [], hasCoverImage: false }),
     });
     expect(view.visual).toBe('attention');
     expect(view.label).toBe('Vinculado com Pendência');

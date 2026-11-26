@@ -10,7 +10,7 @@ import {
   notifyErpRateLimitPenalty,
 } from '../connectors/rate-limit-port.js';
 import { activeErpConnector } from '../connectors/strategy/factory.js';
-import { ErpConnector } from '../connectors/strategy/types.js';
+import { ErpConnector, ErpProductEnrichmentData } from '../connectors/strategy/types.js';
 import { query, withTransaction } from '../db/pool.js';
 import { enqueueProductImagesForSync, normalizeImageUrl } from '../engines/iqre.js';
 import { formatNcmDisplay } from '../engines/nve.js';
@@ -122,7 +122,7 @@ function jitteredRetryMs(attempt: number): number {
 async function fetchEnrichmentWithResilience(
   erp: ErpConnector,
   erpId: string
-): Promise<{ images: string[]; ncm: string; category: string }> {
+): Promise<ErpProductEnrichmentData> {
   let lastError: unknown = null;
   for (let attempt = 0; attempt < 4; attempt += 1) {
     try {
@@ -173,7 +173,10 @@ export async function processEnrichmentBatch(
       const wrote = await withTransaction(async (client) => {
         const imageSaved = data.images.length > 0 ? await saveImages(client, row.id, data.images) : false;
         const ncmSaved = await saveNcmAndCategory(client, row.id, data.ncm, data.category);
-        return imageSaved || ncmSaved;
+        if (data.erpCategoryId !== undefined) {
+          await client.query(`UPDATE master_products SET erp_category_id = $2, updated_at = now() WHERE id = $1`, [row.id, data.erpCategoryId]);
+        }
+        return imageSaved || ncmSaved || data.erpCategoryId !== undefined;
       });
       if (!wrote) continue;
       enriched += 1;

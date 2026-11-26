@@ -17,6 +17,7 @@ interface NuvemshopProduct {
   published?: boolean;
   images?: Array<{ src?: string }>;
   variants?: NuvemshopVariant[];
+  categories?: Array<number | string | { id: number | string }>;
 }
 
 export const NUVEMSHOP_FETCH_TIMEOUT_MS = 15_000;
@@ -174,6 +175,9 @@ export function listingFromProduct(
     price: asMoney(variant.price),
     stock: typeof variant.stock === 'number' ? variant.stock : null,
     images: (product.images ?? []).map((image) => image.src ?? '').filter((url) => url.startsWith('http')),
+    categoryIds: Array.isArray(product.categories)
+      ? product.categories.map((category) => String(typeof category === 'object' ? category.id : category))
+      : undefined,
     status: product.published === false ? 'Rascunho' : 'Ativo',
     signals,
   };

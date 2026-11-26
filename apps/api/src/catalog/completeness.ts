@@ -13,6 +13,7 @@ export interface ChecklistInput {
   sku: string | null;
   hasCoverImage: boolean;
   hubCategoryId: string | null;
+  erpCategoryMapped: boolean;
   mappedPlatforms: CatalogChannel[];
   greenPlatforms: CatalogChannel[];
   eanStatus: string | null;
@@ -75,18 +76,18 @@ export function evaluateCatalogChecklist(input: ChecklistInput): ChecklistResult
     },
     {
       code: 'hub_category',
-      ok: Boolean(input.hubCategoryId),
+      ok: input.erpCategoryMapped,
       blocks: true,
-      title: input.hubCategoryId ? 'Categoria do catálogo definida' : 'Sem categoria',
-      fixHref: `${ficha}?aba=geral`,
+      title: input.erpCategoryMapped ? 'Categoria vinculada no ERP' : 'Sem vínculo de categoria no ERP',
+      fixHref: '/atributos',
     },
     {
       code: 'channel_category',
-      ok: hasAll(input.greenPlatforms, required),
+      ok: hasAll(input.mappedPlatforms, required),
       blocks: true,
-      title: hasAll(input.greenPlatforms, required)
-        ? 'Categoria do canal mapeada'
-        : 'Categoria do canal ainda não está verde',
+      title: hasAll(input.mappedPlatforms, required)
+        ? 'Categoria do canal mapeada pelo ERP'
+        : 'Categoria do canal sem vínculo no ERP',
       fixHref: '/atributos',
     },
     {

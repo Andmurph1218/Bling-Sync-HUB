@@ -107,16 +107,31 @@ export class SkuAlreadyInErpError extends Error {
   }
 }
 
+export interface ErpProductEnrichmentData {
+  images: string[];
+  ncm: string;
+  category: string;
+  erpCategoryId?: string | null;
+}
+
+export interface ErpCategoryMapping {
+  erpCategoryId: string;
+  channelId: string;
+  channelCategoryId: string;
+}
+
 /** Contrato do ERP soberano. Bling é a implementação atual; outro ERP entra como nova classe. */
 export interface ErpConnector {
   readonly id: string;
+  fetchCategoryMappings(): Promise<ErpCategoryMapping[]>;
+  readCachedCategoryReferences?(): Promise<Array<{ externalId: string; erpCategoryId: string }>>;
   syncProduct(productId: string): Promise<ErpProductSnapshot>;
   getStock(productId: string): Promise<ErpStockSnapshot>;
   getPrice(productId: string): Promise<ErpPriceSnapshot>;
   listCatalogPage(page: number, pageSize: number): Promise<ErpCatalogPage>;
   pullCatalogProduct(externalId: string): Promise<unknown | null>;
   readCommerce?(externalId: string): Promise<ErpCommerceSnapshot | null>;
-  fetchProductEnrichmentData(erpId: string): Promise<{ images: string[]; ncm: string; category: string }>;
+  fetchProductEnrichmentData(erpId: string): Promise<ErpProductEnrichmentData>;
   pullStockBalances?(externalIds: string[]): Promise<ErpStockBalance[]>;
   listChildIds?(parentId: string): Promise<string[]>;
   createProduct(productData: CreateProductDTO): Promise<{ erp_id: string; stockWarning: string | null }>;
@@ -210,6 +225,7 @@ export interface MarketplaceListing {
   price: number | null;
   stock: number | null;
   images: string[];
+  categoryIds?: string[];
   status: string;
   sku?: string | null;
   ean?: string | null;
