@@ -1,5 +1,7 @@
 'use client';
 
+import { MountedOverlay } from '../../components/ui/overlay';
+
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '../../utils/api-client';
@@ -161,8 +163,8 @@ export default function VinculosPage() {
       )}
 
       {manualOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Criar vínculo manual">
-          <div className="grid w-full max-w-3xl gap-4 rounded-xl border border-border-color bg-bg-base p-5 sm:grid-cols-2">
+        <MountedOverlay onDismiss={() => setManualOpen(false)} label="Criar vínculo manual">
+          {(close) => <div className="grid gap-4 p-5 sm:grid-cols-2">
             <section>
               <h2 className="text-sm font-semibold">Produto no Bling</h2>
               <input
@@ -196,14 +198,14 @@ export default function VinculosPage() {
               />
               <p className="mt-2 text-xs text-text-muted">Use quando o SKU do ERP não bate com o anúncio. O HUB só registra a ponte.</p>
               <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => setManualOpen(false)} className="rounded-lg border border-border-color px-3 py-1.5 text-xs">Cancelar</button>
+                <button type="button" onClick={close} className="rounded-lg border border-border-color px-3 py-1.5 text-xs">Cancelar</button>
                 <button type="button" disabled={saving || !productId || !externalId.trim()} onClick={() => void createLink()} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
                   {saving ? 'Salvando...' : 'Costurar vínculo'}
                 </button>
               </div>
             </section>
-          </div>
-        </div>
+          </div>}
+        </MountedOverlay>
       )}
     </main>
   );

@@ -544,8 +544,8 @@ export default function ProblemasPage() {
           </div>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-bg-base">
             <div
-              className="h-full bg-emerald-600 transition-all"
-              style={{ width: `${batch.total ? Math.round((batch.processed / batch.total) * 100) : 0}%` }}
+              className="ui-progress h-full w-full bg-emerald-600"
+              style={{ transform: `scaleX(${batch.total ? Math.min(1, batch.processed / batch.total) : 0})` }}
             />
           </div>
           {batchDone && (

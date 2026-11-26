@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, AlertTriangle, Info, X } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Info } from 'lucide-react';
+import { toast, Toaster as SonnerToaster } from 'sonner';
 
 export interface ToastMessage {
   id: string;
@@ -19,75 +20,42 @@ interface ToasterProps {
 }
 
 export function Toaster({ toasts, onDismiss }: ToasterProps) {
+  const scope = useId();
+  const active = useRef(new Map<string, ToastMessage>());
+  const dismiss = useRef(onDismiss);
+  dismiss.current = onDismiss;
+
   useEffect(() => {
-    const timers = toasts
-      .filter((toast) => !toast.reasons?.length && !toast.action)
-      .map((toast) => setTimeout(() => onDismiss(toast.id), 5000));
-    return () => {
-      timers.forEach(clearTimeout);
-    };
-  }, [toasts, onDismiss]);
+    const current = new Set(toasts.map((item) => item.id));
+    for (const id of active.current.keys()) {
+      if (!current.has(id)) {
+        toast.dismiss(`${scope}-${id}`);
+        active.current.delete(id);
+      }
+    }
+    for (const item of toasts) {
+      if (active.current.get(item.id) === item) continue;
+      active.current.set(item.id, item);
+      const Icon = item.variant === 'success' ? CheckCircle2 : item.variant === 'warning' ? AlertTriangle : Info;
+      toast(item.title, {
+        id: `${scope}-${item.id}`,
+        duration: item.reasons?.length || item.action ? Infinity : 5000,
+        icon: <Icon className={`h-5 w-5 ${item.variant === 'success' ? 'text-emerald-700 dark:text-emerald-300' : item.variant === 'warning' ? 'text-amber-800 dark:text-amber-300' : 'text-text-muted'}`} />,
+        description: <>
+          {item.description && <p>{item.description}</p>}
+          {!!item.reasons?.length && <ul className="mt-2 list-disc space-y-1 pl-4">{item.reasons.map((reason, index) => <li key={`${reason}-${index}`}>{reason}</li>)}</ul>}
+        </>,
+        action: item.action ? <Link className="ui-button" href={item.action.href}>{item.action.label}</Link> : undefined,
+        onDismiss: () => dismiss.current(item.id),
+        onAutoClose: () => dismiss.current(item.id),
+      });
+    }
+  }, [toasts, scope]);
 
-  if (toasts.length === 0) return null;
+  useEffect(() => () => {
+    for (const id of active.current.keys()) toast.dismiss(`${scope}-${id}`);
+  }, [scope]);
 
-  return (
-    <div
-      aria-live="polite"
-      className="fixed bottom-5 right-5 z-50 flex w-full max-w-md flex-col gap-2.5"
-    >
-      {toasts.map((toast) => {
-        const tone =
-          toast.variant === 'success'
-            ? 'border-emerald-500/40 bg-bg-surface/95 text-emerald-200'
-            : toast.variant === 'neutral'
-              ? 'border-border-color bg-bg-surface/95 text-text-muted'
-              : 'border-amber-500/40 bg-bg-surface/95 text-amber-200';
-        return (
-          <div
-            key={toast.id}
-            className={`flex items-start justify-between gap-3 rounded-xl border p-4 shadow-2xl backdrop-blur transition-all ${tone}`}
-          >
-            <div className="flex items-start gap-3">
-              {toast.variant === 'success' ? (
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
-              ) : toast.variant === 'neutral' ? (
-                <Info className="mt-0.5 h-5 w-5 shrink-0 text-text-muted" />
-              ) : (
-                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
-              )}
-              <div className="text-xs leading-relaxed">
-                <p className="font-semibold text-text-primary">{toast.title}</p>
-                {toast.description && (
-                  <p className="mt-0.5 text-text-muted">{toast.description}</p>
-                )}
-                {toast.reasons && toast.reasons.length > 0 && (
-                  <ul className="mt-2 list-disc space-y-0.5 pl-4 text-text-primary">
-                    {toast.reasons.map((reason, index) => (
-                      <li key={`${reason}-${index}`}>{reason}</li>
-                    ))}
-                  </ul>
-                )}
-                {toast.action && (
-                  <Link
-                    href={toast.action.href}
-                    className="mt-3 inline-flex rounded-lg bg-amber-400 px-2.5 py-1.5 text-[11px] font-semibold text-amber-950 hover:bg-amber-300"
-                  >
-                    {toast.action.label}
-                  </Link>
-                )}
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => onDismiss(toast.id)}
-              className="rounded p-1 text-text-muted hover:bg-bg-surface hover:text-text-primary"
-              aria-label="Fechar notificação"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        );
-      })}
-    </div>
-  );
+  return <SonnerToaster position="bottom-right" closeButton gap={8} offset={16} mobileOffset={16} visibleToasts={3}
+    toastOptions={{ classNames: { toast: 'hub-toast', title: 'hub-toast-title', description: 'hub-toast-description', closeButton: 'hub-toast-close' } }} />;
 }

@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, AlertOctagon, AlertTriangle, ChevronDown, ChevronRight, ExternalLink, FileJson, RotateCw } from 'lucide-react';
+import { AlertCircle, AlertOctagon, AlertTriangle, ChevronRight, ExternalLink, FileJson, RotateCw } from 'lucide-react';
 import { apiFetch } from '../../utils/api-client';
 import { buildBlingProductUrl } from '../../utils/matching-signals';
 import { ERP_SYNC_GROUP, isErpSyncTarget, ProblemGroup, ProblemItem, ProblemSelection, ProblemSeverity } from './types';
@@ -216,7 +216,7 @@ export function ProblemDataGrid({
                           aria-expanded={Boolean(expansion)}
                           aria-label={expansion ? 'Recolher SKUs' : 'Ver SKUs'}
                         >
-                          {expansion ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          <ChevronRight className="ui-sort-icon h-4 w-4" style={{ transform: expansion ? 'rotate(90deg)' : 'rotate(0deg)' }} />
                         </button>
                       )}
                     </div>
@@ -249,7 +249,7 @@ export function ProblemDataGrid({
                 {expansion && (
                   <>
                     {expansion.items.map((item) => (
-                      <tr key={item.id} className="h-12 border-b border-border-color bg-bg-base/40 text-xs">
+                      <tr key={item.id} className="ui-panel-reveal h-12 border-b border-border-color bg-bg-base/40 text-xs">
                         <td className="px-3 pl-9">
                           <input
                             type="checkbox"

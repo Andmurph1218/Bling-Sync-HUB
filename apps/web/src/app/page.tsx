@@ -13,6 +13,8 @@ import { apiFetch } from '../utils/api-client';
 import { useCurrentRole } from '../components/app-shell';
 import { CatalogCycle } from '../components/home/onboarding-funnel';
 import { BrandLogo } from '../components/brand-logo';
+import { Button } from '../components/ui/button';
+import { MetricValue } from '../components/ui/metric-value';
 import {
   ActionTopic,
   ActionTopicList,
@@ -44,21 +46,17 @@ function QuickAction({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
+    <Button
       onClick={onClick}
       disabled={busy}
       aria-busy={busy}
       title={hint}
-      className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-semibold transition active:scale-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-copper/60 disabled:cursor-progress disabled:opacity-70 ${
-        primary
-          ? 'bg-emerald-700 text-white hover:bg-emerald-600 dark:bg-[#d97324] dark:hover:bg-[#e2843a]'
-          : 'border border-border-color bg-bg-surface text-text-primary hover:border-accent-copper/50'
-      }`}
+      variant={primary ? 'primary' : 'secondary'}
+      className="rounded-full"
     >
       {icon}
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -302,7 +300,7 @@ export default function HomePage() {
       : 'Conectada, sem erros de envio hoje';
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-7">
+    <main className="mx-auto max-w-6xl px-6 py-8">
       {forbidden && (
         <p role="alert" className="mb-4 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2.5 text-sm text-rose-800 dark:text-rose-100">
           Acesso negado (403). A loja de integrações é exclusiva do administrador.
@@ -321,7 +319,7 @@ export default function HomePage() {
 
         <div className="flex flex-wrap items-center gap-2.5">
           {shadow && (
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-sky-700/30 bg-sky-200/70 px-3.5 py-1.5 text-xs font-semibold text-sky-950 dark:border-[#d97324]/45 dark:bg-[#d97324]/12 dark:text-[#f59f4c]">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-sky-700/30 bg-sky-200/70 px-3.5 py-1.5 text-xs font-semibold text-sky-950 dark:border-[#d97324]/45 dark:bg-[#d97324]/[0.12] dark:text-[#f59f4c]">
               <Shield className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span>Shadow Ativo</span>
             </div>
@@ -431,7 +429,7 @@ export default function HomePage() {
           >
             <Link href="/catalogo" className="group rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-copper/60">
               <p className="text-[32px] font-bold leading-none tracking-tight tabular-nums text-text-primary">
-                {formatCount(products)}
+                <MetricValue value={products} ready={!loading && Boolean(catalogHome || state)} />
               </p>
               <p className="mt-2 text-xs text-text-muted">produtos ativos</p>
             </Link>
@@ -449,7 +447,7 @@ export default function HomePage() {
           >
             <Link href="/completude" className="rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-copper/60">
               <p className={`text-[32px] font-bold leading-none tracking-tight tabular-nums ${TONE_TEXT[healthTone]}`}>
-                {averageScore}%
+                <MetricValue value={averageScore} ready={!loading && Boolean(catalogHome)} suffix="%" />
               </p>
               <div
                 className="mt-3 h-2 overflow-hidden rounded-full bg-bg-base dark:bg-white/[0.07]"
@@ -460,8 +458,8 @@ export default function HomePage() {
                 aria-label="Saúde média do catálogo"
               >
                 <div
-                  className={`h-full rounded-full transition-[width] duration-500 ease-out ${TONE_BAR[healthTone]}`}
-                  style={{ width: `${Math.max(2, Math.min(100, averageScore))}%` }}
+                  className={`ui-progress h-full w-full rounded-full ${TONE_BAR[healthTone]}`}
+                  style={{ transform: `scaleX(${Math.max(0, Math.min(1, averageScore / 100))})` }}
                 />
               </div>
             </Link>
@@ -492,7 +490,7 @@ export default function HomePage() {
           >
             <Link href="/canais" className="rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-copper/60">
               <p className="text-[32px] font-bold leading-none tracking-tight tabular-nums text-text-primary">
-                {formatCount(nuvemshopPublished)}
+                <MetricValue value={nuvemshopPublished} ready={!loading && Boolean(catalogHome)} />
               </p>
               <p className="mt-2 text-xs text-text-muted">anúncios vinculados</p>
             </Link>
@@ -596,7 +594,7 @@ export default function HomePage() {
             </div>
             <Link href="/auditoria" className="text-xs text-text-muted underline hover:text-text-primary">Ver auditoria</Link>
           </div>
-          <div className="mt-4 overflow-x-auto">
+          <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="Tabela de atividade recente">
             <table className="w-full text-left text-xs">
               <thead className="border-b border-border-color/70 text-xs text-text-muted dark:border-white/10">
                 <tr>

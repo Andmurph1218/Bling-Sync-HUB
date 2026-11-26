@@ -1,5 +1,7 @@
 'use client';
 
+import { MountedOverlay } from '../../../components/ui/overlay';
+
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Factory, LayoutGrid, Search, Store, Truck } from 'lucide-react';
@@ -247,8 +249,8 @@ export default function AdminIntegrationsPage() {
       </div>
 
       {credentialsFor && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-md rounded-xl border border-border-color bg-bg-surface p-5 text-sm">
+        <MountedOverlay onDismiss={() => setCredentialsFor(null)} label={`Configurar ${credentialsFor.name}`} className="sm:max-w-md">
+          {(close) => <div className="p-5 text-sm">
             <h2 className="font-bold">Configurar {credentialsFor.name}</h2>
             <label className="mt-3 block text-xs text-text-muted">
               {credentialsFor.slug === 'nuvemshop' ? 'ID da loja' : 'Client ID'}
@@ -274,10 +276,10 @@ export default function AdminIntegrationsPage() {
             </div>
             <div className="mt-4 flex gap-2">
               <button type="button" className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white" onClick={() => void saveCredentials()}>Salvar</button>
-              <button type="button" className="text-xs text-text-muted underline" onClick={() => setCredentialsFor(null)}>Fechar</button>
+              <button type="button" className="text-xs text-text-muted underline" onClick={close}>Fechar</button>
             </div>
-          </div>
-        </div>
+          </div>}
+        </MountedOverlay>
       )}
     </main>
   );

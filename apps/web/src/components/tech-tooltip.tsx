@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { HelpCircle } from 'lucide-react';
+import { Tooltip } from '@base-ui/react/tooltip';
 
 export type TechnicalTermKey =
   | 'PIRE'
@@ -44,18 +45,19 @@ export function TechTooltip({ term, label, className = '' }: TechTooltipProps) {
   const description = TECHNICAL_GLOSSARY[term];
 
   return (
-    <span className={`group relative inline-flex items-center gap-1 cursor-help ${className}`}>
-      <span className="underline decoration-dotted decoration-text-muted underline-offset-4">
-        {label ?? term}
-      </span>
-      <HelpCircle className="h-3.5 w-3.5 text-text-muted transition group-hover:text-text-primary" />
-      <span
-        role="tooltip"
-        className="pointer-events-none invisible absolute bottom-full left-1/2 z-50 mb-2 w-72 -translate-x-1/2 rounded-md border border-border-color bg-bg-surface px-3 py-2 text-left text-xs font-normal leading-relaxed text-text-primary opacity-0 shadow-xl transition-all duration-150 group-hover:visible group-hover:opacity-100"
-      >
-        <strong className="mb-0.5 block font-semibold text-text-primary">{term}</strong>
-        {description}
-      </span>
-    </span>
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={400} closeDelay={100} render={<span tabIndex={0} />} className={`inline-flex cursor-help items-center gap-1 rounded ${className}`}>
+        <span className="underline decoration-dotted decoration-text-muted underline-offset-4">{label ?? term}</span>
+        <HelpCircle className="h-3.5 w-3.5 text-text-muted" aria-hidden="true" />
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Positioner side="top" sideOffset={8} className="z-[70]">
+          <Tooltip.Popup className="ui-tooltip max-w-[calc(100vw-32px)] rounded-lg border border-border-color bg-bg-surface px-3 py-2 text-left text-xs font-normal leading-relaxed text-text-primary shadow-lg">
+            <strong className="mb-1 block font-semibold">{term}</strong>
+            {description}
+          </Tooltip.Popup>
+        </Tooltip.Positioner>
+      </Tooltip.Portal>
+    </Tooltip.Root>
   );
 }

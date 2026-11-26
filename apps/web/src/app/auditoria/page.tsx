@@ -1,5 +1,7 @@
 'use client';
 
+import { MountedOverlay } from '../../components/ui/overlay';
+
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Download, Lock, X } from 'lucide-react';
@@ -192,16 +194,15 @@ export default function AuditoriaPage() {
       </section>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="fixed inset-0 bg-black/60" onClick={() => setOpen(null)} />
-          <aside role="dialog" aria-label="Detalhe do log" className="relative z-10 flex h-full w-full max-w-lg flex-col border-l border-border-color bg-bg-base shadow-2xl">
+        <MountedOverlay onDismiss={() => setOpen(null)} label="Detalhe do log" kind="drawer">
+          {(close) => <div className="flex h-full flex-col">
             <header className="flex items-center justify-between border-b border-border-color px-5 py-4">
               <h2 className="text-base font-semibold">Detalhe da alteração</h2>
-              <button type="button" onClick={() => setOpen(null)} aria-label="Fechar"><X className="h-4 w-4" /></button>
+              <button type="button" onClick={close} aria-label="Fechar"><X className="h-4 w-4" /></button>
             </header>
             <pre className="flex-1 overflow-auto p-5 font-mono text-[11px] leading-relaxed">{JSON.stringify(open, null, 2)}</pre>
-          </aside>
-        </div>
+          </div>}
+        </MountedOverlay>
       )}
     </main>
   );

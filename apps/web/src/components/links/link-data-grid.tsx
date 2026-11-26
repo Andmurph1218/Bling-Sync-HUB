@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { ExternalLink, Link2Off, Unlink } from 'lucide-react';
+import { MountedOverlay } from '../ui/overlay';
 
 export interface CatalogLink {
   id: string;
@@ -107,12 +108,12 @@ export function LinkDataGrid({
         </div>
       )}
       {confirming && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Confirmar desvínculo">
-          <div className="w-full max-w-md rounded-xl border border-border-color bg-bg-base p-5 text-sm text-text-primary">
+        <MountedOverlay onDismiss={() => setConfirming(null)} label="Confirmar desvínculo" className="sm:max-w-md">
+          {(close) => <div className="p-5 text-sm">
             <h2 className="text-base font-semibold">Desvincular {confirming.sku}?</h2>
             <p className="mt-2 text-text-muted">Isso impedirá que o HUB atualize este anúncio. O anúncio não será apagado no marketplace.</p>
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setConfirming(null)} className="rounded-lg border border-border-color px-3 py-1.5 text-xs">Cancelar</button>
+              <button type="button" onClick={close} className="rounded-lg border border-border-color px-3 py-1.5 text-xs">Cancelar</button>
               <button
                 type="button"
                 disabled={busy}
@@ -128,8 +129,8 @@ export function LinkDataGrid({
                 {busy ? 'Removendo...' : 'Desvincular'}
               </button>
             </div>
-          </div>
-        </div>
+          </div>}
+        </MountedOverlay>
       )}
     </>
   );

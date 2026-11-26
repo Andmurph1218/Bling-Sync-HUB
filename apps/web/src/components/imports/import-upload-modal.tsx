@@ -3,16 +3,19 @@
 import React, { useState } from 'react';
 import { UploadCloud, X } from 'lucide-react';
 import { API_BASE_URL } from '../../utils/api-client';
+import { Overlay, useOverlayState } from '../ui/overlay';
+import { Button } from '../ui/button';
 
 const REQUIRED = ['SKU (obrigatório)', 'Nome', 'Descrição, categoria e URL da imagem são opcionais'];
 
 export function ImportUploadModal({
-  onClose,
+  onClose: onDismiss,
   onUploaded,
 }: {
   onClose: () => void;
   onUploaded: (message: string) => void;
 }) {
+  const { open, onClose, onAfterClose } = useOverlayState(onDismiss);
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [sending, setSending] = useState(false);
@@ -44,8 +47,8 @@ export function ImportUploadModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Nova importação">
-      <div className="w-full max-w-lg rounded-xl border border-border-color bg-bg-base p-5 text-text-primary">
+    <Overlay open={open} onClose={onClose} onAfterClose={onAfterClose} label="Nova importação" className="sm:max-w-lg">
+      <div className="p-5">
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-base font-semibold">Nova importação</h2>
           <button type="button" onClick={onClose} aria-label="Fechar" className="rounded-md p-1 text-text-muted hover:bg-bg-surface">
@@ -100,12 +103,12 @@ export function ImportUploadModal({
         </label>
         {error && <p className="mt-3 text-sm text-rose-600" role="alert">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="rounded-lg border border-border-color px-3 py-1.5 text-xs">Cancelar</button>
-          <button type="button" disabled={!file || sending} onClick={() => void submit()} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">
+          <Button onClick={onClose}>Cancelar</Button>
+          <Button variant="primary" disabled={!file || sending} aria-busy={sending} onClick={() => void submit()}>
             {sending ? 'Enviando...' : 'Importar'}
-          </button>
+          </Button>
         </div>
       </div>
-    </div>
+    </Overlay>
   );
 }

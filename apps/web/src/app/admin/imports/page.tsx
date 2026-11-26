@@ -1,5 +1,7 @@
 'use client';
 
+import { MountedOverlay } from '../../../components/ui/overlay';
+
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { X } from 'lucide-react';
@@ -95,15 +97,14 @@ export default function ImportHistoryPage() {
       {uploadOpen && <ImportUploadModal onClose={() => setUploadOpen(false)} onUploaded={(message) => { setNotice(message); void load(); }} />}
 
       {detail && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="fixed inset-0 bg-black/60" onClick={() => setDetail(null)} />
-          <aside role="dialog" aria-label="Log da importação" className="relative z-10 flex h-full w-full max-w-md flex-col border-l border-border-color bg-bg-base shadow-2xl">
+        <MountedOverlay onDismiss={() => setDetail(null)} label="Log da importação" kind="drawer">
+          {(close) => <div className="flex h-full flex-col">
             <header className="flex items-start justify-between gap-3 border-b border-border-color px-5 py-4">
               <div>
                 <p className="text-[11px] uppercase tracking-wide text-text-muted">Log de erros</p>
                 <h2 className="text-base font-semibold">{detail.fileName}</h2>
               </div>
-              <button type="button" onClick={() => setDetail(null)} aria-label="Fechar" className="rounded-md p-1 text-text-muted"><X className="h-4 w-4" /></button>
+              <button type="button" onClick={close} aria-label="Fechar" className="rounded-md p-1 text-text-muted"><X className="h-4 w-4" /></button>
             </header>
             <ul className="flex-1 space-y-3 overflow-auto p-5 text-sm">
               {detail.errors.length === 0 && <li className="text-text-muted">Nenhuma linha com erro.</li>}
@@ -119,8 +120,8 @@ export default function ImportHistoryPage() {
                 </li>
               ))}
             </ul>
-          </aside>
-        </div>
+          </div>}
+        </MountedOverlay>
       )}
     </main>
   );

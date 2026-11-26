@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Copy, X } from 'lucide-react';
 import { apiFetch } from '../../utils/api-client';
 import { ProblemGroup, ProblemItem } from './types';
+import { Overlay, useOverlayState } from '../ui/overlay';
 
 interface ProblemLog {
   groupKey: string;
@@ -14,12 +15,13 @@ interface ProblemLog {
 export function ProblemLogDrawer({
   itemId,
   group,
-  onClose,
+  onClose: onDismiss,
 }: {
   itemId: string | null;
   group: ProblemGroup | null;
   onClose: () => void;
 }) {
+  const { open, onClose, onAfterClose } = useOverlayState(onDismiss);
   const [log, setLog] = useState<ProblemLog | null>(null);
   const [error, setError] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -33,27 +35,13 @@ export function ProblemLogDrawer({
       .catch(() => setError(true));
   }, [itemId]);
 
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   const payload = itemId ? log?.technical ?? null : group;
   const title = itemId ? log?.item.name ?? 'Log técnico' : group?.groupMessage ?? 'Grupo de erros';
   const json = payload ? JSON.stringify(payload, null, 2) : '';
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="fixed inset-0 bg-black/60" onClick={onClose} aria-hidden="true" />
-      <aside
-        role="dialog"
-        aria-modal="true"
-        aria-label="Log técnico do erro"
-        className="relative z-10 flex h-full w-full max-w-xl flex-col border-l border-border-color bg-bg-base text-text-primary shadow-2xl"
-      >
+    <Overlay open={open} onClose={onClose} onAfterClose={onAfterClose} label="Log técnico do erro" kind="drawer">
+      <div className="flex h-full flex-col">
         <header className="flex items-start justify-between gap-4 border-b border-border-color px-5 py-4">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">Log técnico</p>
@@ -96,7 +84,7 @@ export function ProblemLogDrawer({
             </button>
           </footer>
         )}
-      </aside>
-    </div>
+      </div>
+    </Overlay>
   );
 }

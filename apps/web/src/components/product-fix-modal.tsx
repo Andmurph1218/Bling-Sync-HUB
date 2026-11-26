@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { apiFetch } from '../utils/api-client';
+import { Overlay, useOverlayState } from './ui/overlay';
 
 interface ChecklistItem {
   code: string;
@@ -29,7 +30,7 @@ interface CategoryOption {
 export function ProductFixModal({
   erpId,
   reason,
-  onClose,
+  onClose: onDismiss,
   onSaved,
 }: {
   erpId: string;
@@ -37,6 +38,7 @@ export function ProductFixModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { open, onClose, onAfterClose } = useOverlayState(onDismiss);
   const [sheet, setSheet] = useState<SheetPayload | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -82,8 +84,8 @@ export function ProductFixModal({
   const pending = sheet?.item.checklist.items.filter((item) => !item.ok) ?? [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="fix-title">
-      <div className="max-h-[85vh] w-full max-w-xl overflow-auto rounded-xl border border-border-color bg-bg-base p-5">
+    <Overlay open={open} onClose={onClose} onAfterClose={onAfterClose} label="Corrigir produto" className="sm:max-w-xl">
+      <div className="p-5">
         <h2 id="fix-title" className="text-sm font-bold text-text-primary">Corrigir produto</h2>
         <p className="mt-1 text-xs text-amber-200">{reason}</p>
         {error && <p className="mt-3 text-sm text-rose-200" role="alert">{error}</p>}
@@ -138,6 +140,6 @@ export function ProductFixModal({
           Fechar
         </button>
       </div>
-    </div>
+    </Overlay>
   );
 }

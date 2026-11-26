@@ -1,5 +1,7 @@
 'use client';
 
+import { MountedOverlay } from '../../components/ui/overlay';
+
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Search } from 'lucide-react';
@@ -257,8 +259,8 @@ export default function IntegracoesPage() {
       )}
 
       {credentialsFor && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label={`Configurar ${credentialsFor.name}`}>
-          <div className="w-full max-w-lg rounded-xl border border-border-color bg-bg-surface p-5">
+        <MountedOverlay onDismiss={() => setCredentialsFor(null)} label={`Configurar ${credentialsFor.name}`} className="sm:max-w-lg">
+          {(close) => <div className="p-5">
             <h2 className="text-lg font-semibold">Configurar {credentialsFor.name}</h2>
             <label className="mt-4 block text-sm text-text-muted">
               Client ID
@@ -295,11 +297,11 @@ export default function IntegracoesPage() {
               </label>
             )}
             <div className="mt-5 flex justify-end gap-2">
-              <button type="button" className="rounded-lg px-3 py-2 text-sm text-text-muted" onClick={() => setCredentialsFor(null)}>Fechar</button>
+              <button type="button" className="rounded-lg px-3 py-2 text-sm text-text-muted" onClick={close}>Fechar</button>
               <button type="button" className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white" onClick={() => void saveCredentials()}>Salvar</button>
             </div>
-          </div>
-        </div>
+          </div>}
+        </MountedOverlay>
       )}
     </main>
   );

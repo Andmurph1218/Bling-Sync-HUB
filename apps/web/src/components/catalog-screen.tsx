@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ImageOff, MoreVertical, PackageOpen, Pencil, Play, Plus, Search, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, ArrowUp, ArrowUpDown, ImageOff, MoreVertical, PackageOpen, Pencil, Play, Plus, Search, SlidersHorizontal } from 'lucide-react';
 import { ApiError, apiFetch, API_BASE_URL } from '../utils/api-client';
 import { EmptySkuNotice, isBlankSku } from './empty-sku-notice';
 import { buildBlingProductUrl } from '../utils/matching-signals';
@@ -12,6 +12,7 @@ import { useCurrentRole } from './app-shell';
 import { Toaster, ToastMessage } from './toaster';
 import { MERCADO_LIVRE_ACTIVE } from '../config/channels';
 import useSWR from 'swr';
+import { MountedOverlay } from './ui/overlay';
 
 type CatalogTab = 'todos' | 'publicados' | 'completude' | 'rejeitados' | 'arquivados' | 'ready';
 type SortColumn = 'name' | 'sku' | 'price' | 'stock' | 'completeness' | 'type';
@@ -42,7 +43,7 @@ function SortHeader({
   onSort: (column: SortColumn) => void;
 }) {
   const active = sortBy === column;
-  const Icon = !active ? ArrowUpDown : sortOrder === 'asc' ? ArrowUp : ArrowDown;
+  const Icon = !active ? ArrowUpDown : ArrowUp;
   return (
     <button
       type="button"
@@ -55,7 +56,8 @@ function SortHeader({
         size={12}
         strokeWidth={2.5}
         aria-hidden
-        className={active ? 'text-accent-copper' : 'text-text-muted/40 group-hover:text-text-muted'}
+        className={`ui-sort-icon ${active ? 'text-accent-copper' : 'text-text-muted/60 group-hover:text-text-muted'}`}
+        style={{ transform: active && sortOrder === 'desc' ? 'rotate(180deg)' : 'rotate(0deg)' }}
       />
     </button>
   );
@@ -991,21 +993,15 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
         const focus = channelFocus.item.integrations?.find((channel) => channel.platform === channelFocus.platform);
         const channelName = CHANNEL_LABEL[channelFocus.platform] ?? channelFocus.platform;
         return (
-          <div className="fixed inset-0 z-40 flex justify-end bg-black/40" role="presentation" onClick={() => setChannelFocus(null)}>
-            <aside
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="channel-focus-title"
-              className="h-full w-full max-w-md overflow-auto border-l border-border-color bg-bg-surface p-5 text-text-primary shadow-xl"
-              onClick={(event) => event.stopPropagation()}
-            >
+          <MountedOverlay onDismiss={() => setChannelFocus(null)} label="Status de integração" kind="drawer">
+            {(close) => <div className="p-5">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-[11px] uppercase tracking-wider text-text-muted">Status de integração</p>
                   <h2 id="channel-focus-title" className="mt-1 text-base font-bold">{channelFocus.item.name || 'Sem nome no ERP'}</h2>
                   <p className={`text-xs ${focus?.visual === 'attention' ? 'font-semibold text-amber-800 dark:text-amber-200' : 'text-text-muted'}`}>{channelName} · {focus?.label ?? 'Sem leitura'}</p>
                 </div>
-                <button type="button" className="text-xs text-text-muted underline" onClick={() => setChannelFocus(null)}>Fechar</button>
+                <button type="button" className="ui-button" onClick={close}>Fechar</button>
               </div>
               <p className="mt-4 text-sm font-semibold">{focus?.percent ?? 0}% pronto</p>
               <div className="mt-2 h-2 overflow-hidden rounded-full bg-bg-base">
@@ -1040,14 +1036,14 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                 </button>
               )}
               <p className="mt-3 text-[11px] text-text-muted">O envio entra na fila. Com a publicação ao vivo desligada, o HUB só simula.</p>
-            </aside>
-          </div>
+            </div>}
+          </MountedOverlay>
         );
       })()}
 
       {simulation && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="simulate-title">
-          <div className="max-h-[80vh] w-full max-w-2xl overflow-auto rounded-xl border border-border-color bg-bg-base p-5">
+        <MountedOverlay onDismiss={() => setSimulation(null)} label="Simulação de envio">
+          {(close) => <div className="p-5">
             <h2 id="simulate-title" className="text-sm font-bold text-text-primary">Simulação de envio — {MERCADO_LIVRE_ACTIVE ? 'Mercado Livre' : 'Nuvemshop'}</h2>
             <p className="mt-1 text-xs text-text-muted">Nada foi publicado no marketplace.</p>
             {simulation.loading && <p className="mt-4 text-sm text-text-muted">Montando o JSON...</p>}
@@ -1063,11 +1059,11 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                 <HighlightedJson value={entry.payload} />
               </section>
             ))}
-            <button type="button" className="mt-4 rounded-lg border border-border-color px-3 py-1.5 text-xs text-text-primary" onClick={() => setSimulation(null)}>
+            <button type="button" className="mt-4 rounded-lg border border-border-color px-3 py-1.5 text-xs text-text-primary" onClick={close}>
               Fechar
             </button>
-          </div>
-        </div>
+          </div>}
+        </MountedOverlay>
       )}
 
       {batch && (
@@ -1149,8 +1145,8 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
       })()}
 
       {lookupOpen && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-xl border border-border-color bg-bg-base p-5">
+        <MountedOverlay onDismiss={() => setLookupOpen(false)} label="Buscar SKU ou EAN antes de criar" className="sm:max-w-md">
+          {(close) => <div className="p-5">
             <h2 className="text-sm font-bold text-text-primary">Buscar SKU ou EAN antes de criar</h2>
             <p className="mt-1 text-xs text-text-muted">Se o produto já existe, a criação fica bloqueada.</p>
             <div className="mt-3 flex gap-2">
@@ -1276,14 +1272,14 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                 <button type="submit" className="rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-text-primary">Salvar</button>
               </form>
             )}
-            <button type="button" onClick={() => setLookupOpen(false)} className="mt-4 text-xs text-text-muted underline">Fechar</button>
-          </div>
-        </div>
+            <button type="button" onClick={close} className="ui-button mt-4">Fechar</button>
+          </div>}
+        </MountedOverlay>
       )}
 
       {draftFor && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-xl border border-border-color bg-bg-base p-5">
+        <MountedOverlay onDismiss={() => setDraftFor(null)} label="Duplicar produto" className="sm:max-w-md">
+          {(close) => <div className="p-5">
             <h2 className="text-sm font-bold text-text-primary">Duplicar não cria SKU no ERP</h2>
             <p className="mt-2 text-xs text-text-muted">Informe um SKU. Se ele já existir, escolha abrir o produto ou vincular um anúncio da Nuvemshop.</p>
             <input
@@ -1321,9 +1317,9 @@ export function CatalogScreen({ lockedTab }: { lockedTab?: 'completude' }) {
                 </Link>
               </div>
             )}
-            <button type="button" onClick={() => setDraftFor(null)} className="mt-4 text-xs text-text-muted underline">Fechar</button>
-          </div>
-        </div>
+            <button type="button" onClick={close} className="ui-button mt-4">Fechar</button>
+          </div>}
+        </MountedOverlay>
       )}
     </main>
   );

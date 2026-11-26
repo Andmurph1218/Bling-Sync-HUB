@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { ExternalLink, X } from 'lucide-react';
 import { formatNcm, NcmHistoryRow, NcmItem, tipiLookupUrl } from './types';
+import { Overlay, useOverlayState } from '../../ui/overlay';
 
 function DiffCode({ value }: { value: string | null }) {
   const digits = (value ?? '').replace(/\D/g, '').padEnd(8, ' ').slice(0, 8);
@@ -14,7 +15,7 @@ export function NcmDetailsDrawer({
   history,
   canReview,
   blockedOwnVote,
-  onClose,
+  onClose: onDismiss,
   onApprove,
   onReject,
 }: {
@@ -26,6 +27,7 @@ export function NcmDetailsDrawer({
   onApprove: (note: string) => void;
   onReject: (note: string) => void;
 }) {
+  const { open, onClose, onAfterClose } = useOverlayState(onDismiss);
   const [note, setNote] = useState('');
   const [warning, setWarning] = useState<string | null>(null);
   const currentDigits = (item.currentNcm ?? '').replace(/\D/g, '');
@@ -42,9 +44,8 @@ export function NcmDetailsDrawer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="fixed inset-0 bg-black/60" onClick={onClose} />
-      <aside role="dialog" aria-label="Detalhe da sugestão de NCM" className="relative z-10 flex h-full w-full max-w-xl flex-col border-l border-border-color bg-bg-base text-text-primary shadow-2xl">
+    <Overlay open={open} onClose={onClose} onAfterClose={onAfterClose} label="Detalhe da sugestão de NCM" kind="drawer">
+      <div className="flex h-full flex-col">
         <header className="flex items-start justify-between gap-3 border-b border-border-color px-5 py-4">
           <div className="min-w-0">
             <p className="truncate text-base font-semibold">{item.productName || 'Produto'}</p>
@@ -112,7 +113,7 @@ export function NcmDetailsDrawer({
             </button>
           </footer>
         )}
-      </aside>
-    </div>
+      </div>
+    </Overlay>
   );
 }

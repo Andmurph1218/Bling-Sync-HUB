@@ -3,17 +3,19 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { BrandLogo } from '../brand-logo';
+import { Overlay, useOverlayState } from '../ui/overlay';
 
 const SOON = [
   { id: 'amazon', name: 'Amazon' },
   { id: 'magalu', name: 'Magalu' },
 ];
 
-export function IntegrationCatalogModal({ onClose }: { onClose: () => void }) {
+export function IntegrationCatalogModal({ onClose: onDismiss }: { onClose: () => void }) {
+  const { open, onClose, onAfterClose } = useOverlayState(onDismiss);
   const [requested, setRequested] = useState<string | null>(null);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Catálogo de integrações">
-      <div className="w-full max-w-lg rounded-xl border border-border-color bg-bg-base p-5">
+    <Overlay open={open} onClose={onClose} onAfterClose={onAfterClose} label="Catálogo de integrações" className="sm:max-w-lg">
+      <div className="p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 className="text-base font-semibold text-text-primary">Adicionar canal</h2>
@@ -41,6 +43,6 @@ export function IntegrationCatalogModal({ onClose }: { onClose: () => void }) {
         </ul>
         {requested && <p className="mt-3 text-xs text-text-muted" role="status">Pedido de {requested} anotado nesta sessão. Ainda não há fila de integração.</p>}
       </div>
-    </div>
+    </Overlay>
   );
 }

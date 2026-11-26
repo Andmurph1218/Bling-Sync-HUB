@@ -296,7 +296,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <RoleContext.Provider value={{ currentUser: user, hasRole, hasPermission, acknowledgePasswordChange }}>
       <div className="flex min-h-screen bg-bg-base text-text-primary">
         <aside
-          className={`craft-sidebar hidden md:flex flex-col border-r border-border-color/80 bg-bg-surface/60 transition-all duration-200 ${
+          className={`craft-sidebar hidden md:flex flex-col border-r border-border-color/80 bg-bg-surface/60 ${
             collapsed ? 'w-20' : 'w-64'
           }`}
         >
@@ -411,7 +411,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className="flex flex-1 flex-col min-w-0 pb-16 md:pb-0">
           <header className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-4 border-b border-border-color/80 bg-bg-base/90 px-6 py-3 backdrop-blur dark:border-white/[0.06] dark:bg-[#140f0a]/85">
-            <div className="flex flex-wrap items-center gap-2" aria-label="Integrações ativas">
+            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Integrações ativas">
               <div className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-sky-700/30 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-900 dark:border-[#d97324]/45 dark:bg-[#d97324]/12 dark:text-[#f49d49]">
                 <span className="h-1.5 w-1.5 rounded-full bg-sky-600 dark:bg-[#e5802e]" aria-hidden="true" />
                 <span>Modo Shadow</span>

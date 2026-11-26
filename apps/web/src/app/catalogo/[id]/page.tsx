@@ -521,7 +521,7 @@ function FichaUnicaProdutoPage({
       </nav>
 
       {/* Conteúdo da Aba Selecionada */}
-      <section className="mt-6">
+      <section key={activeTab} className="ui-panel-reveal mt-6">
         {activeTab === 'geral' && (
           <div className="space-y-6">
             <div className={`grid gap-4 ${MERCADO_LIVRE_ACTIVE ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
@@ -604,10 +604,10 @@ function FichaUnicaProdutoPage({
                     </div>
                     <div className="h-1.5 overflow-hidden rounded-full bg-bg-base">
                       <div
-                        className={`h-full rounded-full transition-[width] duration-500 ${
+                        className={`ui-progress h-full w-full rounded-full ${
                           channel.percent >= 100 ? 'bg-emerald-500' : channel.percent >= 50 ? 'bg-amber-500' : 'bg-rose-500'
                         }`}
-                        style={{ width: `${Math.max(channel.percent, 2)}%` }}
+                        style={{ transform: `scaleX(${Math.max(0, Math.min(1, channel.percent / 100))})` }}
                       />
                     </div>
                     <ul className="space-y-2">

@@ -16,6 +16,7 @@ import {
   translateMatchingSignal,
 } from '../utils/matching-signals';
 import { TechTooltip } from './tech-tooltip';
+import { MountedOverlay } from './ui/overlay';
 
 export interface MatchingComparisonItem {
   id: string;
@@ -105,20 +106,12 @@ export function MatchDetailsDrawer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <MountedOverlay onDismiss={onClose} label="Como o vínculo foi sugerido" kind="drawer">
+      {(close) => <>
       {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity"
-        onClick={onClose}
-      />
 
       {/* Sheet Lateral (shadcn/ui Sheet style) */}
-      <aside
-        role="dialog"
-        aria-modal="true"
-        aria-label="Como o vínculo foi sugerido"
-        className="relative z-10 flex h-full w-full max-w-2xl flex-col border-l border-border-color bg-bg-base text-text-primary shadow-2xl"
-      >
+      <div className="flex h-full flex-col">
         {/* Cabeçalho do Sheet */}
         <header className="flex items-start justify-between gap-4 border-b border-border-color px-6 py-5">
           <div>
@@ -152,7 +145,7 @@ export function MatchDetailsDrawer({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={close}
             className="rounded-lg border border-border-color bg-bg-surface p-1.5 text-text-muted hover:border-border-color hover:text-text-primary"
             aria-label="Fechar painel"
           >
@@ -518,7 +511,8 @@ export function MatchDetailsDrawer({
             </button>
           </div>
         </footer>
-      </aside>
-    </div>
+      </div>
+      </>}
+    </MountedOverlay>
   );
 }

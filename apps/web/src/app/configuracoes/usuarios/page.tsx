@@ -1,5 +1,7 @@
 'use client';
 
+import { MountedOverlay } from '../../../components/ui/overlay';
+
 import React, { useEffect, useMemo, useState } from 'react';
 import { MoreVertical, UserPlus } from 'lucide-react';
 import { apiFetch } from '../../../utils/api-client';
@@ -229,8 +231,8 @@ export default function UsersPage() {
       )}
 
       {inviteOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Convidar usuário">
-          <form className="w-full max-w-md rounded-xl border border-border-color bg-bg-base p-5" onSubmit={(event) => { event.preventDefault(); void sendInvite(); }}>
+        <MountedOverlay onDismiss={() => setInviteOpen(false)} label="Convidar usuário" className="sm:max-w-md">
+          {(close) => <form className="p-5" onSubmit={(event) => { event.preventDefault(); void sendInvite(); }}>
             <h2 className="text-base font-semibold text-text-primary">Convidar usuário</h2>
             <p className="mt-1 text-xs text-text-muted">Comece com o menor privilégio. O convite chega com um link para definir a senha.</p>
             <label className="mt-4 block text-xs text-text-muted">E-mail
@@ -249,11 +251,11 @@ export default function UsersPage() {
               ))}
             </fieldset>
             <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={() => setInviteOpen(false)} className="rounded-lg border border-border-color px-3 py-1.5 text-xs">Cancelar</button>
+              <button type="button" onClick={close} className="rounded-lg border border-border-color px-3 py-1.5 text-xs">Cancelar</button>
               <button type="submit" className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white">Enviar convite</button>
             </div>
-          </form>
-        </div>
+          </form>}
+        </MountedOverlay>
       )}
 
       {roleTarget && (
@@ -276,8 +278,8 @@ function RoleEditor({
 }) {
   const [selected, setSelected] = useState(user.roles.map((role) => role.id));
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Editar papéis">
-      <form className="w-full max-w-sm rounded-xl border border-border-color bg-bg-base p-5" onSubmit={(event) => { event.preventDefault(); onSave(selected); }}>
+    <MountedOverlay onDismiss={onClose} label="Editar papéis" className="sm:max-w-sm">
+      {(close) => <form className="p-5" onSubmit={(event) => { event.preventDefault(); onSave(selected); }}>
         <h2 className="text-base font-semibold text-text-primary">Papéis de {user.name}</h2>
         <div className="mt-4 space-y-2">
           {roles.map((role) => (
@@ -288,10 +290,10 @@ function RoleEditor({
           ))}
         </div>
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="text-xs text-text-muted underline">Cancelar</button>
+          <button type="button" onClick={close} className="ui-button">Cancelar</button>
           <button type="submit" className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white">Salvar</button>
         </div>
-      </form>
-    </div>
+      </form>}
+    </MountedOverlay>
   );
 }

@@ -37,7 +37,7 @@ export function KpiCard({
           {pulse && (
             <span className="relative flex h-2.5 w-2.5" aria-hidden="true">
               {pulse === 'live' && (
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
               )}
               <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${pulse === 'live' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
             </span>

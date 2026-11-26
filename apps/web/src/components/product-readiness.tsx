@@ -20,8 +20,8 @@ export function readinessTone(score: number | null | undefined): ReadinessTone {
 }
 
 const TONE_TEXT: Record<ReadinessTone, string> = {
-  ready: 'text-emerald-600 dark:text-emerald-400',
-  attention: 'text-amber-600 dark:text-amber-300',
+  ready: 'text-emerald-800 dark:text-emerald-400',
+  attention: 'text-amber-800 dark:text-amber-300',
   blocked: 'text-rose-600 dark:text-rose-400',
   unknown: 'text-text-muted',
 };
@@ -85,7 +85,7 @@ export function ScoreRing({
             strokeWidth="3"
             strokeLinecap="round"
             strokeDasharray={`${(filled / 100) * circumference} ${circumference}`}
-            className={`${TONE_STROKE[tone]} transition-[stroke-dasharray] duration-500 ease-out`}
+            className={TONE_STROKE[tone]}
           />
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">

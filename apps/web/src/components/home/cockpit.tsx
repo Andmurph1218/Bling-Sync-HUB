@@ -60,7 +60,7 @@ export function CockpitCard({
   children: React.ReactNode;
 }) {
   return (
-    <article className="flex flex-col rounded-2xl border border-border-color bg-bg-surface p-5">
+    <article className="ui-card flex flex-col">
       <header className="flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-text-muted">
           {icon}
@@ -231,8 +231,8 @@ function FunnelRow({
       </div>
       <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-bg-base dark:bg-white/[0.06]">
         <div
-          className={`h-full rounded-full transition-[width] duration-500 ease-out group-hover:brightness-110 ${bar}`}
-          style={{ width: `${Math.max(value > 0 ? 1.5 : 0, Math.min(100, percent))}%` }}
+          className={`ui-progress h-full w-full rounded-full ${bar}`}
+          style={{ transform: `scaleX(${Math.max(value > 0 ? 0.015 : 0, Math.min(1, percent / 100))})` }}
         />
       </div>
       {leak && <p className="mt-1 text-[11px] text-text-muted">−{leak}</p>}

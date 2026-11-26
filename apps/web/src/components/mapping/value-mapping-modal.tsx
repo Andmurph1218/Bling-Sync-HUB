@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Sparkles, X } from 'lucide-react';
 import { apiFetch } from '../../utils/api-client';
 import { ValuePair } from './types';
+import { Overlay, useOverlayState } from '../ui/overlay';
 
 function sameValue(left: string, right: string): boolean {
   const normalize = (value: string) =>
@@ -18,7 +19,7 @@ export function ValueMappingModal({
   field,
   channelValues,
   pairs,
-  onClose,
+  onClose: onDismiss,
   onConfirm,
 }: {
   title: string;
@@ -28,6 +29,7 @@ export function ValueMappingModal({
   onClose: () => void;
   onConfirm: (pairs: ValuePair[]) => void;
 }) {
+  const { open, onClose, onAfterClose } = useOverlayState(onDismiss);
   const [values, setValues] = useState<string[]>([]);
   const [draft, setDraft] = useState<ValuePair[]>(pairs);
   const [error, setError] = useState<string | null>(null);
@@ -61,8 +63,8 @@ export function ValueMappingModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label={`Mapear valores de ${title}`}>
-      <div className="flex max-h-[85vh] w-full max-w-3xl flex-col rounded-xl border border-border-color bg-bg-base text-text-primary shadow-2xl">
+    <Overlay open={open} onClose={onClose} onAfterClose={onAfterClose} label={`Mapear valores de ${title}`}>
+      <div className="flex max-h-[85dvh] w-full flex-col">
         <header className="flex items-start justify-between gap-3 border-b border-border-color px-5 py-4">
           <div>
             <h2 className="text-base font-semibold">Mapear valores · {title}</h2>
@@ -161,6 +163,6 @@ export function ValueMappingModal({
           </div>
         </footer>
       </div>
-    </div>
+    </Overlay>
   );
 }
